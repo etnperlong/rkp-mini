@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   MiuixButton,
   MiuixCard,
+  MiuixIcon,
+  MiuixIconButton,
   MiuixScrollArea,
   MiuixSmallTitle,
   MiuixSnackbarHost,
@@ -10,11 +12,14 @@ import {
   MiuixTopAppBar,
   showSnackbar,
 } from 'miuix-vue'
+import { Settings } from 'miuix-vue/icons'
 import StatusCard from './components/StatusCard.vue'
 import CheckCard from './components/CheckCard.vue'
 import IssueCard from './components/IssueCard.vue'
 import IssueSheet from './components/IssueSheet.vue'
 import ResultSheet from './components/ResultSheet.vue'
+import DetailSheet from './components/DetailSheet.vue'
+import SettingsSheet from './components/SettingsSheet.vue'
 import { bridgeAvailable } from './lib/ksu'
 import { CommandError, blockerLabel, readCachedStatus, readStatus, type StatusData } from './lib/rkp'
 import { useIssueRunner } from './lib/runner'
@@ -32,6 +37,15 @@ const statusCached = ref(false)
 
 const issueOpen = ref(false)
 const resultOpen = ref(false)
+const detailOpen = ref(false)
+const settingsOpen = ref(false)
+const settingsFocusLogs = ref(false)
+
+function openSettings(focusLogs: boolean): void {
+  settingsFocusLogs.value = focusLogs
+  resultOpen.value = false
+  settingsOpen.value = true
+}
 
 // Ticks once a minute so relative times and day counts stay current.
 const now = ref(nowUnix())
@@ -114,7 +128,13 @@ onBeforeUnmount(() => clearInterval(clock))
 
 <template>
   <div class="app">
-    <MiuixTopAppBar title="RKP Mini" />
+    <MiuixTopAppBar title="RKP Mini">
+      <template #actions>
+        <MiuixIconButton aria-label="设置" @click="openSettings(false)">
+          <MiuixIcon :icon="Settings" />
+        </MiuixIconButton>
+      </template>
+    </MiuixTopAppBar>
 
     <MiuixScrollArea class="app__scroll">
       <main class="page">
@@ -135,6 +155,7 @@ onBeforeUnmount(() => clearInterval(clock))
             :cached="statusCached"
             :now="now"
             @retry="loadStatus(false)"
+            @detail="detailOpen = true"
           />
 
           <IssueCard :runner="runner" :now="now" @open="resultOpen = true" />
@@ -170,8 +191,10 @@ onBeforeUnmount(() => clearInterval(clock))
         :has-keybox="!!status?.keybox.exists"
         @confirm="onConfirmIssue"
       />
-      <ResultSheet v-model="resultOpen" :runner="runner" />
+      <ResultSheet v-model="resultOpen" :runner="runner" @logs="openSettings(true)" />
+      <DetailSheet v-if="status" v-model="detailOpen" :status="status" :now="now" />
     </template>
+    <SettingsSheet v-model="settingsOpen" :focus-logs="settingsFocusLogs" />
   </div>
 </template>
 

@@ -179,6 +179,18 @@ export async function readLog(name: string): Promise<string> {
   return r.stdout
 }
 
+export interface ModuleProp {
+  version: string
+  versionCode: string
+}
+
+export async function readModuleProp(): Promise<ModuleProp> {
+  const r = await run(`cat '${MODULE_DIR}/module.prop'`)
+  if (r.errno !== 0) throw new CommandError('exit', `读取失败（${r.errno}）`, r.stderr.trim())
+  const get = (key: string) => new RegExp(`^${key}=(.*)$`, 'm').exec(r.stdout)?.[1]?.trim() ?? '?'
+  return { version: get('version'), versionCode: get('versionCode') }
+}
+
 // ---- UI mappings --------------------------------------------------------------
 
 export type KeyboxState = 'missing' | 'expired' | 'invalid' | 'expiring' | 'valid'

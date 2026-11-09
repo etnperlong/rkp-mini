@@ -168,6 +168,9 @@ export async function mockExec(command: string): Promise<ExecResult> {
   }
   if (command.endsWith(' --version')) return ok('rkp-mini 0.1.0\n')
   if (command.startsWith('cat ') && command.includes('config.toml')) return ok(CONFIG_TOML)
+  if (command.startsWith('cat ') && command.includes('module.prop')) {
+    return ok('id=rkp_mini\nname=RKP Mini · 证书签发\nversion=v0.1.0\nversionCode=1\nauthor=Evans Mike\n')
+  }
   if (command.startsWith('ls -1t ')) return ok(logs.join('\n') + '\n')
   if (command.startsWith('tail -n 200 ')) {
     const name = command.split('/').pop()?.replace(/'$/, '') ?? ''

@@ -12,8 +12,12 @@ import {
 } from 'miuix-vue'
 import StatusCard from './components/StatusCard.vue'
 import CheckCard from './components/CheckCard.vue'
+import IssueCard from './components/IssueCard.vue'
+import IssueSheet from './components/IssueSheet.vue'
+import ResultSheet from './components/ResultSheet.vue'
 import { bridgeAvailable } from './lib/ksu'
-import { CommandError, readStatus, type StatusData } from './lib/rkp'
+import { CommandError, blockerLabel, readCachedStatus, readStatus, type StatusData } from './lib/rkp'
+import { useIssueRunner } from './lib/runner'
 import { nowUnix } from './lib/format'
 import { initTheme } from './lib/theme'
 
@@ -26,9 +30,16 @@ const statusError = ref<CommandError | null>(null)
 const statusLoading = ref(false)
 const statusCached = ref(false)
 
+const issueOpen = ref(false)
+const resultOpen = ref(false)
+
 // Ticks once a minute so relative times and day counts stay current.
 const now = ref(nowUnix())
 let clock: number | undefined
+
+function asCommandError(e: unknown): CommandError {
+  return e instanceof CommandError ? e : new CommandError('exec', String(e))
+}
 
 async function loadStatus(updateDescription: boolean): Promise<boolean> {
   statusLoading.value = true
@@ -38,7 +49,7 @@ async function loadStatus(updateDescription: boolean): Promise<boolean> {
     statusError.value = null
     return true
   } catch (e) {
-    statusError.value = e instanceof CommandError ? e : new CommandError('exec', String(e))
+    statusError.value = asCommandError(e)
     return false
   } finally {
     statusLoading.value = false
@@ -46,15 +57,56 @@ async function loadStatus(updateDescription: boolean): Promise<boolean> {
   }
 }
 
+/** status.json snapshot; used while an issuance runs so `status` is not run concurrently. */
+async function loadCachedStatus(): Promise<void> {
+  statusLoading.value = true
+  try {
+    status.value = await readCachedStatus()
+    statusCached.value = true
+    statusError.value = null
+  } catch (e) {
+    statusError.value = asCommandError(e)
+  } finally {
+    statusLoading.value = false
+  }
+}
+
+// Every finished task (even one that ended while the page was closed) gets one
+// `status --update-description`: issue itself never refreshes status.json.
+const runner = useIssueRunner(async (result) => {
+  await loadStatus(true)
+  void showSnackbar({ message: result.code === 0 ? '签发成功，状态已刷新' : '签发失败，原有 keybox 未被替换' })
+})
+
 async function onRefresh(): Promise<void> {
   if (await loadStatus(true)) void showSnackbar({ message: '状态已刷新，模块描述已同步' })
 }
 
+async function onConfirmIssue(): Promise<void> {
+  resultOpen.value = true
+  await runner.start()
+}
+
 const blockers = computed(() => status.value?.blockers ?? [])
 
-onMounted(() => {
+/** Reason the primary action is unavailable, or null when it can run. */
+const issueBlockedReason = computed(() => {
+  if (runner.busy.value) return null
+  if (runner.phase.value === 'stale') return '存在残留的任务锁，请先处理'
+  if (!status.value || statusCached.value) return statusLoading.value ? null : '需要先成功读取状态'
+  if (blockers.value.length) return blockerLabel(blockers.value[0])
+  return null
+})
+const canIssue = computed(
+  () => !runner.busy.value && !statusLoading.value && issueBlockedReason.value === null && status.value !== null,
+)
+
+onMounted(async () => {
   clock = window.setInterval(() => (now.value = nowUnix()), 60_000)
-  if (available) void loadStatus(false)
+  if (!available) return
+  await runner.check()
+  if (runner.busy.value) await loadCachedStatus()
+  else if (!status.value && !statusLoading.value) await loadStatus(false)
 })
 
 onBeforeUnmount(() => clearInterval(clock))
@@ -85,13 +137,21 @@ onBeforeUnmount(() => clearInterval(clock))
             @retry="loadStatus(false)"
           />
 
+          <IssueCard :runner="runner" :now="now" @open="resultOpen = true" />
+
           <template v-if="status">
             <MiuixSmallTitle :text="blockers.length ? `环境检查 · ${blockers.length} 项未通过` : '环境检查'" />
             <CheckCard :status="status" />
           </template>
 
           <div class="actions">
-            <MiuixButton :disabled="statusLoading" @click="onRefresh">刷新状态</MiuixButton>
+            <MiuixText v-if="issueBlockedReason" type="footnote1" color="var(--m-color-error)" align="center">
+              {{ issueBlockedReason }}
+            </MiuixText>
+            <MiuixButton type="primary" :disabled="!canIssue" @click="issueOpen = true">
+              {{ runner.busy.value ? '签发进行中…' : '签发新证书' }}
+            </MiuixButton>
+            <MiuixButton :disabled="statusLoading || runner.busy.value" @click="onRefresh">刷新状态</MiuixButton>
           </div>
         </template>
 
@@ -102,6 +162,16 @@ onBeforeUnmount(() => clearInterval(clock))
     </MiuixScrollArea>
 
     <MiuixSnackbarHost />
+
+    <template v-if="available">
+      <IssueSheet
+        v-model="issueOpen"
+        :keybox-path="status?.keybox.path ?? ''"
+        :has-keybox="!!status?.keybox.exists"
+        @confirm="onConfirmIssue"
+      />
+      <ResultSheet v-model="resultOpen" :runner="runner" />
+    </template>
   </div>
 </template>
 

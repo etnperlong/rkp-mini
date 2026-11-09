@@ -3,10 +3,13 @@
 
 :root {
   --app-warning: #f5a623;
+  /* Grouped rows inside bottom sheets (sheet background is --m-color-background). */
+  --app-sheet-group: #f7f7f7;
 }
 
 .m-theme-dark {
   --app-warning: #ffb74d;
+  --app-sheet-group: #2e2e2e;
 }
 
 *,
@@ -29,4 +32,24 @@ body {
   font-family: system-ui, -apple-system, 'Roboto', 'Noto Sans CJK SC', 'PingFang SC', sans-serif;
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Shared bottom-sheet layout. */
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
+.sheet-group {
+  border-radius: var(--m-radius-md);
+  background: var(--app-sheet-group);
+  overflow: hidden;
+}
+
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+  word-break: break-all;
 }

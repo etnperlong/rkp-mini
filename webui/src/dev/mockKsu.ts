@@ -1,5 +1,10 @@
-// Dev-only stand-in for the KernelSU bridge. Pick a scenario with `?mock=<name>`.
-// Never imported by production builds (see lib/ksu.ts).
+// Dev-only stand-in for the KernelSU bridge. Never imported by production
+// builds (see lib/ksu.ts). Query parameters select the scenario:
+//   ?mock=    ready | expiring | expired | invalid | missing | blocked
+//             | status-exit | status-parse | status-timeout     (status read)
+//   ?runner=  idle | running | overdue | success | failure | crashed | stale
+//                                                         (state at page load)
+//   ?outcome= success | failure                (result of an issue started here)
 import type { ExecResult } from '../lib/ksu'
 import type { StatusData } from '../lib/rkp'
 import { nowUnix } from '../lib/format'
@@ -9,20 +14,12 @@ import expired from './fixtures/status-expired.json'
 import invalid from './fixtures/status-invalid.json'
 import missing from './fixtures/status-missing.json'
 import blocked from './fixtures/status-blocked.json'
+import issueSuccess from './fixtures/issue-success.json'
+import issueFailure from './fixtures/issue-failure.json'
 
-export const MOCK_SCENARIOS = [
-  'ready',
-  'expiring',
-  'expired',
-  'invalid',
-  'missing',
-  'blocked',
-  'status-exit',
-  'status-parse',
-  'status-timeout',
-] as const
-
-const scenario = new URLSearchParams(location.search).get('mock') ?? 'ready'
+const params = new URLSearchParams(location.search)
+let scenario = params.get('mock') ?? 'ready'
+const outcome = params.get('outcome') ?? 'success'
 
 const STATUS: Record<string, StatusData> = {
   ready: ready as StatusData,
@@ -75,6 +72,79 @@ function liveStatus(): StatusData {
   return base
 }
 
+// ---- Runner state files (tmp/issue.*) ------------------------------------------
+
+interface RunnerFiles {
+  lock: number | null
+  code: number | null
+  end: number | null
+  json: string
+  err: string
+}
+
+function successJson(): string {
+  const env = structuredClone(issueSuccess)
+  env.data.leaf_not_after = nowUnix() + 90 * 86_400
+  env.data.leaf_not_after_utc = new Date(env.data.leaf_not_after * 1000).toISOString().slice(0, 19) + 'Z'
+  return JSON.stringify(env) + '\n'
+}
+
+const FAILURE_ERR = 'warning: KeyMint returned -18\n❌ [ta] KeyMint -18 INCOMPATIBLE_KEY_FORMAT\n'
+
+function initialFiles(): RunnerFiles {
+  const now = nowUnix()
+  const idle: RunnerFiles = { lock: null, code: null, end: null, json: '', err: '' }
+  switch (params.get('runner')) {
+    case 'running':
+      return { ...idle, lock: now - 15 }
+    case 'overdue':
+      return { ...idle, lock: now - 130 }
+    case 'stale':
+      return { ...idle, lock: now - 900 }
+    case 'success':
+      return { ...idle, code: 0, end: now - 3600, json: successJson() }
+    case 'failure':
+      return { ...idle, code: 5, end: now - 600, json: JSON.stringify(issueFailure) + '\n', err: FAILURE_ERR }
+    case 'crashed':
+      return { ...idle, code: 137, end: now - 120, err: 'Killed\n' }
+    default:
+      return idle
+  }
+}
+
+const files = initialFiles()
+
+function launch(): void {
+  if (files.lock !== null) return // runner exits 9: already running
+  setTimeout(() => {
+    files.lock = nowUnix()
+    files.code = files.end = null
+    files.json = files.err = ''
+  }, 400)
+  setTimeout(() => {
+    if (outcome === 'failure') {
+      files.json = JSON.stringify(issueFailure) + '\n'
+      files.err = FAILURE_ERR
+      files.code = 5
+    } else {
+      files.json = successJson()
+      files.code = 0
+      scenario = 'ready'
+    }
+    files.end = nowUnix()
+    files.lock = null
+  }, 4500)
+}
+
+function probeOutput(): string {
+  const lines = [`now=${nowUnix()}`]
+  if (files.lock !== null) lines.push(`lock=${files.lock}`)
+  if (files.code !== null) lines.push(`code=${files.code}`, `end=${files.end}`)
+  return lines.join('\n') + '\n'
+}
+
+// ---- Dispatcher -----------------------------------------------------------------
+
 function ok(stdout: string): ExecResult {
   return { errno: 0, stdout, stderr: '' }
 }
@@ -83,12 +153,8 @@ function fail(errno: number, stderr: string): ExecResult {
   return { errno, stdout: '', stderr }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 export async function mockExec(command: string): Promise<ExecResult> {
-  await sleep(250)
+  await new Promise((resolve) => setTimeout(resolve, 200))
   console.debug('[mock exec]', command)
 
   if (command.includes(' status --json')) {
@@ -106,6 +172,16 @@ export async function mockExec(command: string): Promise<ExecResult> {
   if (command.startsWith('tail -n 200 ')) {
     const name = command.split('/').pop()?.replace(/'$/, '') ?? ''
     return logs.includes(name) ? ok(logBody(name)) : fail(1, `tail: ${name}: No such file`)
+  }
+  if (command.includes('now=$(date +%s)')) return ok(probeOutput())
+  if (command.includes('issue.last.json')) return ok(`${files.json}<<<RKP-SEP>>>\n${files.err}`)
+  if (command.includes('command -v setsid')) {
+    launch()
+    return ok('setsid\n')
+  }
+  if (command.startsWith('rmdir ') && command.includes('issue.lock')) {
+    files.lock = null
+    return ok('')
   }
   return fail(127, `mock: unhandled command: ${command}`)
 }

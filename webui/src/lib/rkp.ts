@@ -245,3 +245,27 @@ const EXIT_LABEL: Record<number, string> = {
 export function exitLabel(code: number): string {
   return EXIT_LABEL[code] ?? `异常退出（${code}）`
 }
+
+/** Actionable explanation for known failure signatures (README go/no-go list). */
+export function failureHint(e: IssueFailure): string | null {
+  if (e.code === 'device_not_registered') return '设备未在 Google RKP 注册（HTTP 444），无法通过本模块解决。'
+  if (e.ta_status === -100) return 'TA 未实现该命令（UNIMPLEMENTED），当前固件不支持 Native V2。'
+  if (e.ta_status === -18) return 'TA 要求 MacedPublicKey（INCOMPATIBLE_KEY_FORMAT），当前固件不支持 Native V2。'
+  if (e.ta_status === -40) return '厂商命令或帧格式不匹配（INVALID_TAG）。'
+  if (e.code === 'ta_timeout') return 'TA 调用超时，可在配置中调大 ta_timeout_seconds 后重试。'
+  switch (e.stage) {
+    case 'challenge':
+    case 'server':
+      return '请检查网络或 proxy 配置后重试。'
+    case 'prereq':
+      return '请查看“环境检查”中未通过的项目。'
+    case 'chain':
+      return '服务端返回的证书链未通过本地校验。'
+    case 'write':
+      return '写入失败，请检查存储空间与 SELinux（dmesg | grep avc）。'
+    case 'config':
+      return '请检查 config.toml。'
+    default:
+      return null
+  }
+}

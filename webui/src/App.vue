@@ -1,52 +1,144 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { MiuixButton, MiuixCard, MiuixText, MiuixTopAppBar, setThemeMode } from 'miuix-vue'
-import { exec, hasKsu } from './lib/ksu'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  MiuixButton,
+  MiuixCard,
+  MiuixScrollArea,
+  MiuixSmallTitle,
+  MiuixSnackbarHost,
+  MiuixText,
+  MiuixTopAppBar,
+  showSnackbar,
+} from 'miuix-vue'
+import StatusCard from './components/StatusCard.vue'
+import CheckCard from './components/CheckCard.vue'
+import { bridgeAvailable } from './lib/ksu'
+import { CommandError, readStatus, type StatusData } from './lib/rkp'
+import { nowUnix } from './lib/format'
+import { initTheme } from './lib/theme'
 
-setThemeMode('system')
+initTheme()
 
-const version = ref('…')
-const uid = ref('')
+const available = bridgeAvailable()
 
-async function run(cmd: string): Promise<string> {
-  if (!hasKsu()) return '未检测到 KernelSU WebUI 接口'
+const status = ref<StatusData | null>(null)
+const statusError = ref<CommandError | null>(null)
+const statusLoading = ref(false)
+const statusCached = ref(false)
+
+// Ticks once a minute so relative times and day counts stay current.
+const now = ref(nowUnix())
+let clock: number | undefined
+
+async function loadStatus(updateDescription: boolean): Promise<boolean> {
+  statusLoading.value = true
   try {
-    const r = await exec(cmd)
-    return r.errno === 0 ? r.stdout.trim() : `失败（${r.errno}）${r.stderr.trim()}`
+    status.value = await readStatus(updateDescription)
+    statusCached.value = false
+    statusError.value = null
+    return true
   } catch (e) {
-    return String(e)
+    statusError.value = e instanceof CommandError ? e : new CommandError('exec', String(e))
+    return false
+  } finally {
+    statusLoading.value = false
+    now.value = nowUnix()
   }
 }
 
-onMounted(async () => {
-  version.value = await run('/data/adb/modules/rkp_mini/bin/rkp-mini --version')
+async function onRefresh(): Promise<void> {
+  if (await loadStatus(true)) void showSnackbar({ message: '状态已刷新，模块描述已同步' })
+}
+
+const blockers = computed(() => status.value?.blockers ?? [])
+
+onMounted(() => {
+  clock = window.setInterval(() => (now.value = nowUnix()), 60_000)
+  if (available) void loadStatus(false)
 })
+
+onBeforeUnmount(() => clearInterval(clock))
 </script>
 
 <template>
-  <MiuixTopAppBar title="RKP Mini" />
-  <main class="page">
-    <MiuixCard>
-      <div class="pad">
-        <MiuixText type="body1">二进制版本：{{ version }}</MiuixText>
-        <MiuixText v-if="uid" type="body2">id -u：{{ uid }}</MiuixText>
-      </div>
-    </MiuixCard>
-    <MiuixButton type="primary" @click="run('id -u').then((v) => (uid = v))">检测 root</MiuixButton>
-  </main>
+  <div class="app">
+    <MiuixTopAppBar title="RKP Mini" />
+
+    <MiuixScrollArea class="app__scroll">
+      <main class="page">
+        <MiuixCard v-if="!available">
+          <div class="notice">
+            <MiuixText type="title4" weight="medium" color="var(--m-color-error)">未检测到 KernelSU 接口</MiuixText>
+            <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
+              请在 KernelSU 管理器的模块页中点击本模块的“打开”进入此页面。当前环境无法执行命令。
+            </MiuixText>
+          </div>
+        </MiuixCard>
+
+        <template v-else>
+          <StatusCard
+            :status="status"
+            :loading="statusLoading"
+            :error="statusError"
+            :cached="statusCached"
+            :now="now"
+            @retry="loadStatus(false)"
+          />
+
+          <template v-if="status">
+            <MiuixSmallTitle :text="blockers.length ? `环境检查 · ${blockers.length} 项未通过` : '环境检查'" />
+            <CheckCard :status="status" />
+          </template>
+
+          <div class="actions">
+            <MiuixButton :disabled="statusLoading" @click="onRefresh">刷新状态</MiuixButton>
+          </div>
+        </template>
+
+        <MiuixText class="footnote" type="footnote1" color="var(--m-color-on-surface-variant-actions)" align="center">
+          签发结果取决于设备固件与 Google RKP 服务，不保证 Play Integrity 通过。
+        </MiuixText>
+      </main>
+    </MiuixScrollArea>
+
+    <MiuixSnackbarHost />
+  </div>
 </template>
 
 <style scoped>
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.app__scroll {
+  flex: 1;
+  min-height: 0;
+}
 .page {
-  padding: 12px;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 4px 12px 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-.pad {
+.page :deep(.m-small-title) {
+  padding: 4px 16px 0;
+}
+.notice {
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+}
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.footnote {
+  padding: 4px 16px 0;
 }
 </style>

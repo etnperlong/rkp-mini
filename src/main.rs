@@ -2,6 +2,8 @@ mod cli;
 mod config;
 mod error;
 mod rkp;
+#[cfg(test)]
+mod test_support;
 mod util;
 
 use cli::Command;

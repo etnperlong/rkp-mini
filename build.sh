@@ -67,15 +67,21 @@ cargo build --release --target "$TARGET"
 BIN="target/$TARGET/release/rkp-mini"
 [ -f "$BIN" ] || { echo "! build produced no binary" >&2; exit 1; }
 
+# --- WebUI --------------------------------------------------------------------
+command -v bun >/dev/null 2>&1 || { echo "! bun is required to build the WebUI" >&2; exit 1; }
+echo "- Building WebUI"
+( cd webui && bun install --frozen-lockfile && bun run build )
+[ -f webui/dist/index.html ] || { echo "! webui build produced no index.html" >&2; exit 1; }
+
 # --- Package ------------------------------------------------------------------
 echo "- Packaging $ZIP"
 rm -rf dist/module "$ZIP"
-mkdir -p dist/module/bin
+mkdir -p dist/module/bin dist/module/webroot
 cp "$BIN" dist/module/bin/rkp-mini
 cp module/module.prop module/customize.sh module/action.sh \
    module/service.sh module/uninstall.sh dist/module/
+cp -R webui/dist/. dist/module/webroot/
 chmod 755 dist/module/bin/rkp-mini dist/module/*.sh
-
 ( cd dist/module && zip -rq "../rkp_mini-${VERSION}.zip" . )
 
 # --- Verify -------------------------------------------------------------------
@@ -83,5 +89,9 @@ echo "- Verify:"
 file "$BIN" | sed 's/^/    /'
 readelf -h "$BIN" | grep -E 'Machine|Class' | sed 's/^/    /'
 echo "    zip contents:"
-unzip -l "$ZIP" | sed 's/^/      /'
+LISTING=$(unzip -l "$ZIP")
+sed 's/^/      /' <<<"$LISTING"
+for f in module.prop bin/rkp-mini webroot/index.html webroot/runner/issue.sh; do
+  grep -q " $f\$" <<<"$LISTING" || { echo "! $f missing from zip" >&2; exit 1; }
+done
 echo "- Done: $ZIP"

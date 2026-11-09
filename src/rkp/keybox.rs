@@ -36,6 +36,29 @@ fn pem_block(label: &str, der: &[u8]) -> String {
     format!("-----BEGIN {label}-----\n{body}-----END {label}-----\n")
 }
 
+/// Concatenated PEM of a cert chain (for `cert-chain.pem`).
+pub fn chain_pem(chain: &[CertInfo]) -> String {
+    let mut out = String::new();
+    for cert in chain {
+        out.push_str(&pem_block("CERTIFICATE", &cert.der));
+    }
+    out
+}
+
+/// SEC1 `EC PRIVATE KEY` PEM for a secret key.
+pub fn private_key_pem(secret: &SecretKey) -> Result<String> {
+    secret
+        .to_sec1_pem(LineEnding::LF)
+        .map(|z| z.to_string())
+        .map_err(|e| {
+            err(
+                Stage::Chain,
+                "chain_invalid",
+                format!("encode SEC1 key: {e}"),
+            )
+        })
+}
+
 /// Device id: `rkp-mini-` + first 12 hex of sha256(public key SEC1).
 pub fn device_id(public: &p256::PublicKey) -> String {
     let sec1 = public.to_encoded_point(false);

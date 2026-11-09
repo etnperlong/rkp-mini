@@ -8,7 +8,7 @@ mod test_support;
 mod util;
 
 use cli::Command;
-use error::{err, to_app_error, Stage};
+use error::to_app_error;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -83,10 +83,6 @@ fn dispatch(cmd: Command) -> anyhow::Result<i32> {
         }
         Command::TaWorker { dir } => Ok(rkp::keymint::worker_main(&dir)),
         Command::Status(a) => status::run(&a),
-        Command::Issue(_) => Err(err(
-            Stage::Generic,
-            "not_implemented",
-            "command not yet wired",
-        )),
+        Command::Issue(a) => rkp::issue(&a),
     }
 }

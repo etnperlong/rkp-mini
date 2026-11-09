@@ -132,7 +132,7 @@ fn keybox_lib() -> &'static str {
 }
 
 /// Short human hint for a blocker code (used in the single-line description).
-fn blocker_hint(code: &str) -> &'static str {
+pub(crate) fn blocker_hint(code: &str) -> &'static str {
     match code {
         "android_arm64_required" => "需 arm64",
         "root_required" => "需 root",

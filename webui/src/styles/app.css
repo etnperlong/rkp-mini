@@ -1,0 +1,32 @@
+/* App-level styles. Miuix tokens come from miuix-vue/style.css; only
+   app-owned tokens are defined here. */
+
+:root {
+  --app-warning: #f5a623;
+}
+
+.m-theme-dark {
+  --app-warning: #ffb74d;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* KernelSU's WebView is transparent: the page must paint its own background. */
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  background: var(--m-color-surface);
+  color: var(--m-color-on-background);
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Roboto', 'Noto Sans CJK SC', 'PingFang SC', sans-serif;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}

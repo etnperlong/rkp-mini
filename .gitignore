@@ -1,3 +1,5 @@
 /target
 /dist
 *.log
+/webui/node_modules
+/webui/dist

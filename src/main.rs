@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod error;
+mod rkp;
 mod util;
 
 use cli::Command;

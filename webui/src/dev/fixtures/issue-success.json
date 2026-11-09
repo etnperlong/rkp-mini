@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "data": {
+    "keybox": "/data/misc/keystore/rkp-mini/output/keybox.xml",
+    "chain_certificates": 3,
+    "leaf_subject": "CN=d4a3f0b2c19e8a7f, O=TEE, C=US",
+    "leaf_not_after": 0,
+    "leaf_not_after_utc": "",
+    "device_id": "c3f1a9e07b2d4c58",
+    "csr_len": 1412,
+    "frame_layout": "status+len",
+    "ta_status": 0
+  }
+}

@@ -8,6 +8,7 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "jsx": "preserve",
+    "resolveJsonModule": true,
     "types": ["vite/client"],
     "paths": {
       "miuix-vue": ["./node_modules/miuix-vue/dist/src/index.d.ts"],

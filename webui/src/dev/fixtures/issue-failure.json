@@ -1,0 +1,10 @@
+{
+  "ok": false,
+  "error": {
+    "stage": "ta",
+    "code": "ta_rejected",
+    "message": "KeyMint -18 INCOMPATIBLE_KEY_FORMAT: TA wants MacedPublicKey; Native V2 unavailable",
+    "ta_status": -18,
+    "head_hex": "eeffffff000000000000000000000000a5010203042658202b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80912"
+  }
+}

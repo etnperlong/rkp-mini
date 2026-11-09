@@ -13,6 +13,23 @@ export function hasKsu(): boolean {
   return typeof window !== 'undefined' && 'ksu' in window
 }
 
+/** Dev server in a plain browser: commands are answered by fixtures. */
+export const MOCK = import.meta.env.DEV && !hasKsu()
+
+/** Whether commands can run at all (real bridge or dev mock). */
+export function bridgeAvailable(): boolean {
+  return MOCK || hasKsu()
+}
+
+async function dispatch(command: string): Promise<ExecResult> {
+  if (import.meta.env.DEV && MOCK) {
+    // Dynamic so the dev-only mock and its fixtures never reach the production bundle.
+    const { mockExec } = await import('../dev/mockKsu')
+    return mockExec(command)
+  }
+  return ksuExec(command)
+}
+
 /**
  * Run a shell command as root through the KernelSU bridge.
  * The bridge has no timeout of its own; this only stops waiting, it never
@@ -26,7 +43,7 @@ export async function exec(command: string, timeoutMs = TIMEOUT_MS): Promise<Exe
     timer = window.setTimeout(() => reject(new Error(`命令超时（${timeoutMs / 1000}s）`)), timeoutMs)
   })
   try {
-    return await Promise.race([ksuExec(command), timeout])
+    return await Promise.race([dispatch(command), timeout])
   } finally {
     clearTimeout(timer)
   }

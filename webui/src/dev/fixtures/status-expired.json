@@ -1,0 +1,25 @@
+{
+  "generated_at": 0,
+  "device": {
+    "android_arm64": true,
+    "root": true,
+    "qualcomm": true,
+    "library_present": true,
+    "device_present": true,
+    "fingerprint": "example/reference/device:1/EXAMPLE/1:user/release-keys"
+  },
+  "blockers": [],
+  "keybox": {
+    "path": "/data/misc/keystore/rkp-mini/output/keybox.xml",
+    "exists": true,
+    "valid": false,
+    "certificates": 3,
+    "leaf_subject": "CN=d4a3f0b2c19e8a7f, O=TEE, C=US",
+    "not_after": null,
+    "not_after_utc": null,
+    "days_left": -3,
+    "key_match": true,
+    "error": "leaf certificate expired"
+  },
+  "description": "❌ RKP 已过期"
+}

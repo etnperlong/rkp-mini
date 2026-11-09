@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod error;
 mod rkp;
+mod status;
 #[cfg(test)]
 mod test_support;
 mod util;
@@ -81,7 +82,8 @@ fn dispatch(cmd: Command) -> anyhow::Result<i32> {
             Ok(0)
         }
         Command::TaWorker { dir } => Ok(rkp::keymint::worker_main(&dir)),
-        Command::Status(_) | Command::Issue(_) => Err(err(
+        Command::Status(a) => status::run(&a),
+        Command::Issue(_) => Err(err(
             Stage::Generic,
             "not_implemented",
             "command not yet wired",

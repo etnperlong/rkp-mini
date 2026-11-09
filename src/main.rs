@@ -1,4 +1,5 @@
 mod cli;
+mod config;
 mod error;
 mod util;
 
@@ -68,11 +69,15 @@ fn dispatch(cmd: Command) -> anyhow::Result<i32> {
             println!("rkp-mini {}", cli::VERSION);
             Ok(0)
         }
-        Command::ConfigInit { .. }
-        | Command::ConfigShow { .. }
-        | Command::Status(_)
-        | Command::Issue(_)
-        | Command::TaWorker { .. } => Err(err(
+        Command::ConfigInit { config } => {
+            config::init(&config::resolve_path(&config))?;
+            Ok(0)
+        }
+        Command::ConfigShow { config } => {
+            config::show(&config::resolve_path(&config))?;
+            Ok(0)
+        }
+        Command::Status(_) | Command::Issue(_) | Command::TaWorker { .. } => Err(err(
             Stage::Generic,
             "not_implemented",
             "command not yet wired",

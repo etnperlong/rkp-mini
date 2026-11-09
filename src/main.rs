@@ -78,7 +78,8 @@ fn dispatch(cmd: Command) -> anyhow::Result<i32> {
             config::show(&config::resolve_path(&config))?;
             Ok(0)
         }
-        Command::Status(_) | Command::Issue(_) | Command::TaWorker { .. } => Err(err(
+        Command::TaWorker { dir } => Ok(rkp::keymint::worker_main(&dir)),
+        Command::Status(_) | Command::Issue(_) => Err(err(
             Stage::Generic,
             "not_implemented",
             "command not yet wired",

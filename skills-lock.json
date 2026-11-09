@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "miuix": {
+      "source": "limczhh/miuix-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "c481f30d5f6b83dfd3e5657f52d9cdb2e3cf05d375f89fc52ae4df9db1ecc9bb"
+    }
+  }
+}

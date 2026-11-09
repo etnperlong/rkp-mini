@@ -171,7 +171,7 @@ pub fn description_for(status: &DeviceStatus, keybox: &KeyboxInfo) -> String {
     } else if let Some(b) = status.blockers.first() {
         format!("❌ 未签发（{}）", blocker_hint(b))
     } else {
-        "❌ 未签发；点 Action".to_string()
+        "❌ 未签发".to_string()
     };
     util::single_line(&raw, 120)
 }
@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn description_no_keybox_no_blocker() {
         let kb = KeyboxInfo::default();
-        assert_eq!(description_for(&base_status(), &kb), "❌ 未签发；点 Action");
+        assert_eq!(description_for(&base_status(), &kb), "❌ 未签发");
     }
 
     #[test]

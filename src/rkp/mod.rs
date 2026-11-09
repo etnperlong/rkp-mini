@@ -135,7 +135,7 @@ pub fn issue(args: &IssueArgs) -> Result<i32> {
     if !args.acknowledge {
         eprintln!("rkp-mini issue signs a fresh RKP keybox via the on-device KeyMint TA (0x3122).");
         eprintln!("A new P-256 key is generated every run; an old keybox is never reused.");
-        eprintln!("Re-run with --acknowledge (the module Action button does this for you).");
+        eprintln!("Re-run with --acknowledge.");
         return Ok(2);
     }
 

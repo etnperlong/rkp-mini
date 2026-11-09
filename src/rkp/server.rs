@@ -103,7 +103,8 @@ fn encode_eek_request(fingerprint: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Parse `[ [eek chains...], challenge_bstr ]` and return the challenge.
+/// Parse `[ eek_chains, challenge_bstr, ? device_config_map ]` and return the challenge.
+/// The live server appends the config map, so the challenge is index 1, not the last item.
 pub fn parse_challenge(body: &[u8]) -> Result<Vec<u8>> {
     let v: Value = ciborium::from_reader(body).map_err(|e| {
         err(
@@ -126,7 +127,7 @@ pub fn parse_challenge(body: &[u8]) -> Result<Vec<u8>> {
             "response array too short",
         ));
     }
-    let challenge = as_bytes(&arr[arr.len() - 1]).ok_or_else(|| {
+    let challenge = as_bytes(&arr[1]).ok_or_else(|| {
         err(
             Stage::Challenge,
             "challenge_invalid",
@@ -226,6 +227,26 @@ mod tests {
             Value::Bytes(vec![1, 2, 3, 4]),
         ]));
         assert_eq!(parse_challenge(&body).unwrap(), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn challenge_parse_ignores_trailing_device_config() {
+        // Shape returned by remoteprovisioning.googleapis.com/v1:fetchEekChain.
+        let body = encode(&Value::Array(vec![
+            Value::Array(vec![]),
+            Value::Bytes(vec![9; 29]),
+            Value::Map(vec![
+                (
+                    Value::Text("time_to_refresh_hours".into()),
+                    Value::Integer(72.into()),
+                ),
+                (
+                    Value::Text("num_extra_attestation_keys".into()),
+                    Value::Integer(12.into()),
+                ),
+            ]),
+        ]));
+        assert_eq!(parse_challenge(&body).unwrap(), vec![9; 29]);
     }
 
     #[test]

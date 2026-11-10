@@ -1470,6 +1470,7 @@ dependencies = [
  "rand_core",
  "rcgen",
  "roxmltree",
+ "sec1",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1512,6 +1513,7 @@ dependencies = [
  "p256",
  "rand_core",
  "rcgen",
+ "sec1",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1520,6 +1522,7 @@ dependencies = [
  "toml 0.8.23",
  "ureq",
  "x509-cert",
+ "zeroize",
 ]
 
 [[package]]

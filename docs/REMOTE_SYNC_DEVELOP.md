@@ -152,6 +152,14 @@ TEESimulator-RS 与 TrickyStore（`tricky_store`，同一模块 id 与路径，�
 - 不删除客户端 key。TEESimulator-RS 只清空 patched chain 缓存：替换前已生成/已缓存的 key 继续返回旧证书链，直到守护进程重启；TrickyStore 开源版同样不清理已生成 key 的缓存。
 - 解析失败不会回退到旧 keybox（表现为没有可用的 attestation key）。
 
+缺 SEC1 `parameters`（namedCurve）的私钥——即本次改动前 `rkp-mini-issuer` 的输出——在各目标的处理（仍为读源码结论，未在真机验证）：
+
+- TrickyStore（开源 `3a515c5` + BouncyCastle 1.78.1，以及 1.4.1 dex）**拒绝**：`PEMParser` 得到 `PEMKeyPair`，其 AlgorithmIdentifier 参数为 null，`JcaPEMKeyConverter.getKeyPair` 随即失败；异常发生在 `keyboxes.clear()` 之后，整份 keybox 被丢弃，完全不做 attestation patch。
+- TEESimulator-RS（`6d241e5` + BouncyCastle 1.83）**拒绝**：同一个 `JcaPEMKeyConverter` 失败（"EC domain parameters must be encoded in the algorithm identifier"）；只丢弃该 `<Key>`，EC-only keybox 因此没有可用 attestation key（-75）。
+- TEESimulator（JingMatrix `06f9f2e`）**接受**：私钥只是不透明 DER，内置 BoringSSL 补丁（`rust/patches/kmr-crypto-boring-ec-group.patch`）用调用方提供的 group 解析 SEC1，`parameters` 可选。
+
+因此旧 keybox 只在 TEESimulator 上可用；要在 OhMyKeymint / TrickyStore / TEESimulator-RS 上工作必须重新签发。
+
 ### 4.4 Gist / WebDAV
 
 - GitHub Gist 的 “secret” 不是 private：任何拿到 URL 的人都能读；密文仍依赖 age 密码。

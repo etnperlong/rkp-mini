@@ -4,9 +4,10 @@ use std::path::Path;
 
 use anyhow::Result;
 use base64::Engine;
+use der::{asn1::ObjectIdentifier, Encode};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
-use p256::pkcs8::LineEnding;
 use p256::SecretKey;
+use zeroize::Zeroizing;
 
 use crate::error::{err, Stage};
 use crate::rkp::chain::{self, CertInfo};
@@ -25,6 +26,35 @@ pub struct KeyboxInfo {
 }
 
 const PEM_WRAP: usize = 64;
+
+/// secp256r1 (`1.2.840.10045.3.1.7`): the named curve OhMyKeymint's
+/// `import_sec1_private_key` requires in the SEC1 `parameters` field.
+const SECP256R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
+
+/// SEC1 `ECPrivateKey` DER carrying the named curve in `parameters`.
+///
+/// `SecretKey::to_sec1_der` writes `parameters: None`, which OhMyKeymint
+/// refuses ("sec1 formatted EC private key didn't have a parameters field")
+/// and then replaces the keybox with its bundled template. The keybox private
+/// key therefore has to be encoded here, with the curve OID.
+fn sec1_key_der(secret: &SecretKey) -> Result<Zeroizing<Vec<u8>>> {
+    let private = Zeroizing::new(secret.to_bytes());
+    let public = secret.public_key().to_encoded_point(false);
+    let der = sec1::EcPrivateKey {
+        private_key: &private[..],
+        parameters: Some(sec1::EcParameters::NamedCurve(SECP256R1)),
+        public_key: Some(public.as_bytes()),
+    }
+    .to_der()
+    .map_err(|e| {
+        err(
+            Stage::Chain,
+            "chain_invalid",
+            format!("encode SEC1 key: {e}"),
+        )
+    })?;
+    Ok(Zeroizing::new(der))
+}
 
 fn pem_block(label: &str, der: &[u8]) -> String {
     let b64 = base64::engine::general_purpose::STANDARD.encode(der);
@@ -47,16 +77,8 @@ pub fn chain_pem(chain: &[CertInfo]) -> String {
 
 /// SEC1 `EC PRIVATE KEY` PEM for a secret key.
 pub fn private_key_pem(secret: &SecretKey) -> Result<String> {
-    secret
-        .to_sec1_pem(LineEnding::LF)
-        .map(|z| z.to_string())
-        .map_err(|e| {
-            err(
-                Stage::Chain,
-                "chain_invalid",
-                format!("encode SEC1 key: {e}"),
-            )
-        })
+    let der = sec1_key_der(secret)?;
+    Ok(pem_block("EC PRIVATE KEY", &der))
 }
 
 /// Device id: `rkp-mini-` + first 12 hex of sha256(public key SEC1).
@@ -68,13 +90,7 @@ pub fn device_id(public: &p256::PublicKey) -> String {
 
 /// Build the keybox XML (SEC1 private key + leaf→root cert chain).
 pub fn build(secret: &SecretKey, chain: &[CertInfo], device_id: &str) -> Result<String> {
-    let private_pem = secret.to_sec1_pem(LineEnding::LF).map_err(|e| {
-        err(
-            Stage::Chain,
-            "chain_invalid",
-            format!("encode SEC1 key: {e}"),
-        )
-    })?;
+    let private_pem = Zeroizing::new(private_key_pem(secret)?);
 
     let mut certs_xml = String::new();
     for cert in chain {
@@ -189,6 +205,35 @@ pub fn inspect(path: &Path) -> KeyboxInfo {
 mod tests {
     use super::*;
     use crate::test_support::{test_chain, TestChain};
+    use der::Decode;
+
+    #[test]
+    fn private_key_pem_carries_the_named_curve() {
+        let TestChain { secret, public, .. } = test_chain();
+        let pem = private_key_pem(&secret).unwrap();
+        assert!(pem.starts_with(&format!("{0}BEGIN EC PRIVATE KEY{0}\n", "-".repeat(5))));
+        let body: String = pem
+            .lines()
+            .filter(|line| !line.starts_with("-----"))
+            .collect();
+        let der = base64::engine::general_purpose::STANDARD
+            .decode(body.as_bytes())
+            .unwrap();
+
+        // OhMyKeymint refuses a SEC1 key without `parameters`; keep the OID.
+        let key = sec1::EcPrivateKey::from_der(&der).unwrap();
+        assert_eq!(
+            key.parameters.and_then(|p| p.named_curve()),
+            Some(SECP256R1)
+        );
+
+        // Readers that ignore `parameters` still derive the same key.
+        let round_trip = SecretKey::from_sec1_der(&der).unwrap();
+        assert_eq!(
+            round_trip.public_key().to_encoded_point(false),
+            public.to_encoded_point(false)
+        );
+    }
 
     #[test]
     fn build_inspect_roundtrip() {

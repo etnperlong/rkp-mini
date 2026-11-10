@@ -1,8 +1,9 @@
 //! Test-only fixtures: real P-256 chains and keybox XML in the RKP Mini layout.
 
 use base64::Engine;
+use der::{asn1::ObjectIdentifier, Encode};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
-use p256::pkcs8::{EncodePrivateKey, LineEnding};
+use p256::pkcs8::EncodePrivateKey;
 use p256::SecretKey;
 use rand_core::OsRng;
 use rcgen::{
@@ -10,6 +11,11 @@ use rcgen::{
     PKCS_ECDSA_P256_SHA256,
 };
 use time::{Duration, OffsetDateTime};
+use zeroize::Zeroizing;
+
+/// secp256r1 (`1.2.840.10045.3.1.7`): the named curve OhMyKeymint's
+/// `import_sec1_private_key` requires in the SEC1 `parameters` field.
+const SECP256R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
 
 pub struct TestKeybox {
     pub xml: String,
@@ -25,6 +31,22 @@ fn dn(cn: &str) -> DistinguishedName {
     let mut d = DistinguishedName::new();
     d.push(DnType::CommonName, cn);
     d
+}
+
+/// SEC1 `ECPrivateKey` DER with the secp256r1 named curve in `parameters`.
+///
+/// Mirrors what `rkp-mini-issuer` writes into its keybox:
+/// `SecretKey::to_sec1_der` omits `parameters`, which OhMyKeymint refuses.
+fn sec1_key_der(secret: &SecretKey) -> Vec<u8> {
+    let private = Zeroizing::new(secret.to_bytes());
+    let public = secret.public_key().to_encoded_point(false);
+    sec1::EcPrivateKey {
+        private_key: &private[..],
+        parameters: Some(sec1::EcParameters::NamedCurve(SECP256R1)),
+        public_key: Some(public.as_bytes()),
+    }
+    .to_der()
+    .unwrap()
 }
 
 fn pem(label: &str, der: &[u8]) -> String {
@@ -93,7 +115,7 @@ impl TestKeybox {
 
         let sec1 = secret.public_key().to_encoded_point(false);
         let device_id = format!("rkp-mini-{}", &crate::sha256_hex(sec1.as_bytes())[..12]);
-        let key_pem = secret.to_sec1_pem(LineEnding::LF).unwrap().to_string();
+        let key_pem = pem("EC PRIVATE KEY", &sec1_key_der(&secret));
         let xml = keybox_xml(&key_pem, &chain_pems, &device_id);
         TestKeybox {
             xml,

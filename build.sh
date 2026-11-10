@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 
 TARGET=aarch64-linux-android
 API=26
-VERSION="v$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+VERSION="v$(grep -m1 '^version' crates/rkp-mini/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
 ZIP="dist/rkp_mini-${VERSION}.zip"
 
 # --- Locate the NDK -----------------------------------------------------------

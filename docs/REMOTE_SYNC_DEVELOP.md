@@ -1,6 +1,6 @@
 # RKP Mini 远程同步（rkp-sync）设计方案
 
-> 状态：方案已定稿，**尚未实现**。
+> 状态：CLI/协议已实现（2026-11-10）；**§19 WebUI 修订**为同日新增决策，按 §19 实现。
 > 读者：接手实现的新 Agent 会话。
 > 先读：仓库根 `AGENTS.md`（Rust 侧约束与验证命令），再读本文。
 > 范围：新增“加密同步 + 接收端部署”能力；不改现有 KeyMint `0x3122` 签发协议，但**扩展仓库 scope**（见 §13）。
@@ -41,6 +41,9 @@
 | 接收端设备 | **新设备**，跨设备使用 | 必须在 UI 首次启用时接受风险 |
 | 默认开关 | `sync.enabled = false` | 远程私钥下发是高危能力 |
 | 身份轮换 | 默认 `scheduled` | 避免每次 push 都换 keybox；临近到期才自动轮换 |
+| 管理界面 | **WebUI 为主入口**（发送端并入 `rkp_mini` WebUI；接收端模块自带 WebUI），CLI 保留同等能力 | 见 §19 |
+| 密钥写入 | WebUI 经 `ksu.exec` 用 shell 内建把 **hex 编码**的密钥写入 0600 inbox 文件，`rkp-sync` 读取、校验、落盘并删除 inbox | `ksu.exec` 走 root shell 的 stdin，不进 argv；见 §19.2 |
+| 非交互确认 | `enable --accept-risk <版本>`；`fetch --accept-first <sha>`；`deploy apply --confirm-first/--allow-identity-change <sha>` | 确认绑定到用户看到的那个版本，防并发替换 |
 | 自动签发 | 以 `auto_issue_days` 为“剩余天数阈值” | 不做无条件周期签发 |
 | 工具配置 | **不同步** | OMK `[crypto]`、TEESim `config.json` 是设备/身份相关 |
 | 额外签名 | 默认不做 Ed25519 | 密码是唯一信任锚；减少公钥分发 |
@@ -258,7 +261,7 @@ rkp-sync.age
 - UTF-8；只去掉输入行尾的单个 `\n` 或 `\r\n`；**不 trim 首尾空格**。
 - 建议至少 6 个随机单词或 20+ 随机字符；每个 stream 唯一。
 - 不提供“密码校验字段”；解密失败统一报 `decrypt_failed`。
-- 不在日志、错误消息、URL、二维码、进程 argv、环境变量中出现密码。
+- 不在日志、错误消息、URL、二维码、外部进程 argv、环境变量中出现密码；WebUI 的写入路径见 §19.2（经 shell stdin + 内建命令，不产生含密码的 argv）。
 - `secret-file` 内容为原始口令；读取时只去掉行尾换行；文件 `0600`。
 - 默认使用 age 的 scrypt 参数；若低端设备耗时明显，记录耗时但不要降低到不可接受的安全参数。
 
@@ -871,7 +874,7 @@ restorecon（如需要）
 - 定时器：`service.sh` 等 `sys.boot_completed` + 网络；后台循环 `setsid/nohup` + 锁 + 抖动。
 - Android Doze/厂商省电可能冻结 root shell 循环；纯 shell 不保证严格定时。若要严格定时，接收端应做成 App + WorkManager。
 - `secret-file` 缺失/权限不对：自动任务停止并报错；不要静默回退到空密码或提示输入。
-- 读取口令后尽快 zeroize；不把密码传给子进程 argv；必要时用 stdin/fd。
+- 读取口令后尽快 zeroize；不把密码传给子进程 argv；必要时用 stdin/fd/inbox 文件（§19.2）。
 
 ---
 
@@ -1018,9 +1021,9 @@ UI 必须展示并让用户勾选确认：
 
 ## 15. 安全要求（MUST）
 
-1. 密码/token/WebDAV 密码/keybox/私钥 **MUST NOT** 出现在 URL、二维码、日志、错误消息、WebUI 文本、argv、环境变量。
+1. 密码/token/WebDAV 密码/keybox/私钥 **MUST NOT** 出现在 URL、二维码、日志、错误消息、WebUI 文本（输入框除外，提交后立即清空）、外部进程 argv、环境变量。
 2. 所有 secret/state/staging **MUST** 为 `0600`；目录 `0700`；目标 keybox 权限按适配器要求。
-3. 密码输入 **MUST** 走 stdin/TTY/`0600` 文件；**MUST NOT** 使用 `--password <明文>`。
+3. 密码输入 **MUST** 走 stdin/TTY/`0600` 文件/§19.2 的 inbox；**MUST NOT** 使用 `--password <明文>`。
 4. 远端响应 **MUST** 有大小上限；解密前不得无限缓冲。
 5. age 解密失败 **MUST** 拒绝应用；不得“跳过校验”。
 6. `seq/prev/stream_id/叶子到期` **MUST** 全部校验。
@@ -1093,9 +1096,60 @@ UI 必须展示并让用户勾选确认：
 - workspace vs 独立仓库：推荐 workspace；若工期紧可先独立 crate，但不要塞进 `rkp-mini` 单二进制。
 - Gist 直链 vs API 解析：默认直链；API 作为无 token 回退。
 - WebDAV MOVE vs If-Match：按目标服务器能力选择；保留失败回退。
-- UI 技术栈：接收端可复用 KernelSU WebUI 方案，也可纯 CLI；但风险确认/禁用必须存在。
+- UI 技术栈：KernelSU WebUI（§19），复用 `webui/` 的 Vue + miuix-vue；CLI 保持同等能力。风险确认/禁用必须在两者都存在。
 - 是否保留 staging 最近 1 份：允许，但必须 0600 且可清理。
 - 是否加 Ed25519：v1 不做；未来如做，必须单独设计公钥分发，不要混入本方案。
+
+## 19. WebUI 修订（2026-11-10，已定）
+
+原 v1 只做 CLI，理由是“WebUI 经 `ksu.exec` 传密码会进 argv”。读 KernelSU manager 源码后该前提不成立，改为 WebUI 为主入口。
+
+### 19.1 已确认事实（KernelSU `main`）
+
+| 事实 | 来源 | 影响 |
+|---|---|---|
+| `exec(cmd[, opts], cb)` 用 libsu：`createRootShell` 构造 `libksud.so debug su [-g]`，命令经 `newJob().add(cmd)` 写入该 shell 的 **stdin** | `ui/webui/WebViewInterface.kt`、`ui/util/KsuCli.kt` | 命令文本不出现在任何进程 argv；只有 shell 再 `exec` 的**外部命令**会把参数放进 argv |
+| `opts.env` 被拼成 `export k=v;` 前缀，同样走 stdin | 同上 | 不要用 env 传密钥：子进程会继承环境变量 |
+| `Shell.enableVerboseLogging = BuildConfig.DEBUG` | `KsuCli.kt` | **debug 版** manager 会把命令写进 logcat；release 版不会。这是残余风险，写进风险说明 |
+| WebView 同源 `https://mui.kernelsu.org`，生产 CSP `connect-src 'none'` | `docs/WEBUI_DEVELOP.md` | 页面拿到的密码无法外传；只能经 `exec` 落盘 |
+
+### 19.2 密钥写入（inbox）
+
+```text
+WebUI: hex = utf8ToHex(password)        // [0-9a-f]，无引号/转义/换行问题
+exec:  umask 077; mkdir -p <inbox> 2>/dev/null; echo <hex> > <inbox>/<kind>.hex && \
+       <bin> --json secret set <kind> --from-file <inbox>/<kind>.hex --hex
+```
+
+- 只用 shell **内建**（`umask`、`echo`、重定向）承载密钥；`mkdir`、`rkp-sync` 等外部命令的 argv 只有路径。hex 让 mksh/ash/bash 的 `echo` 行为一致；不用 here-doc（mksh 会落临时文件）。
+- inbox：发送端 `<数据根>/sync/inbox/`，接收端 `/data/adb/rkp_sync/sync/inbox/`，`0700`。
+- `secret set --from-file`：`O_NOFOLLOW` 打开；必须是当前 euid 拥有的普通文件、无 group/other 位；≤ 8 KiB；`--hex` 解码（容忍一个行尾换行）；非空 UTF-8；原子写入配置的 secret 路径（0600）。**无论成败都删除 inbox 文件**，并清空内存。
+- 同一机制用于 `rotate-password --from-file <f> --hex`（新口令）。
+- 页面：`type=password`、`autocomplete=off`；提交后立即清空输入与 hex 变量；从不回显、从不读取已存的 secret 文件，只展示“已设置/缺失/权限错误”。
+
+### 19.3 非交互确认（绑定版本）
+
+| 操作 | CLI | 绑定 |
+|---|---|---|
+| 风险接受 | `rkp-sync --json risk` 输出 `{version, items[], passphrase_path}`；`enable --accept-risk <version>` | `<version>` 必须等于当前 `RISK_VERSION`；旧 UI 不能替新版本说明“同意” |
+| 首次导入 TOFU | `fetch` 失败 `first_import_needs_confirmation`，错误信封带 `data`（seq/issued_at/device_id/leaf_not_after/keybox_sha256/plaintext_sha256）；`fetch --accept-first <plaintext_sha256>` | 只接受与展示一致的那一版；否则 `confirmation_mismatch` |
+| 首次部署 / 身份变化 | `deploy plan --json`（只读：gate、warnings、targets、old/new）；`deploy apply --confirm-first <keybox_sha256>` / `--allow-identity-change <keybox_sha256>` | 在 `sync.lock` 内比对 staged sha；后台循环若已换了 staging，拒绝 `confirmation_mismatch` |
+
+sha 参数接受完整 hex 或 ≥16 位前缀。TTY 交互路径不变（仍可 y/N）。
+
+### 19.4 配置编辑
+
+- `rkp-sync --json config show`：生效配置（不含任何密钥值，只含 secret 路径与状态）。
+- `rkp-sync config set <key> <value>`：**白名单**，写后重新加载校验，失败回滚。发送端：`provider`、`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`gist_id`、`gist_filename`、`webdav_endpoint`、`webdav_path`、`webdav_user`、`password_mode`、顶层 `auto_issue_days`。接收端：`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`password_mode`、`identity_change_policy`、`rotation_lead_days`、`auto_deploy`。位置字段（接收端）只经 `import` 写入；`enabled`/`risk_ack_*` 只经 `enable/disable`；部署目标只经 `deploy add-target/remove-target`。
+- `rkp-mini` WebUI 原“配置只读”决策仅对 `rkp-mini` 自身字段保持；`[sync]` 与 `auto_issue_days` 经上面的命令修改。
+
+### 19.5 页面
+
+- **发送端**（`rkp_mini` WebUI 新增“远程同步”卡片 + 底部弹层）：状态（启用、provider、位置、seq、上次推送/错误、本地 keybox 到期、自动循环是否运行）；初始化；provider 配置；设置 age 口令 / Gist token / WebDAV 密码；风险确认弹层（§13.2 每条独立复选框，默认全不勾，全勾才可提交，含 §19.1 debug manager 残余风险）；启用/禁用；立即推送；分享（URI + 由 `share --json` 的 `qr` 矩阵本地渲染的二维码 + “不含密码”提示）；轮换口令；清除本地数据；同步日志。
+- **接收端**（`rkp_sync` 模块 `webroot/`，同一 Vue 工程的第二个入口）：粘贴导入链接 → `import --check` 预览位置 → 确认后 `import --yes`；风险确认；口令/WebDAV 密码；目标增删（omk/teesim/tricky_store）；策略设置；拉取（TOFU 弹层展示事实后 `--accept-first <sha>`）；部署（先 `deploy plan`，首次/身份变化弹层展示 old→new、OMK key 删除警告、TEESim re-attest、“未做根信任检查”，再带 sha 执行）；pending 提示；立即运行；禁用；清除；移除已部署 keybox（两步确认）；日志。
+- 长任务（push、fetch、run、rotate-password）走 `webroot/runner/sync.sh <op> [非密钥参数]`，与 `issue.sh` 相同的 `setsid` + 状态文件 + 轮询模型；短命令（status/plan/config/secret/enable）直接 `exec`。
+- 启用后页面立即以 `setsid` 启动模块的 `sync-loop.sh`（脚本自带 pid 锁，重复启动无害）；禁用后循环在下一次唤醒时退出。
+- 页面从不读取或展示 keybox、私钥、口令、token；`staging/`、`secrets/`、`inbox/` 不出现在任何 `cat`/`ls` 命令里。
 
 ---
 

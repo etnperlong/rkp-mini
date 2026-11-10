@@ -178,9 +178,9 @@ export async function mockExec(command: string): Promise<ExecResult> {
     const name = command.split('/').pop()?.replace(/'$/, '') ?? ''
     return logs.includes(name) ? ok(logBody(name)) : fail(1, `tail: ${name}: No such file`)
   }
-  if (command.includes('now=$(date +%s)')) return ok(probeOutput())
-  if (command.includes('issue.last.json')) return ok(`${files.json}<<<RKP-SEP>>>\n${files.err}`)
-  if (command.includes('command -v setsid')) {
+  if (command.includes('now=$(date +%s)') && command.includes("'issue.lock'")) return ok(probeOutput())
+  if (command.includes('issue.last.json')) return ok(`<<<RKP-SEP>>>\n${files.json}<<<RKP-SEP>>>\n${files.err}`)
+  if (command.includes('command -v setsid') && command.includes('/issue.sh')) {
     launch()
     return ok('setsid\n')
   }

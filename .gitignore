@@ -3,3 +3,4 @@
 *.log
 /webui/node_modules
 /webui/dist
+/webui/dist-receiver

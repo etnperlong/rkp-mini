@@ -8,20 +8,21 @@ export const MODULE_ID = 'rkp_mini'
 const DEFAULT_MODULE_DIR = '/data/adb/modules/rkp_mini'
 
 /** Only plain absolute paths are ever interpolated into shell commands. */
-const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/
+export const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/
 
-function resolveModuleDir(): string {
-  if (!hasKsu()) return DEFAULT_MODULE_DIR
+/** This module's directory from the manager, else `fallback` (older managers / dev). */
+export function resolveModuleDir(fallback: string): string {
+  if (!hasKsu()) return fallback
   try {
     const dir: unknown = JSON.parse(moduleInfo()).moduleDir
     if (typeof dir === 'string' && SAFE_PATH.test(dir)) return dir
   } catch {
     // Older managers: fall through to the fixed install path.
   }
-  return DEFAULT_MODULE_DIR
+  return fallback
 }
 
-export const MODULE_DIR = resolveModuleDir()
+export const MODULE_DIR = resolveModuleDir(DEFAULT_MODULE_DIR)
 export const BIN = `${MODULE_DIR}/bin/rkp-mini`
 export const DATA = '/data/misc/keystore/rkp-mini'
 export const TMP = `${DATA}/tmp`

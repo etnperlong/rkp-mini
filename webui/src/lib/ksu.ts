@@ -23,8 +23,10 @@ export function bridgeAvailable(): boolean {
 
 async function dispatch(command: string): Promise<ExecResult> {
   if (import.meta.env.DEV && MOCK) {
-    // Dynamic so the dev-only mock and its fixtures never reach the production bundle.
-    const { mockExec } = await import('../dev/mockKsu')
+    // Dynamic so the dev-only mocks and their fixtures never reach a production
+    // bundle; each build mode has its own scenario set.
+    const { mockExec } =
+      import.meta.env.MODE === 'receiver' ? await import('../dev/mockReceiver') : await import('../dev/mockKsu')
     return mockExec(command)
   }
   return ksuExec(command)

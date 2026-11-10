@@ -5,3 +5,6 @@ declare module '*.vue' {
   const component: DefineComponent<{}, {}, any>
   export default component
 }
+
+// Build-mode entry (vite.config.ts alias): sender or receiver main.
+declare module '@app'

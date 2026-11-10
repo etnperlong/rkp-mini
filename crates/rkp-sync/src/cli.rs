@@ -7,8 +7,9 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
-
-use crate::config::Role;
+use rkp_mini_runtime::cli::{sha_arg, Flags};
+use rkp_mini_runtime::config::Role;
+use rkp_mini_runtime::context::Global;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -66,15 +67,6 @@ to the exact version that was reviewed; a different staged version is refused.
 
   rkp-sync --version | --help
 ";
-
-#[derive(Debug, Default, Clone)]
-pub struct Global {
-    pub config: Option<PathBuf>,
-    pub role: Option<Role>,
-    pub json: bool,
-    pub allow_insecure_http: bool,
-    pub allow_private: bool,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretKind {
@@ -369,65 +361,6 @@ pub fn parse(args: &[String]) -> Result<(Global, Command)> {
     };
     flags.finish()?;
     Ok((g, command))
-}
-
-/// A confirmation digest: lowercase hex, 16..=64 chars.
-fn sha_arg(v: String) -> Result<String> {
-    let v = v.to_ascii_lowercase();
-    if !(16..=64).contains(&v.len()) || !v.bytes().all(|b| b.is_ascii_hexdigit()) {
-        bail!("confirmation values are sha256 hex (full or a prefix of at least 16 chars)");
-    }
-    Ok(v)
-}
-
-/// Remaining command arguments, consumed by name.
-struct Flags {
-    args: Vec<String>,
-}
-
-impl Flags {
-    fn new(args: Vec<String>) -> Self {
-        Flags { args }
-    }
-
-    fn flag(&mut self, name: &str) -> bool {
-        match self.args.iter().position(|a| a == name) {
-            Some(i) => {
-                self.args.remove(i);
-                true
-            }
-            None => false,
-        }
-    }
-
-    fn value(&mut self, name: &str) -> Result<Option<String>> {
-        let Some(i) = self.args.iter().position(|a| a == name) else {
-            return Ok(None);
-        };
-        if i + 1 >= self.args.len() || self.args[i + 1].starts_with("--") {
-            bail!("{name} needs a value");
-        }
-        let v = self.args.remove(i + 1);
-        self.args.remove(i);
-        Ok(Some(v))
-    }
-
-    fn positional(&mut self) -> Option<String> {
-        let i = self.args.iter().position(|a| !a.starts_with("--"))?;
-        Some(self.args.remove(i))
-    }
-
-    /// Next remaining argument, even if it looks like a flag (config values).
-    fn positional_any(&mut self) -> Option<String> {
-        (!self.args.is_empty()).then(|| self.args.remove(0))
-    }
-
-    fn finish(self) -> Result<()> {
-        if let Some(a) = self.args.first() {
-            bail!("unexpected argument `{a}`");
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]

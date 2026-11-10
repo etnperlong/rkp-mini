@@ -17,8 +17,8 @@ use age::{scrypt, DecryptError, Decryptor, Encryptor};
 use anyhow::Result;
 use zeroize::Zeroizing;
 
-use crate::error::{err, Stage};
-use crate::limits;
+use rkp_mini_core::error::{err, Stage};
+use rkp_mini_core::limits;
 
 /// scrypt work factor for new envelopes.
 pub const ENCRYPT_LOG_N: u8 = 18;
@@ -131,7 +131,7 @@ pub(crate) fn encrypt_fast(plaintext: &[u8], passphrase: &SecretString) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::to_sync_error;
+    use rkp_mini_core::error::to_sync_error;
 
     fn pw(s: &str) -> SecretString {
         SecretString::from(s.to_string())

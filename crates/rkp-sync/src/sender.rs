@@ -4,17 +4,21 @@ use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use rkp_sync_core::error::{err, to_sync_error, Stage};
-use rkp_sync_core::locator::{encode_import, ImportSpec, Location};
-use rkp_sync_core::protocol::{self, PushOutcome, PushRequest};
-use rkp_sync_core::secrecy::{ExposeSecret, SecretString};
-use rkp_sync_core::{fsutil, limits, secret, state};
+use rkp_mini_core::error::{err, to_sync_error, Stage};
+use rkp_mini_core::locator::{encode_import, ImportSpec, Location};
+use rkp_mini_core::{fsutil, limits, state};
+use rkp_mini_sync_core::protocol::{self, PushOutcome, PushRequest};
+use rkp_mini_sync_core::secrecy::{ExposeSecret, SecretString};
+use rkp_mini_sync_core::secret;
 use serde_json::json;
 
-use crate::app::{self, Ctx, Output};
+use crate::app;
 use crate::common;
-use crate::config::{self, Config, PasswordMode, Role, Value};
 use crate::remote::Remote;
+use rkp_mini_runtime::config::{self, Config, PasswordMode, Role, Value};
+use rkp_mini_runtime::context::Ctx;
+use rkp_mini_runtime::output::Output;
+use rkp_mini_runtime::{lock, util};
 
 /// Retries after a `remote_conflict` (re-read, new seq, try again).
 const CONFLICT_RETRIES: usize = 2;
@@ -85,13 +89,13 @@ fn push_inner(ctx: &Ctx, cfg: &Config, args: &PushArgs) -> Result<(PushOutcome, 
     let local = read_local(cfg)?;
     let creds = app::credentials(cfg)?;
     let passphrase = app::passphrase(ctx, cfg, args.auto)?;
-    let http = ctx.http(cfg)?;
+    let http = app::http(ctx, cfg)?;
     let remote = Remote::open(&http, &loc, creds)?;
     let t = remote.transport();
     let mut attempt = 0;
     let out = loop {
         let state = app::load_sync_state(cfg)?;
-        let now = app::now();
+        let now = util::now();
         let req = PushRequest {
             stream_id: &stream_id,
             keybox_xml: &local.xml,
@@ -144,7 +148,7 @@ fn push_output(cfg: &Config, out: &PushOutcome, url: &str, allow_expiring: bool)
         "url": url,
         "remote_seq": out.remote_seq,
         "base": out.base.as_str(),
-        "uploaded_at": (!out.noop).then(app::now),
+        "uploaded_at": (!out.noop).then(util::now),
     });
     // Log line: provider/seq/hash only.
     eprintln!(
@@ -169,7 +173,7 @@ fn push_output(cfg: &Config, out: &PushOutcome, url: &str, allow_expiring: bool)
             "uploaded seq {} to {url}\nkeybox {} expires {}",
             out.seq,
             out.facts.device_id,
-            app::date(out.facts.leaf_not_after)
+            util::date(out.facts.leaf_not_after)
         )
     };
     Output::ok(data, text)
@@ -184,7 +188,7 @@ pub fn push(ctx: &Ctx, force: bool, allow_expiring: bool, auto: bool) -> Result<
             "--allow-expiring is for manual emergency use only",
         ));
     }
-    let _lock = app::lock(&cfg.lock_path())?;
+    let _lock = lock::lock(&cfg.lock_path())?;
     let args = PushArgs {
         force,
         allow_expiring,
@@ -194,7 +198,7 @@ pub fn push(ctx: &Ctx, force: bool, allow_expiring: bool, auto: bool) -> Result<
     match push_inner(ctx, &cfg, &args) {
         Ok((out, url)) => Ok(push_output(&cfg, &out, &url, allow_expiring)),
         Err(e) => {
-            app::record_error(&cfg, &e, app::now());
+            app::record_error(&cfg, &e, util::now());
             Err(e)
         }
     }
@@ -235,7 +239,7 @@ pub fn share(ctx: &Ctx, label: Option<String>) -> Result<Output> {
     // Re-validate through the receiver's parser so share never emits a link
     // the receiver would reject.
     let (uri, json_text) = encode_import(&spec);
-    rkp_sync_core::locator::parse_import(&uri, ctx.url_policy())?;
+    rkp_mini_core::locator::parse_import(&uri, ctx.url_policy())?;
     let code = qrcode::QrCode::new(uri.as_bytes())
         .map_err(|e| err(Stage::Generic, "qr", format!("QR encode: {e}")))?;
     let qr = code
@@ -273,7 +277,7 @@ pub fn rotate_password(ctx: &Ctx, from_file: Option<PathBuf>, hex: bool) -> Resu
     // Consume an inbox file first so it never outlives this command.
     let inboxed = from_file
         .as_deref()
-        .map(|f| rkp_sync_core::secret::take_inbox_file(f, hex, "new age passphrase"))
+        .map(|f| rkp_mini_sync_core::secret::take_inbox_file(f, hex, "new age passphrase"))
         .transpose()?;
     let cfg = ctx.load(Some(Role::Sender))?;
     if !ctx.interactive(false) && cfg.sync.password_mode == PasswordMode::Prompt {
@@ -283,7 +287,7 @@ pub fn rotate_password(ctx: &Ctx, from_file: Option<PathBuf>, hex: bool) -> Resu
             "rotate-password with password_mode = \"prompt\" needs a TTY",
         ));
     }
-    let _lock = app::lock(&cfg.lock_path())?;
+    let _lock = lock::lock(&cfg.lock_path())?;
     let pending: PathBuf = {
         let mut p = cfg.password_file().into_os_string();
         p.push(".new");
@@ -360,7 +364,7 @@ pub fn rotate_password(ctx: &Ctx, from_file: Option<PathBuf>, hex: bool) -> Resu
             if file_mode {
                 let _ = std::fs::remove_file(&pending);
             }
-            app::record_error(&cfg, &e, app::now());
+            app::record_error(&cfg, &e, util::now());
             Err(e)
         }
     }

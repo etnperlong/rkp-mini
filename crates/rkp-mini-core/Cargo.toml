@@ -1,0 +1,33 @@
+[package]
+name = "rkp-mini-core"
+version = "0.1.0"
+edition = "2021"
+description = "rkp-mini core: errors, atomic files, strict keybox validation, URL scheme, state files"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+der = "0.7"
+hex = "0.4"
+p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
+rand_core = { version = "0.6", features = ["getrandom"], optional = true }
+rcgen = { version = "0.13", optional = true }
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+time = { version = "0.3", optional = true }
+url = "2"
+x509-cert = "0.2"
+zeroize = "1"
+
+[features]
+# Real P-256 chains / keybox XML for tests; off by default.
+test-support = ["dep:rand_core", "dep:rcgen", "dep:time"]
+
+[dev-dependencies]
+rand_core = { version = "0.6", features = ["getrandom"] }
+rcgen = "0.13"
+tempfile = "3"
+time = "0.3"

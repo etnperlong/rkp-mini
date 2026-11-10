@@ -8,10 +8,10 @@ use std::cell::RefCell;
 
 use anyhow::Result;
 use base64::Engine;
-use rkp_sync_core::error::{err, Stage};
-use rkp_sync_core::locator::{self, Location, GIST_RAW_HOST};
-use rkp_sync_core::secrecy::{ExposeSecret, SecretString};
-use rkp_sync_core::transport::{Fetch, Transport};
+use rkp_mini_core::error::{err, Stage};
+use rkp_mini_core::locator::{self, Location, GIST_RAW_HOST};
+use rkp_mini_sync_core::secrecy::{ExposeSecret, SecretString};
+use rkp_mini_sync_core::transport::{Fetch, Transport};
 use serde_json::Value;
 use url::Url;
 use zeroize::Zeroizing;
@@ -620,7 +620,7 @@ impl<'a> Remote<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rkp_sync_core::locator::UrlPolicy;
+    use rkp_mini_core::locator::UrlPolicy;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
@@ -664,7 +664,7 @@ mod tests {
                 r.read_exact(&mut body).unwrap();
                 l2.lock().unwrap().push(format!("{method} {path}"));
                 let mut files = f2.lock().unwrap();
-                let etag = |b: &[u8]| format!("\"{}\"", &rkp_sync_core::sha256_hex(b)[..8]);
+                let etag = |b: &[u8]| format!("\"{}\"", &rkp_mini_core::sha256_hex(b)[..8]);
                 let (status, extra, out): (u16, String, Vec<u8>) = match method.as_str() {
                     "GET" | "HEAD" => match files.get(&path) {
                         Some(b) if headers.get("if-none-match") == Some(&etag(b)) => {
@@ -753,7 +753,7 @@ mod tests {
         // Stale expectation → conflict, target untouched, temp cleaned.
         let e = w.put(b"v2", Some("\"stale\"")).unwrap_err();
         assert_eq!(
-            rkp_sync_core::error::to_sync_error(&e).code,
+            rkp_mini_core::error::to_sync_error(&e).code,
             "remote_conflict"
         );
         assert_eq!(files.lock().unwrap()["/rkp/x.age"], b"v1");

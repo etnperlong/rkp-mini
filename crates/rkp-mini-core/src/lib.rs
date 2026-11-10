@@ -1,32 +1,25 @@
-//! `rkp-sync-core`: everything the sync protocol needs that is independent of
-//! the network stack and of Android.
+//! `rkp-mini-core`: the local, network-free foundation shared by the sync CLI
+//! and the deployer.
 //!
-//! - [`envelope`]: age v1 passphrase encryption with ASCII armor.
-//! - [`manifest`]: canonical CBOR plaintext (manifest + keybox bytes).
+//! - [`error`]: stage/code error model and exit codes.
+//! - [`fsutil`]: atomic, permission-preserving file writes.
 //! - [`keybox`]: strict keybox XML validation (no DTD, chain/key/DeviceID checks).
 //! - [`locator`]: `rkpsync://v1/import` URL scheme parsing and URL policy.
 //! - [`state`]: `sync-state.json` / `deploy-state.json` / staging metadata.
-//! - [`transport`]: provider-neutral fetch/put trait plus a local directory transport.
-//! - [`protocol`]: push base selection and receiver replay/rollback rules.
-//! - [`secret`]: secret-file loading (permission checks, newline handling).
-//! - [`fsutil`]: atomic, permission-preserving file writes.
+//! - [`confirmation`]: sha256 approval matching shared by fetch and apply.
 //!
-//! The crate is synchronous and performs no network I/O itself.
+//! This crate performs no network I/O and never depends on `age`, an HTTP
+//! client or vendor ABI code: the deployer links it without any of those.
 
-pub mod envelope;
+pub mod confirmation;
 pub mod error;
 pub mod fsutil;
 pub mod keybox;
 pub mod locator;
-pub mod manifest;
-pub mod protocol;
-pub mod secret;
 pub mod state;
-pub mod transport;
 
-#[cfg(test)]
-pub(crate) mod test_support;
-pub use age::secrecy;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 
 use sha2::{Digest, Sha256};
 

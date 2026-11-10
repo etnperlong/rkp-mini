@@ -6,12 +6,14 @@
 use age::secrecy::SecretString;
 use anyhow::Result;
 
-use crate::error::{err, Stage};
-use crate::keybox::{self, KeyboxFacts, Validity};
+use rkp_mini_core::error::{err, Stage};
+use rkp_mini_core::keybox::{self, KeyboxFacts, Validity};
+use rkp_mini_core::state::SyncState;
+use rkp_mini_core::{sha256, sha256_hex, DAY, MIN_PLAUSIBLE_NOW};
+
+use crate::envelope;
 use crate::manifest::{KeyboxSummary, Manifest};
-use crate::state::SyncState;
 use crate::transport::{Fetch, Transport};
-use crate::{envelope, sha256, sha256_hex, DAY, MIN_PLAUSIBLE_NOW};
 
 /// Maximum accepted `issued_at` lead over the local clock (seconds).
 pub const ISSUED_AT_SKEW: i64 = 600;
@@ -152,7 +154,7 @@ fn read_remote_head(
         Fetch::Body { bytes, token } => (bytes, token),
     };
     let plaintext = envelope::decrypt(&bytes, passphrase).map_err(|e| {
-        let se = crate::error::to_sync_error(&e);
+        let se = rkp_mini_core::error::to_sync_error(&e);
         err(
             se.stage,
             &se.code,
@@ -475,9 +477,9 @@ pub fn record_received(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::to_sync_error;
-    use crate::test_support::TestKeybox;
     use crate::transport::DirTransport;
+    use rkp_mini_core::error::to_sync_error;
+    use rkp_mini_core::test_support::TestKeybox;
 
     const STREAM: &str = "st_01JTESTSTREAM";
 

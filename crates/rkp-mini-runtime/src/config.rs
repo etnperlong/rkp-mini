@@ -11,9 +11,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use rkp_sync_core::error::{err, Stage};
-use rkp_sync_core::locator::{self, Location, UrlPolicy};
-use rkp_sync_core::{valid_stream_id, REMOTE_FILENAME};
+use rkp_mini_core::error::{err, Stage};
+use rkp_mini_core::locator::{self, Location, UrlPolicy};
+use rkp_mini_core::{valid_stream_id, REMOTE_FILENAME};
 use serde::Deserialize;
 
 pub const SENDER_CONFIG: &str = "/data/misc/keystore/rkp-mini/config.toml";
@@ -455,8 +455,12 @@ impl Config {
                 Stage::Config,
                 "stream_missing",
                 match self.role {
-                    Role::Sender => "[sync].stream_id is empty; run `rkp-sync init --role sender`",
-                    Role::Receiver => "no stream imported; run `rkp-sync import '<rkpsync://…>'`",
+                    Role::Sender => {
+                        "[sync].stream_id is empty; run `rkp-sync init --role sender`"
+                    }
+                    Role::Receiver => {
+                        "no stream imported; run `rkp-sync import '<rkpsync://…>'`"
+                    }
                 },
             ));
         }
@@ -564,7 +568,7 @@ pub fn edit_table(path: &Path, table: &str, values: &[(&str, Value)]) -> Result<
 
 pub fn write_config(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(dir) = path.parent() {
-        rkp_sync_core::fsutil::ensure_private_dir(dir).map_err(|e| {
+        rkp_mini_core::fsutil::ensure_private_dir(dir).map_err(|e| {
             err(
                 Stage::State,
                 "config_write",
@@ -572,7 +576,7 @@ pub fn write_config(path: &Path, bytes: &[u8]) -> Result<()> {
             )
         })?;
     }
-    rkp_sync_core::fsutil::atomic_write(path, bytes, 0o600, None).map_err(|e| {
+    rkp_mini_core::fsutil::atomic_write(path, bytes, 0o600, None).map_err(|e| {
         err(
             Stage::State,
             "config_write",
@@ -799,7 +803,7 @@ mod tests {
         assert_eq!(c.min_validity_days(), 7);
         assert_eq!(
             load(&r, Some(Role::Sender), UrlPolicy::default())
-                .map_err(|e| rkp_sync_core::error::to_sync_error(&e).code)
+                .map_err(|e| rkp_mini_core::error::to_sync_error(&e).code)
                 .unwrap_err(),
             "wrong_role"
         );
@@ -818,7 +822,7 @@ mod tests {
         let c = load(&p, None, UrlPolicy::default()).unwrap();
         let e = c.require_enabled().unwrap_err();
         assert_eq!(
-            rkp_sync_core::error::to_sync_error(&e).code,
+            rkp_mini_core::error::to_sync_error(&e).code,
             "risk_not_acknowledged"
         );
         // Unknown keys (e.g. an inline password) are rejected, not ignored.

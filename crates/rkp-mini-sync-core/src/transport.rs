@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::error::{err, Stage};
-use crate::{fsutil, limits, sha256_hex};
+use rkp_mini_core::error::{err, Stage};
+use rkp_mini_core::{fsutil, limits, sha256_hex};
 
 /// Result of reading the remote envelope.
 #[derive(Debug, Clone, PartialEq, Eq)]

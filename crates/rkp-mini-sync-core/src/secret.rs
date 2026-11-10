@@ -15,8 +15,8 @@ use age::secrecy::SecretString;
 use anyhow::Result;
 use zeroize::Zeroizing;
 
-use crate::error::{err, Stage};
-use crate::fsutil;
+use rkp_mini_core::error::{err, Stage};
+use rkp_mini_core::fsutil;
 
 /// Upper bound for any secret file.
 pub const MAX_SECRET_FILE: usize = 4096;
@@ -210,8 +210,8 @@ pub fn remove_secret_file(path: &Path) -> std::io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::to_sync_error;
     use age::secrecy::ExposeSecret;
+    use rkp_mini_core::error::to_sync_error;
     use std::os::unix::fs::PermissionsExt;
 
     #[test]

@@ -8,8 +8,8 @@
 use anyhow::Result;
 use ciborium::value::{Integer, Value};
 
-use crate::error::{err, Stage};
-use crate::{limits, valid_stream_id, PROTOCOL_VERSION};
+use rkp_mini_core::error::{err, Stage};
+use rkp_mini_core::{limits, valid_stream_id, PROTOCOL_VERSION};
 
 /// Public facts about the keybox, duplicated in the manifest for quick checks.
 /// The receiver recomputes every field from `keybox_xml` and requires equality.
@@ -247,7 +247,7 @@ fn digest(v: Value, name: &str) -> Result<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::to_sync_error;
+    use rkp_mini_core::error::to_sync_error;
 
     fn sample() -> Manifest {
         Manifest {

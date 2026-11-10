@@ -1,21 +1,26 @@
 //! Receiver commands: import, fetch, deploy, run (design §11).
 
 use anyhow::Result;
-use rkp_sync_core::error::{err, to_sync_error, Stage, SyncError};
-use rkp_sync_core::locator::{self, ImportSpec, Location};
-use rkp_sync_core::protocol::{self, FetchOutcome, FetchRequest, Received};
-use rkp_sync_core::secrecy::ExposeSecret;
-use rkp_sync_core::state::{self, Staged};
-use rkp_sync_core::transport::Fetch;
-use rkp_sync_core::{secret, PROTOCOL_VERSION};
+use rkp_mini_core::error::{err, to_sync_error, Stage, SyncError};
+use rkp_mini_core::locator::{self, ImportSpec, Location};
+use rkp_mini_core::state::{self, Staged};
+use rkp_mini_core::PROTOCOL_VERSION;
+use rkp_mini_sync_core::protocol::{self, FetchOutcome, FetchRequest, Received};
+use rkp_mini_sync_core::secrecy::ExposeSecret;
+use rkp_mini_sync_core::secret;
+use rkp_mini_sync_core::transport::Fetch;
 use serde_json::{json, Value as Json};
 
-use crate::app::{self, Ctx, Output};
+use crate::app;
 use crate::common;
-use crate::config::{self, Config, PasswordMode, Role, Value, RISK_VERSION};
 use crate::deploy::{self, ApplyOptions, Gate};
 use crate::remote::Remote;
 use crate::tty;
+use rkp_mini_runtime::config::{self, Config, PasswordMode, Role, Value, RISK_VERSION};
+use rkp_mini_runtime::context::Ctx;
+use rkp_mini_runtime::output::Output;
+use rkp_mini_runtime::targets;
+use rkp_mini_runtime::{lock, util};
 
 /// `full` (lowercase hex) matches a confirmation value (full or >= 16-char prefix).
 fn sha_confirms(full: &str, given: &str) -> bool {
@@ -125,7 +130,7 @@ pub fn import(ctx: &Ctx, input: &str, yes: bool, test: bool, check: bool) -> Res
             return Err(err(Stage::Config, "cancelled", "import cancelled"));
         }
     }
-    let _lock = app::lock(&cfg.lock_path())?;
+    let _lock = lock::lock(&cfg.lock_path())?;
     let existing = app::load_sync_state(&cfg)?;
     if !cfg.sync.stream_id.is_empty()
         && cfg.sync.stream_id != spec.stream_id
@@ -161,7 +166,7 @@ pub fn import(ctx: &Ctx, input: &str, yes: bool, test: bool, check: bool) -> Res
         } => (
             String::new(),
             String::new(),
-            rkp_sync_core::REMOTE_FILENAME.to_string(),
+            rkp_mini_core::REMOTE_FILENAME.to_string(),
             endpoint.clone(),
             path.clone(),
             user.clone().unwrap_or_default(),
@@ -170,7 +175,7 @@ pub fn import(ctx: &Ctx, input: &str, yes: bool, test: bool, check: bool) -> Res
         Location::Url { url } => (
             String::new(),
             String::new(),
-            rkp_sync_core::REMOTE_FILENAME.to_string(),
+            rkp_mini_core::REMOTE_FILENAME.to_string(),
             String::new(),
             String::new(),
             String::new(),
@@ -247,7 +252,7 @@ pub fn import(ctx: &Ctx, input: &str, yes: bool, test: bool, check: bool) -> Res
     let mut test_result = Json::Null;
     if test {
         let probe = || -> Result<Fetch> {
-            let http = ctx.http(&cfg)?;
+            let http = app::http(ctx, &cfg)?;
             let remote = Remote::open(&http, &cfg.location()?, app::credentials(&cfg)?)?;
             remote.transport().fetch(None)
         };
@@ -303,9 +308,9 @@ fn received_summary(r: &Received) -> String {
         "seq:       {}{}\nissued_at: {}\ndevice_id: {}\nexpires:   {} (leaf not_after)\nkeybox:    {}\n",
         r.manifest.seq,
         if r.gap { " (skipped versions)" } else { "" },
-        app::date(r.manifest.issued_at),
+        util::date(r.manifest.issued_at),
         r.facts.device_id,
-        app::date(r.facts.leaf_not_after),
+        util::date(r.facts.leaf_not_after),
         &hex::encode(r.facts.sha256)[..16],
     )
 }
@@ -328,11 +333,11 @@ fn fetch_inner(
     let stream_id = cfg.require_stream()?.to_string();
     let loc = cfg.location()?;
     let passphrase = app::passphrase(ctx, cfg, auto)?;
-    let http = ctx.http(cfg)?;
+    let http = app::http(ctx, cfg)?;
     let remote = Remote::open(&http, &loc, app::credentials(cfg)?)?;
     let t = remote.transport();
     let state = app::load_sync_state(cfg)?;
-    let now = app::now();
+    let now = util::now();
     let req = FetchRequest {
         stream_id: &stream_id,
         passphrase: &passphrase,
@@ -360,7 +365,7 @@ fn fetch_inner(
         // TOFU (§7.4 step 9): explicit confirmation of exactly what is trusted.
         let summary = received_summary(&r);
         let plaintext_hex = hex::encode(r.plaintext_sha256);
-        let targets: Vec<String> = deploy::resolve_targets(cfg)
+        let targets: Vec<String> = targets::resolve_targets(cfg)
             .map(|ts| ts.iter().map(|t| t.path.display().to_string()).collect())
             .unwrap_or_default();
         let facts = json!({
@@ -467,7 +472,7 @@ pub fn fetch(
     auto: bool,
 ) -> Result<Output> {
     let cfg = ctx.load(Some(Role::Receiver))?;
-    let _lock = app::lock(&cfg.lock_path())?;
+    let _lock = lock::lock(&cfg.lock_path())?;
     match fetch_inner(ctx, &cfg, accept_first.as_deref(), no_cache, auto) {
         Ok(r) => Ok(Output {
             data: r.data,
@@ -475,7 +480,7 @@ pub fn fetch(
             failure: r.failure,
         }),
         Err(e) => {
-            app::record_error(&cfg, &e, app::now());
+            app::record_error(&cfg, &e, util::now());
             Err(e)
         }
     }
@@ -512,7 +517,7 @@ fn plan_json(plan: &deploy::Plan) -> Json {
 pub fn deploy_plan(ctx: &Ctx) -> Result<Output> {
     let cfg = ctx.load(Some(Role::Receiver))?;
     cfg.require_stream()?;
-    let plan = deploy::plan(&cfg, app::now(), false)?;
+    let plan = deploy::plan(&cfg, util::now(), false)?;
     let text = format!(
         "staged seq {} keybox {} → gate {}",
         plan.staged.seq,
@@ -531,7 +536,7 @@ fn apply_inner(
 ) -> Result<Output> {
     cfg.require_enabled()?;
     cfg.require_stream()?;
-    let now = app::now();
+    let now = util::now();
     let plan = deploy::plan(cfg, now, allow_identity_change.is_some())?;
     // Approvals name the reviewed keybox; a different staged one is refused.
     for given in [allow_identity_change, confirm_first].into_iter().flatten() {
@@ -549,9 +554,9 @@ fn apply_inner(
         eprintln!(
             "identity change ({reason}): deployed keybox {} (expires {}) → staged {} (expires {})",
             &old[..16.min(old.len())],
-            plan.old_not_after.map_or("-".into(), app::date),
+            plan.old_not_after.map_or("-".into(), util::date),
             &plan.staged.keybox_sha256[..16],
-            app::date(plan.staged.leaf_not_after)
+            util::date(plan.staged.leaf_not_after)
         );
     }
     for w in &plan.warnings {
@@ -564,7 +569,7 @@ fn apply_inner(
             &plan.staged.keybox_sha256[..16],
             plan.staged.seq,
             plan.staged.device_id,
-            app::date(plan.staged.leaf_not_after)
+            util::date(plan.staged.leaf_not_after)
         );
         for t in &plan.targets {
             eprintln!("  {} → {}", t.id, t.path.display());
@@ -643,7 +648,7 @@ pub fn deploy_apply(
     auto: bool,
 ) -> Result<Output> {
     let cfg = ctx.load(Some(Role::Receiver))?;
-    let _lock = app::lock(&cfg.lock_path())?;
+    let _lock = lock::lock(&cfg.lock_path())?;
     apply_inner(
         ctx,
         &cfg,
@@ -686,7 +691,7 @@ pub fn add_target(
     )?;
     // Validate the result; roll back on error.
     let reloaded = config::load(&cfg.path, Some(Role::Receiver), ctx.url_policy())?;
-    if let Err(e) = deploy::resolve_targets(&reloaded) {
+    if let Err(e) = targets::resolve_targets(&reloaded) {
         config::remove_target(&cfg.path, id)?;
         return Err(e);
     }
@@ -736,7 +741,7 @@ pub fn deploy_remove(ctx: &Ctx, targets: Vec<String>, yes: bool) -> Result<Outpu
             return Err(err(Stage::Config, "cancelled", "removal cancelled"));
         }
     }
-    let _lock = app::lock(&cfg.lock_path())?;
+    let _lock = lock::lock(&cfg.lock_path())?;
     let reports = deploy::remove(&cfg, &targets)?;
     let failed = reports.iter().filter(|r| !r.ok).count();
     let mut text = String::new();
@@ -779,11 +784,11 @@ pub fn run(ctx: &Ctx, auto: bool) -> Result<Output> {
             "unattended runs start after the first manual `rkp-sync fetch`",
         ));
     }
-    let _lock = app::lock(&cfg.lock_path())?;
+    let _lock = lock::lock(&cfg.lock_path())?;
     let (fetch_data, fetch_err, fetch_text) = match fetch_inner(ctx, &cfg, None, false, auto) {
         Ok(r) => (r.data, r.failure, r.text),
         Err(e) => {
-            app::record_error(&cfg, &e, app::now());
+            app::record_error(&cfg, &e, util::now());
             let se = to_sync_error(&e);
             let text = format!("fetch failed: {se}");
             (Json::Null, Some(se), text)

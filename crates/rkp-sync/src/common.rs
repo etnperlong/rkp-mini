@@ -4,16 +4,20 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use rkp_sync_core::error::{err, Stage};
-use rkp_sync_core::secrecy::{ExposeSecret, SecretString};
-use rkp_sync_core::secret;
-use rkp_sync_core::state::{self, DeployState};
+use rkp_mini_core::error::{err, Stage};
+use rkp_mini_core::state::{self, DeployState};
+use rkp_mini_sync_core::secrecy::{ExposeSecret, SecretString};
+use rkp_mini_sync_core::secret;
 use serde_json::json;
 
-use crate::app::{self, Ctx, Output};
+use crate::app;
 use crate::cli::SecretKind;
-use crate::config::{self, Config, PasswordMode, Role, Value, RISK_VERSION};
-use crate::{deploy, tty};
+use crate::tty;
+use rkp_mini_runtime::config::{self, Config, PasswordMode, Role, Value, RISK_VERSION};
+use rkp_mini_runtime::context::Ctx;
+use rkp_mini_runtime::output::Output;
+use rkp_mini_runtime::targets;
+use rkp_mini_runtime::{lock, util};
 
 /// One risk statement item (§13.2), English and Chinese.
 pub struct RiskItem {
@@ -136,7 +140,7 @@ pub fn init(ctx: &Ctx, provider: Option<String>, stream_id: Option<String>) -> R
                 ));
             }
             let stream = match stream_id {
-                Some(s) if rkp_sync_core::valid_stream_id(&s) => s,
+                Some(s) if rkp_mini_core::valid_stream_id(&s) => s,
                 Some(_) => {
                     return Err(err(
                         Stage::Config,
@@ -165,7 +169,7 @@ pub fn init(ctx: &Ctx, provider: Option<String>, stream_id: Option<String>) -> R
     };
     config::write_config(&path, text.as_bytes())?;
     let cfg = config::load(&path, Some(role), ctx.url_policy())?;
-    rkp_sync_core::fsutil::ensure_private_dir(&cfg.sync_dir()).map_err(|e| {
+    rkp_mini_core::fsutil::ensure_private_dir(&cfg.sync_dir()).map_err(|e| {
         err(
             Stage::State,
             "mkdir",
@@ -231,7 +235,7 @@ pub fn accept_risk(ctx: &Ctx, cfg: &Config, accept_version: Option<u32>) -> Resu
         "sync",
         &[
             ("risk_ack_version", Value::Int(i64::from(RISK_VERSION))),
-            ("risk_ack_at", Value::Int(app::now())),
+            ("risk_ack_at", Value::Int(util::now())),
         ],
     )?;
     Ok(true)
@@ -287,7 +291,7 @@ pub fn forget(ctx: &Ctx, yes: bool, staging: bool) -> Result<Output> {
             "pass --yes to confirm",
         ));
     }
-    let _lock = app::lock(&cfg.lock_path())?;
+    let _lock = lock::lock(&cfg.lock_path())?;
     config::edit_table(&cfg.path, "sync", &[("enabled", Value::Bool(false))])?;
     let mut removed = Vec::new();
     for p in [
@@ -481,7 +485,7 @@ pub fn config_set(ctx: &Ctx, key: &str, value: &str) -> Result<Output> {
     };
     // Field-level checks that `load` does not perform for incomplete locations.
     if !value.is_empty() {
-        use rkp_sync_core::locator;
+        use rkp_mini_core::locator;
         match key {
             "webdav_endpoint" => {
                 locator::check_url(value, ctx.url_policy(), "webdav_endpoint")?;
@@ -587,7 +591,7 @@ pub fn check_auto(ctx: &Ctx) -> Result<Output> {
 
 pub fn status(ctx: &Ctx) -> Result<Output> {
     let cfg = ctx.load(None)?;
-    let now = app::now();
+    let now = util::now();
     let sync_state = app::load_sync_state(&cfg)?;
     let loc = cfg.location().ok().map(|l| l.display());
     let mut secrets = serde_json::Map::new();
@@ -613,7 +617,7 @@ pub fn status(ctx: &Ctx) -> Result<Output> {
         "risk_ack_version": cfg.sync.risk_ack_version,
         "risk_ack_current": cfg.sync.risk_ack_version >= RISK_VERSION,
         "risk_version": RISK_VERSION,
-        "loop_running": app::loop_running(&cfg),
+        "loop_running": util::loop_running(&cfg),
         "provider": cfg.sync.provider,
         "location": loc,
         "stream_id": cfg.sync.stream_id,
@@ -664,10 +668,10 @@ pub fn status(ctx: &Ctx) -> Result<Output> {
                     .as_deref()
                     .map_or("-", |h| &h[..12.min(h.len())]),
                 s.device_id.as_deref().unwrap_or("-"),
-                s.keybox_not_after.map_or("-".into(), app::date),
+                s.keybox_not_after.map_or("-".into(), util::date),
             ));
             if let Some(e) = &s.last_error {
-                text.push_str(&format!("last error: {} ({})\n", e.code, app::date(e.at)));
+                text.push_str(&format!("last error: {} ({})\n", e.code, util::date(e.at)));
             }
         }
         None => text.push_str("no sync state yet\n"),
@@ -684,14 +688,14 @@ pub fn status(ctx: &Ctx) -> Result<Output> {
             data["auto_issue_days"] = json!(cfg.auto_issue_days);
         }
         Role::Receiver => {
-            let deploy_state: Option<DeployState> = deploy::status(&cfg)?;
+            let deploy_state: Option<DeployState> = state::load(&cfg.deploy_state_path())?;
             let staged = state::load::<state::Staged>(&cfg.staging_dir().join("latest.json"))?;
-            let targets = match deploy::resolve_targets(&cfg) {
+            let targets = match targets::resolve_targets(&cfg) {
                 Ok(t) => json!(t
                     .iter()
                     .map(|t| json!({"id": t.id, "path": t.path.display().to_string()}))
                     .collect::<Vec<_>>()),
-                Err(e) => json!({ "error": rkp_sync_core::error::to_sync_error(&e).message }),
+                Err(e) => json!({ "error": rkp_mini_core::error::to_sync_error(&e).message }),
             };
             if let Some(st) = &staged {
                 text.push_str(&format!(
@@ -744,18 +748,18 @@ pub fn status(ctx: &Ctx) -> Result<Output> {
 
 fn sender_keybox_status(cfg: &Config, now: i64) -> serde_json::Value {
     let path = cfg.keybox_path();
-    let bytes = match rkp_sync_core::fsutil::read_limited(
+    let bytes = match rkp_mini_core::fsutil::read_limited(
         &path,
-        rkp_sync_core::limits::MAX_KEYBOX_XML,
+        rkp_mini_core::limits::MAX_KEYBOX_XML,
     ) {
         Ok(b) => b,
         Err(e) => {
             return json!({ "path": path.display().to_string(), "valid": false, "summary": format!("unreadable ({e})") })
         }
     };
-    match rkp_sync_core::keybox::validate_structure(&bytes) {
+    match rkp_mini_core::keybox::validate_structure(&bytes) {
         Ok(f) => {
-            let days = (f.leaf_not_after - now).div_euclid(rkp_sync_core::DAY);
+            let days = (f.leaf_not_after - now).div_euclid(rkp_mini_core::DAY);
             json!({
                 "path": path.display().to_string(),
                 "valid": true,
@@ -763,11 +767,11 @@ fn sender_keybox_status(cfg: &Config, now: i64) -> serde_json::Value {
                 "keybox_sha256": hex::encode(f.sha256),
                 "leaf_not_after": f.leaf_not_after,
                 "days_left": days,
-                "summary": format!("{} expires {} ({days} days)", f.device_id, app::date(f.leaf_not_after)),
+                "summary": format!("{} expires {} ({days} days)", f.device_id, util::date(f.leaf_not_after)),
             })
         }
         Err(e) => {
-            let se = rkp_sync_core::error::to_sync_error(&e);
+            let se = rkp_mini_core::error::to_sync_error(&e);
             json!({ "path": path.display().to_string(), "valid": false, "summary": format!("invalid: {}", se.message) })
         }
     }

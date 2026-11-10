@@ -16,9 +16,9 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 
 use anyhow::Result;
-use rkp_sync_core::error::{err, Stage};
-use rkp_sync_core::limits;
-use rkp_sync_core::locator::{self, UrlPolicy};
+use rkp_mini_core::error::{err, Stage};
+use rkp_mini_core::limits;
+use rkp_mini_core::locator::{self, UrlPolicy};
 use url::Url;
 
 const MAX_REDIRECTS: usize = 3;
@@ -314,7 +314,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(
-            rkp_sync_core::error::to_sync_error(&e).code,
+            rkp_mini_core::error::to_sync_error(&e).code,
             "cross_host_redirect"
         );
         h.join().unwrap();
@@ -336,7 +336,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(
-            rkp_sync_core::error::to_sync_error(&e).code,
+            rkp_mini_core::error::to_sync_error(&e).code,
             "response_too_large"
         );
         h.join().unwrap();
@@ -354,7 +354,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(
-            rkp_sync_core::error::to_sync_error(&e).code,
+            rkp_mini_core::error::to_sync_error(&e).code,
             "private_address"
         );
         let e = http
@@ -365,7 +365,7 @@ mod tests {
                 None,
             )
             .unwrap_err();
-        assert_eq!(rkp_sync_core::error::to_sync_error(&e).code, "insecure_url");
+        assert_eq!(rkp_mini_core::error::to_sync_error(&e).code, "insecure_url");
         // DNS-level guard: a public-looking name resolving to loopback.
         let r = GuardedResolver {
             allow_private: false,

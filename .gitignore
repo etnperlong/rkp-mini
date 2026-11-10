@@ -1,6 +1,7 @@
 /target
 /dist
+# Runtime logs pulled from a device stay out of git; dev fixtures are source.
 *.log
+!/webui/src/apps/*/dev/fixtures/**/*.log
 /webui/node_modules
 /webui/dist
-/webui/dist-receiver

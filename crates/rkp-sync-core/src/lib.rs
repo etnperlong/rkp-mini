@@ -26,6 +26,7 @@ pub mod transport;
 
 #[cfg(test)]
 pub(crate) mod test_support;
+pub use age::secrecy;
 
 use sha2::{Digest, Sha256};
 

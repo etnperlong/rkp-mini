@@ -1,0 +1,32 @@
+[package]
+name = "rkp-sync"
+version = "0.1.0"
+edition = "2021"
+description = "Encrypted keybox sync (age + Gist/WebDAV/HTTPS) and receiver-side deployment"
+license = "MIT"
+
+[[bin]]
+name = "rkp-sync"
+path = "src/main.rs"
+
+[dependencies]
+rkp-sync-core = { path = "../rkp-sync-core" }
+anyhow = "1"
+base64 = "0.22"
+hex = "0.4"
+libc = "0.2"
+qrcode = { version = "0.14", default-features = false }
+rand_core = { version = "0.6", features = ["getrandom"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+toml_edit = "0.22"
+ureq = { version = "2.10", features = ["tls"] }
+url = "2"
+zeroize = "1"
+
+[dev-dependencies]
+p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
+rcgen = "0.13"
+tempfile = "3"
+time = "0.3"

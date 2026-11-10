@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/rkp-mini", "crates/rkp-sync-core"]
+members = ["crates/rkp-mini", "crates/rkp-sync-core", "crates/rkp-sync"]
 
 [profile.release]
 opt-level = "z"

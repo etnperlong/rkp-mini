@@ -1362,6 +1362,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1474,6 +1480,30 @@ dependencies = [
  "toml 0.8.23",
  "ureq",
  "x509-cert",
+]
+
+[[package]]
+name = "rkp-sync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "hex",
+ "libc",
+ "p256",
+ "qrcode",
+ "rand_core",
+ "rcgen",
+ "rkp-sync-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "toml 0.8.23",
+ "toml_edit",
+ "ureq",
+ "url",
+ "zeroize",
 ]
 
 [[package]]

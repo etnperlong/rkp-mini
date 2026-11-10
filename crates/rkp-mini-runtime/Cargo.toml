@@ -1,6 +1,6 @@
 [package]
 name = "rkp-mini-runtime"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "rkp-mini runtime: config, targets, context, output, lock, tty (no network, no age)"
 license = "MIT"

@@ -1,6 +1,6 @@
 [package]
 name = "rkp-mini-issuer"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Qualcomm KeyMint CSR_V2 (0x3122) RKP keybox issuer for KernelSU"
 license = "MIT"

@@ -1,6 +1,6 @@
 [package]
 name = "rkp-mini-sync-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "rkp-mini sync core: age envelope, CBOR manifest, sync protocol, secret files, transports"
 license = "MIT"

@@ -42,7 +42,7 @@ Two modules use them: **RKP-Mini Issuer** (`rkp_mini_issuer`, ships issuer + syn
 ./build.sh
 ```
 
-Produces `dist/rkp_mini_issuer-v0.1.0.zip` and `dist/rkp_mini_deployer-v0.1.0.zip`
+Produces `dist/rkp_mini_issuer-v0.2.0.zip` and `dist/rkp_mini_deployer-v0.2.0.zip`
 (binaries, hooks and `webroot/`), both installable from the KernelSU manager. Every
 `rkp-mini-*` dependency of a package is compiled from the same workspace: the two ZIPs ship
 a byte-identical `rkp-mini-sync`.
@@ -54,7 +54,7 @@ each page in a browser against fixtures.
 
 ## Install & use
 
-1. KernelSU manager → install `dist/rkp_mini_issuer-v0.1.0.zip` → reboot (or reopen the module
+1. KernelSU manager → install `dist/rkp_mini_issuer-v0.2.0.zip` → reboot (or reopen the module
    page). The installer refuses to run while the legacy `rkp_mini` module is still installed:
    uninstall it first (its data at `/data/misc/keystore/rkp-mini` is kept and reused).
 2. Tap **Open** on the module card for the WebUI: check status, then **签发新证书**.

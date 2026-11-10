@@ -23,7 +23,9 @@ ta_timeout_seconds = 30
 proxy = ""                        # e.g. "http://127.0.0.1:7890"; empty = direct
 log_retention = 10                # keep the most recent N issue logs
 
-# Reserved; not implemented in this version. 0 = off.
+# Re-issue when the current leaf has <= N days left. Used only by the sync
+# loop (`rkp-mini issue --if-expiring-days N` before `rkp-sync push`) while
+# remote sync is enabled. 0 = off.
 auto_issue_days = 0
 "#;
 
@@ -69,6 +71,8 @@ fn unknown_keys(raw: &toml::Table) -> Vec<String> {
         "proxy",
         "log_retention",
         "auto_issue_days",
+        // Owned by `rkp-sync` (remote keybox sync); not read by rkp-mini.
+        "sync",
     ];
     raw.keys()
         .filter(|k| !KNOWN.contains(&k.as_str()))
@@ -331,5 +335,10 @@ mod tests {
         assert_eq!(cfg.server_url, "https://h/v1");
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("mystery"));
+        // The rkp-sync section is not reported as unknown.
+        let (_, warnings) =
+            load_with_warnings(tmp_cfg("[sync]\nrole = \"sender\"\nenabled = false\n").path())
+                .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 }

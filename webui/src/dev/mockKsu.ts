@@ -40,7 +40,9 @@ ta_timeout_seconds = 30
 proxy = ""                        # e.g. "http://127.0.0.1:7890"; empty = direct
 log_retention = 10                # keep the most recent N issue logs
 
-# Reserved; not implemented in this version. 0 = off.
+# Re-issue when the current leaf has <= N days left. Used only by the sync
+# loop (\`rkp-mini issue --if-expiring-days N\` before \`rkp-sync push\`) while
+# remote sync is enabled. 0 = off.
 auto_issue_days = 0
 `
 

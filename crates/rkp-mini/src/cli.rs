@@ -13,6 +13,7 @@ USAGE:
   rkp-mini status [--json] [--update-description] [--quiet] [--config PATH]
   rkp-mini issue  [--acknowledge] [--json] [--config PATH]
                   [--output DIR] [--server URL] [--fingerprint FP]
+                  [--if-expiring-days N]   (skip unless the current leaf has <= N days left)
   rkp-mini config init|show [--config PATH]
   rkp-mini --version
   rkp-mini --help
@@ -34,6 +35,8 @@ pub struct IssueArgs {
     pub output: Option<PathBuf>,
     pub server: Option<String>,
     pub fingerprint: Option<String>,
+    /// Only issue when the current keybox is missing/invalid or within N days of expiry.
+    pub if_expiring_days: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -86,6 +89,12 @@ pub fn parse(args: &[String]) -> Result<Command> {
                     "--output" => a.output = Some(PathBuf::from(take_value("--output", &mut it)?)),
                     "--server" => a.server = Some(take_value("--server", &mut it)?),
                     "--fingerprint" => a.fingerprint = Some(take_value("--fingerprint", &mut it)?),
+                    "--if-expiring-days" => {
+                        let v = take_value("--if-expiring-days", &mut it)?;
+                        a.if_expiring_days = Some(v.parse().map_err(|_| {
+                            anyhow::anyhow!("--if-expiring-days needs a non-negative integer")
+                        })?);
+                    }
                     other => bail!("unknown issue flag: {other}"),
                 }
             }

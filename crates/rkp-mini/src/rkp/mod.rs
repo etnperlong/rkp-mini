@@ -140,6 +140,29 @@ pub fn issue(args: &IssueArgs) -> Result<i32> {
     }
 
     let cfg = build_config(args)?;
+    if let Some(threshold) = args.if_expiring_days {
+        if let Some(days_left) = not_expiring(&cfg, threshold) {
+            let keybox = Path::new(&cfg.output_dir).join("keybox.xml");
+            if args.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "ok": true, "data": {
+                        "skipped": true,
+                        "reason": "not_expiring",
+                        "days_left": days_left,
+                        "threshold_days": threshold,
+                        "keybox": keybox.display().to_string(),
+                    }})
+                );
+            } else {
+                println!(
+                    "keybox still valid for {days_left} days (> {threshold}); not issuing: {}",
+                    keybox.display()
+                );
+            }
+            return Ok(0);
+        }
+    }
     let mut log = Log::new(&cfg);
     log.line("issue start");
 
@@ -195,6 +218,15 @@ fn build_config(args: &IssueArgs) -> Result<Config> {
         cfg.fingerprint = f.clone();
     }
     Ok(cfg)
+}
+
+/// `Some(days_left)` when the current keybox is valid with more than
+/// `threshold` whole days left; `None` means issuance should proceed.
+fn not_expiring(cfg: &Config, threshold: u32) -> Option<i64> {
+    let info = keybox::inspect(&Path::new(&cfg.output_dir).join("keybox.xml"));
+    let not_after = info.not_after.filter(|_| info.valid)?;
+    let days_left = util::days_left(not_after, util::now_unix());
+    (days_left > i64::from(threshold)).then_some(days_left)
 }
 
 fn issue_inner(cfg: &Config, log: &mut Log) -> Result<Outcome> {

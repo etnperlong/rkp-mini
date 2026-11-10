@@ -75,6 +75,33 @@ export function deployApply(approval: ApplyApproval = {}): Promise<SyncCall<Depl
 
 export type BuiltinTarget = 'omk' | 'teesim' | 'tricky_store'
 
+/** The root module that reads a builtin target's keybox. */
+export interface TargetModule {
+  /** Directory name under /data/adb/modules. */
+  id: string
+  installed: boolean
+  /** Installed and neither disabled nor queued for removal. */
+  enabled: boolean
+  /** `name=` / `version=` from its module.prop. */
+  name: string | null
+  version: string | null
+}
+
+export interface BuiltinTargetInfo {
+  id: BuiltinTarget
+  path: string
+  owner: string
+  mode: string
+  module: TargetModule
+}
+
+/** `targets`: builtin targets plus module detection (read-only, no config needed). */
+export async function readBuiltinTargets(): Promise<BuiltinTargetInfo[]> {
+  const data = await deployData<{ builtin?: unknown }>('targets')
+  if (!Array.isArray(data.builtin)) throw new CommandError('parse', '无法解析内置目标列表')
+  return data.builtin as BuiltinTargetInfo[]
+}
+
 export function addTarget(id: BuiltinTarget): Promise<unknown> {
   return deployData(`add-target ${id}`)
 }

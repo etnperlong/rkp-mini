@@ -653,7 +653,7 @@ export const IDENTITY_POLICY_LABEL: Record<IdentityPolicy, string> = {
 export const TARGET_LABEL: Record<string, string> = {
   omk: 'OhMyKeymint',
   teesim: 'TEESimulator',
-  tricky_store: 'TrickyStore',
+  tricky_store: 'TrickyStore / TEESimulator-RS',
   custom: '自定义',
 }
 

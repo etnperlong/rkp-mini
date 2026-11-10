@@ -5,6 +5,8 @@
 // Fetch result (?fetch=): tofu | ok | fail | mismatch  (default ok)
 // Deploy result (&deploy=fail): one configured target reports a write failure.
 // Combined run (&run=): ok | fetch_fail | missing_envelope | skipped | stale
+// Installed target modules (&modules=): comma list of omk | teesim | tricky_store,
+//   each optionally `:disabled`; `none`; `fail` (detection error). Default omk,tricky_store.
 //
 // Sample import links (also accepted as their JSON):
 //   rkpsync://v1/import?p=eyJ2IjoxLCJwcm92aWRlciI6Imdpc3QiLCJ1cmwiOiJodHRwczovL2dpc3QuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2V2YW5zL2FiYzEyMy9yYXcvcmtwLXN5bmMuYWdlIiwiZ2lzdF9pZCI6ImFiYzEyMyIsImZpbGVuYW1lIjoicmtwLXN5bmMuYWdlIiwic3RyZWFtX2lkIjoic3RfZGVtb19yZWNlaXZlciIsImxhYmVsIjoicGhvbmUtYSIsImZvcm1hdCI6ImFnZS1hcm1vciJ9
@@ -32,6 +34,7 @@ import type {
   TargetState,
   TofuFacts,
 } from '../../../shared/lib/sync'
+import type { BuiltinTargetInfo } from '../lib/deploy'
 import scenariosJson from './fixtures/receiver/scenarios.json'
 import tofuJson from './fixtures/receiver/tofu.json'
 
@@ -137,6 +140,47 @@ const fetchMode = params.get('fetch') ?? 'ok'
 const deployMode = params.get('deploy') ?? 'ok'
 /** Combined run shape: ok | fetch_fail | missing_envelope | skipped | stale. */
 const runMode = params.get('run') ?? 'ok'
+/** Which builtin-target modules `targets` reports as installed. */
+const modulesMode = params.get('modules') ?? 'omk,tricky_store'
+
+const BUILTIN_TARGETS: BuiltinTargetInfo[] = [
+  {
+    id: 'omk',
+    path: '/data/misc/keystore/omk/keybox.xml',
+    owner: '1017:1017',
+    mode: '0600',
+    module: { id: 'oh_my_keymint', installed: false, enabled: false, name: 'Oh My Keymint', version: '1.2.6' },
+  },
+  {
+    id: 'teesim',
+    path: '/data/adb/teesim/keybox.xml',
+    owner: '0:0',
+    mode: '0600',
+    module: { id: 'teesim', installed: false, enabled: false, name: 'TEESimulator', version: 'canary-76' },
+  },
+  {
+    id: 'tricky_store',
+    path: '/data/adb/tricky_store/keybox.xml',
+    owner: '0:0',
+    mode: '0600',
+    module: { id: 'tricky_store', installed: false, enabled: false, name: 'TEESimulator-RS', version: 'v6.0.1' },
+  },
+]
+
+function detectedTargets(): BuiltinTargetInfo[] {
+  const flags = new Map(
+    modulesMode.split(',').map((entry) => {
+      const [id, flag] = entry.trim().split(':')
+      return [id, flag !== 'disabled'] as const
+    }),
+  )
+  return BUILTIN_TARGETS.map((b) => {
+    const enabled = flags.get(b.id)
+    return enabled === undefined
+      ? { ...b, module: { ...b.module, name: null, version: null } }
+      : { ...b, module: { ...b.module, installed: true, enabled } }
+  })
+}
 
 let initialized = initialScenario !== 'new'
 let state: ScenarioFixture = structuredClone(
@@ -960,23 +1004,24 @@ function handleImport(args: string[]): ExecResult | null {
 
 /** `bin/rkp-mini-deployer --json <sub>`; the `deploy` word is gone from argv. */
 function handleDeploy(args: string[]): ExecResult {
+  const sub = args[0]
+  // Module detection needs no configuration.
+  if (sub === 'targets') {
+    return modulesMode === 'fail'
+      ? toExec(errOutcome('generic', 'io', 'read /data/adb/modules: permission denied'))
+      : toExec(okOutcome({ builtin: detectedTargets() }))
+  }
   const notInit = requireInit()
   if (notInit) return toExec(notInit)
-  const sub = args[0]
 
   if (sub === 'add-target') {
     const id = args[1] ?? ''
-    const defaults: Record<string, { path: string; owner: string }> = {
-      omk: { path: '/data/misc/keystore/omk/keybox.xml', owner: '1017:1017' },
-      teesim: { path: '/data/adb/teesim/keybox.xml', owner: '0:0' },
-      tricky_store: { path: '/data/adb/tricky_store/keybox.xml', owner: '0:0' },
-    }
-    const d = defaults[id]
+    const d = BUILTIN_TARGETS.find((b) => b.id === id)
     if (!d) return toExec(errOutcome('config', 'usage', 'built-in targets: omk, teesim, tricky_store'))
     if (state.targets.some((t) => t.id === id)) {
       return toExec(errOutcome('config', 'duplicate_target_id', `duplicate target id \`${id}\``))
     }
-    state.targets.push({ id, path: d.path, owner: d.owner, mode: '0600', reload: 'auto' })
+    state.targets.push({ id, path: d.path, owner: d.owner, mode: d.mode, reload: 'auto' })
     return toExec(okOutcome({ id, path: d.path, reload: 'auto' }))
   }
 

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Deployment targets (§11.4, §13.3). Config targets come from the local
-// config only; removing a deployed keybox is destructive and needs the dialog
-// plus typing the exact target id.
+// config only; a builtin target can be added only while the module that
+// reads its keybox is detected as installed. Removing a deployed keybox is
+// destructive and needs the dialog plus typing the exact target id.
 import { computed, ref, watch } from 'vue'
 import {
   MiuixBottomSheet,
@@ -16,8 +17,17 @@ import {
 } from 'miuix-vue'
 import { Add, Close } from 'miuix-vue/icons'
 import ReceiverField from './ReceiverField.vue'
+import StatusPill from '../../../shared/components/StatusPill.vue'
 import { deployCodeLabel, deployErrorText, errorMessage } from '../lib/display'
-import { addTarget, removeDeployed, removeTarget, type BuiltinTarget } from '../lib/deploy'
+import {
+  addTarget,
+  readBuiltinTargets,
+  removeDeployed,
+  removeTarget,
+  type BuiltinTarget,
+  type BuiltinTargetInfo,
+  type TargetModule,
+} from '../lib/deploy'
 import {
   TARGET_LABEL,
   readSyncConfig,
@@ -31,6 +41,9 @@ const props = defineProps<{ deployed: TargetState[] }>()
 const emit = defineEmits<{ changed: [] }>()
 
 const config = ref<SyncConfig | null>(null)
+/** Module detection; `null` (unknown or failed) allows no selection at all. */
+const builtins = ref<BuiltinTargetInfo[] | null>(null)
+const detectError = ref<string | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const busyId = ref<string | null>(null)
@@ -43,19 +56,10 @@ const removing = ref(false)
 const removeError = ref<string | null>(null)
 const removeReports = ref<TargetReport[] | null>(null)
 
-const BUILTINS: { id: BuiltinTarget; note: string }[] = [
-  {
-    id: 'omk',
-    note: 'OMK：写入 /data/misc/keystore/omk/keybox.xml，owner 1017:1017。若 OMK 开启 retire_stale_keybox_bound_keys（默认 true），更换 keybox 会删除绑定旧 keybox 的客户端密钥。',
-  },
-  {
-    id: 'teesim',
-    note: 'TEESimulator：文件必须被 /data/adb/teesim/config.json 中的某个 profile 引用，且只接受 EC keybox。',
-  },
-  {
-    id: 'tricky_store',
-    note: 'TrickyStore：写入 /data/adb/tricky_store/keybox.xml；模块覆盖安装时可能被替换。',
-  },
+const NOTES: string[] = [
+  'OhMyKeymint（模块 oh_my_keymint）：写入 /data/misc/keystore/omk/keybox.xml，owner 1017:1017；模块监听该目录，文件替换后立即重载，无需重启。若开启 retire_stale_keybox_bound_keys（默认 true），更换 keybox 会删除绑定旧 keybox 的客户端密钥。',
+  'TEESimulator（模块 teesim）：写入 /data/adb/teesim/ 下的 .xml 文件，文件名必须被 config.json 中的某个 profile 引用，且只接受 EC keybox；替换后立即重载，并为已有密钥重新生成证明。',
+  'TrickyStore / TEESimulator-RS（两者的模块 id 都是 tricky_store）：写入 /data/adb/tricky_store/keybox.xml；替换后立即重载，但替换前已生成的密钥可能沿用旧证书链，直到该模块的守护进程重启。模块覆盖安装时该文件可能被替换。',
 ]
 
 watch(open, (v) => {
@@ -69,14 +73,21 @@ watch(open, (v) => {
 async function load(): Promise<void> {
   loading.value = true
   error.value = null
-  try {
-    config.value = await readSyncConfig()
-  } catch (e) {
+  detectError.value = null
+  const [conf, detected] = await Promise.allSettled([readSyncConfig(), readBuiltinTargets()])
+  if (conf.status === 'fulfilled') {
+    config.value = conf.value
+  } else {
     config.value = null
-    error.value = errorMessage(e)
-  } finally {
-    loading.value = false
+    error.value = errorMessage(conf.reason)
   }
+  if (detected.status === 'fulfilled') {
+    builtins.value = detected.value
+  } else {
+    builtins.value = null
+    detectError.value = errorMessage(detected.reason)
+  }
+  loading.value = false
 }
 
 const deployedById = computed(() => new Map(props.deployed.map((t) => [t.id, t])))
@@ -104,12 +115,31 @@ const rows = computed(() => {
   })
 })
 
-const missing = computed(() => {
+/** Builtin targets not yet in the config, with the state of their module. */
+const addable = computed(() => {
   const ids = new Set((config.value?.targets ?? []).map((t) => t.id))
-  return BUILTINS.filter((b) => !ids.has(b.id))
+  return (builtins.value ?? []).filter((b) => !ids.has(b.id))
 })
 
+function moduleTone(m: TargetModule): 'ok' | 'warning' | 'neutral' {
+  if (!m.installed) return 'neutral'
+  return m.enabled ? 'ok' : 'warning'
+}
+
+function moduleLabel(m: TargetModule): string {
+  if (!m.installed) return '未安装'
+  return m.enabled ? '已安装' : '已停用'
+}
+
+function moduleLine(m: TargetModule): string {
+  if (!m.installed) return `未检测到模块 ${m.id}（/data/adb/modules/${m.id}）；安装并重启后才能选择。`
+  const found = `检测到模块 ${m.name ?? m.id}${m.version ? ` ${m.version}` : ''}（${m.id}）`
+  return m.enabled ? found : `${found}；模块已停用或待卸载，启用前不会重载 keybox。`
+}
+
 async function add(id: BuiltinTarget): Promise<void> {
+  // The button is disabled for these; never rely on that alone.
+  if (!builtins.value?.some((b) => b.id === id && b.module.installed)) return
   busyId.value = id
   error.value = null
   try {
@@ -233,19 +263,32 @@ async function confirmRemove(): Promise<void> {
         </template>
         <MiuixText v-if="removeError" type="footnote1" color="var(--m-color-error)">{{ removeError }}</MiuixText>
 
-        <template v-if="missing.length">
+        <template v-if="detectError || addable.length">
           <MiuixSmallTitle text="添加内置目标" />
-          <div class="sheet-group">
-            <MiuixButton v-for="b in missing" :key="b.id" :disabled="busyId === b.id" @click="add(b.id)">
-              <MiuixIcon :icon="Add" :size="18" />
-              <span>添加 {{ TARGET_LABEL[b.id] ?? b.id }}</span>
-            </MiuixButton>
+          <MiuixText v-if="detectError" type="footnote1" color="var(--m-color-error)">
+            无法检测已安装的模块，暂不能添加目标：{{ detectError }}
+          </MiuixText>
+          <div v-else class="targets">
+            <div v-for="b in addable" :key="b.id" class="target">
+              <div class="target__head">
+                <span class="target__name">{{ TARGET_LABEL[b.id] ?? b.id }}</span>
+                <StatusPill :tone="moduleTone(b.module)" :label="moduleLabel(b.module)" />
+              </div>
+              <span class="target__path selectable">{{ b.path }}</span>
+              <span class="target__state">{{ moduleLine(b.module) }}</span>
+              <div class="target__actions">
+                <MiuixButton :disabled="!b.module.installed || busyId === b.id" @click="add(b.id)">
+                  <MiuixIcon :icon="Add" :size="18" />
+                  <span>添加</span>
+                </MiuixButton>
+              </div>
+            </div>
           </div>
         </template>
 
         <MiuixSmallTitle text="注意事项" />
         <ul class="notes">
-          <li v-for="b in BUILTINS" :key="b.id">{{ b.note }}</li>
+          <li v-for="note in NOTES" :key="note">{{ note }}</li>
         </ul>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
           “从配置移除”只改配置，不动已写入的文件；“移除已部署的 keybox”会删除目标文件，且需要输入目标 id 二次确认。两者都不会删除远端同步文件。
@@ -339,12 +382,6 @@ async function confirmRemove(): Promise<void> {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;
-}
-.sheet-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
 }
 .notes {
   margin: 0;

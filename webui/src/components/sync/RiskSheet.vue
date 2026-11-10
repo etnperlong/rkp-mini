@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // First-enable risk confirmation (design §13.2, §19.3). The statement comes
-// from `rkp-sync risk` so the text and its version have one source; every item
+// from `rkp-mini-sync risk` so the text and its version have one source; every item
 // is a separate, initially unchecked checkbox, and acceptance names the exact
 // version shown. Enabling also starts the module's unattended loop.
 import { computed, ref, watch } from 'vue'

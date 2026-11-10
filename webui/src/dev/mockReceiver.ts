@@ -716,7 +716,7 @@ function applyImport(spec: ImportSpec): ImportResult {
   state.webdav_user = spec.user
   state.url = spec.provider === 'url' ? spec.url : ''
   const notes = ['location saved; nothing was downloaded or deployed']
-  if (!state.age_present) notes.push('set the age passphrase with `rkp-sync secret set age`')
+  if (!state.age_present) notes.push('set the age passphrase with `rkp-mini-sync secret set age`')
   if (spec.provider === 'webdav' && spec.user) notes.push('set the WebDAV app password')
   if (!state.risk_ack) notes.push('sync stays disabled until the risk statement is accepted')
   tofuFacts = makeTofu(tofuFacts.seq, tofuFacts.keybox_sha256, tofuFacts.plaintext_sha256, 3)
@@ -775,7 +775,7 @@ function stageFromFacts(facts: TofuFacts, firstImport: boolean): Outcome {
 }
 
 function doFetch(acceptFirst?: string): Outcome {
-  if (!initialized) return errOutcome('config', 'not_initialized', 'no rkp-sync configuration found')
+  if (!initialized) return errOutcome('config', 'not_initialized', 'no rkp-mini-sync configuration found')
   if (!state.enabled) return errOutcome('config', 'sync_disabled', 'remote sync is disabled')
   if (!state.stream_id) return errOutcome('config', 'stream_missing', 'no sync stream configured')
   if (fetchMode === 'fail') {
@@ -832,7 +832,7 @@ function doFetch(acceptFirst?: string): Outcome {
 }
 
 function doRun(): Outcome {
-  if (!initialized) return errOutcome('config', 'not_initialized', 'no rkp-sync configuration found')
+  if (!initialized) return errOutcome('config', 'not_initialized', 'no rkp-mini-sync configuration found')
   if (!state.enabled) return errOutcome('config', 'sync_disabled', 'remote sync is disabled')
   const fetched = doFetch(undefined)
   let fetchData: unknown = null
@@ -904,7 +904,7 @@ interface SyncErrorInfoLike {
 function requireInit(): Outcome | null {
   return initialized
     ? null
-    : errOutcome('config', 'not_initialized', 'no rkp-sync configuration found; run `rkp-sync init --role receiver`')
+    : errOutcome('config', 'not_initialized', 'no rkp-mini-sync configuration found; run `rkp-mini-sync init --role receiver`')
 }
 
 function handleImport(args: string[]): ExecResult | null {
@@ -928,14 +928,14 @@ function handleImport(args: string[]): ExecResult | null {
   }
 }
 
-function handleDeploy(args: string[]): ExecResult | null {
-  if (args[0] !== 'deploy') return null
+/** `bin/rkp-mini-deployer --json <sub>`; the `deploy` word is gone from argv. */
+function handleDeploy(args: string[]): ExecResult {
   const notInit = requireInit()
   if (notInit) return toExec(notInit)
-  const sub = args[1]
+  const sub = args[0]
 
   if (sub === 'add-target') {
-    const id = args[2] ?? ''
+    const id = args[1] ?? ''
     const defaults: Record<string, { path: string; owner: string }> = {
       omk: { path: '/data/misc/keystore/omk/keybox.xml', owner: '1017:1017' },
       teesim: { path: '/data/adb/teesim/keybox.xml', owner: '0:0' },
@@ -951,7 +951,7 @@ function handleDeploy(args: string[]): ExecResult | null {
   }
 
   if (sub === 'remove-target') {
-    const id = args[2] ?? ''
+    const id = args[1] ?? ''
     const before = state.targets.length
     state.targets = state.targets.filter((t) => t.id !== id)
     if (state.targets.length === before) {
@@ -987,13 +987,13 @@ function handleDeploy(args: string[]): ExecResult | null {
   }
 
   if (sub !== 'plan' && sub !== 'apply') {
-    return toExec(errOutcome('config', 'usage', `unknown deploy subcommand \`${sub ?? ''}\``))
+    return toExec(errOutcome('config', 'usage', `unknown deployer command \`${sub ?? ''}\``))
   }
   if (!state.stream_id) {
-    return toExec(errOutcome('config', 'stream_missing', 'no sync stream configured; run `rkp-sync import`'))
+    return toExec(errOutcome('config', 'stream_missing', 'no sync stream configured; run `rkp-mini-sync import`'))
   }
   if (!state.staged) {
-    return toExec(errOutcome('state', 'nothing_staged', 'no verified keybox yet; run `rkp-sync fetch` first'))
+    return toExec(errOutcome('state', 'nothing_staged', 'no verified keybox yet; run `rkp-mini-sync fetch` first'))
   }
 
   const allow = args.includes('--allow-identity-change')
@@ -1167,7 +1167,7 @@ function logText(): string {
     new Date((nowUnix() - offset) * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
   const hash = (value: string | null | undefined): string => (value ? value.slice(0, 12) : '—')
   const lines = [
-    '# rkp-sync receiver log (seq/provider/hash/codes only)',
+    '# rkp-mini-sync receiver log (seq/provider/hash/codes only)',
     `${at(7200)} fetch provider=${state.provider || '-'} seq=${state.sync_state?.seq ?? 0} keybox=${hash(state.staged?.keybox_sha256)} changed=1`,
     `${at(7100)} deploy seq=${state.deployed?.seq ?? 0} keybox=${hash(state.deployed?.keybox_sha256)} targets=${state.targets.map((t) => `${t.id}:${t.reload_status ?? 'ok'}`).join(',') || 'none'}`,
     `${at(3600)} note: certificate signatures, root trust and revocation are not verified`,
@@ -1256,12 +1256,20 @@ export async function mockExec(command: string): Promise<ExecResult> {
   const jsonAt = args.indexOf('--json')
   if (jsonAt < 0) return { errno: 127, stdout: '', stderr: `mock: unhandled command: ${safeCommand(command)}` }
   const rest = args.slice(jsonAt + 1)
+
+  // `bin/rkp-mini-deployer` is a separate local-only binary whose argv carries
+  // no `deploy` word: the binary picks the handler, not the verb.
+  if (command.includes('/bin/rkp-mini-deployer')) return handleDeploy(rest)
+  if (!command.includes('/bin/rkp-mini-sync')) {
+    return { errno: 127, stdout: '', stderr: `mock: unhandled binary: ${safeCommand(command)}` }
+  }
+
   const verb = rest[0]
 
   if (verb === 'status') {
     if (!initialized) {
       return toExec(
-        errOutcome('config', 'not_initialized', 'no rkp-sync configuration found; run `rkp-sync init --role receiver`'),
+        errOutcome('config', 'not_initialized', 'no rkp-mini-sync configuration found; run `rkp-mini-sync init --role receiver`'),
       )
     }
     return toExec(okOutcome(buildStatus()))
@@ -1323,8 +1331,6 @@ export async function mockExec(command: string): Promise<ExecResult> {
 
   const imported = handleImport(rest)
   if (imported) return imported
-  const deployed = handleDeploy(rest)
-  if (deployed) return deployed
   const configured = handleConfig(rest)
   if (configured) return configured
 

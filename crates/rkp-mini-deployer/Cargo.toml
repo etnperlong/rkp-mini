@@ -1,0 +1,27 @@
+[package]
+name = "rkp-mini-deployer"
+version = "0.1.0"
+edition = "2021"
+description = "Local keybox deployment: write a verified staged keybox to OMK/TEESimulator/TrickyStore"
+license = "MIT"
+
+[[bin]]
+name = "rkp-mini-deployer"
+path = "src/main.rs"
+
+[dependencies]
+rkp-mini-core = { path = "../rkp-mini-core" }
+rkp-mini-runtime = { path = "../rkp-mini-runtime" }
+anyhow = "1"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+rkp-mini-core = { path = "../rkp-mini-core", features = ["test-support"] }
+base64 = "0.22"
+p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+rcgen = "0.13"
+tempfile = "3"
+time = "0.3"

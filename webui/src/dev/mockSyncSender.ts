@@ -1,4 +1,4 @@
-// Dev-only mock for the sender's rkp-sync commands (routed from mockKsu.ts).
+// Dev-only mock for the sender's rkp-mini-sync commands (routed from mockKsu.ts).
 // Query parameters:
 //   ?sync=     uninit | disabled | ready | error | nosecret      (sync state)
 //   ?syncpush= ok | noop | fail                     (result of one push task)
@@ -118,7 +118,7 @@ function taskResult(op: string): { json: string; err: string; code: number } {
   }
   if (op === 'push') {
     if (pushOutcome === 'fail') {
-      return { json: `${JSON.stringify(pushFail)}\n`, err: 'rkp-sync: remote: auth_failed\n', code: 8 }
+      return { json: `${JSON.stringify(pushFail)}\n`, err: 'rkp-mini-sync: remote: auth_failed\n', code: 8 }
     }
     if (pushOutcome === 'ok') applyPush()
     return { json: `${JSON.stringify(pushOutcome === 'noop' ? pushNoop : pushOk)}\n`, err: '', code: 0 }
@@ -151,7 +151,7 @@ function probeOutput(): string {
   return `${lines.join('\n')}\n`
 }
 
-// ---- rkp-sync commands -------------------------------------------------------------
+// ---- rkp-mini-sync commands --------------------------------------------------------
 
 const NUMERIC: SenderConfigKey[] = ['min_validity_days', 'request_timeout_seconds', 'auto_issue_days']
 
@@ -164,7 +164,7 @@ function dispatch(sub: string, command: string): ExecResult {
     return okJson({ ...RISK, accepted_version: status.risk_ack_current ? status.risk_version : null })
   }
 
-  if (sub.startsWith('--role sender init')) {
+  if (/^init --provider/.test(sub)) {
     const provider = /--provider 'webdav'/.test(sub) ? 'webdav' : 'gist'
     initialized = true
     status = liveStatus(STATUS.disabled)
@@ -277,11 +277,12 @@ export async function mockSync(command: string): Promise<ExecResult> {
   if (command.includes('sync-loop.sh')) {
     return okJson({ loop: 'started' })
   }
-  // prepareRotation / discardRotation: the staged inbox file only.
-  if (command.includes('sync/inbox')) {
+  // prepareRotation / discardRotation write the inbox file only; `secret set`
+  // also writes one but then runs the binary, so the binary check comes first.
+  if (!command.includes('/bin/rkp-mini-sync') && command.includes('sync/inbox')) {
     return { errno: 0, stdout: '', stderr: '' }
   }
-  if (command.includes('/bin/rkp-sync')) {
+  if (command.includes('/bin/rkp-mini-sync')) {
     return dispatch(rest(command), command)
   }
 

@@ -163,7 +163,7 @@ function retry(): void {
       </div>
 
       <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-        新口令经 root shell 写入 0600 临时文件，由 rkp-sync 读取并立即删除；不会出现在命令行参数、URL 或日志中。
+        新口令经 root shell 写入 0600 临时文件，由 rkp-mini-sync 读取并立即删除；不会出现在命令行参数、URL 或日志中。
       </MiuixText>
 
       <MiuixButton v-if="!launched" type="primary" :disabled="busy || problem !== null" @click="begin">

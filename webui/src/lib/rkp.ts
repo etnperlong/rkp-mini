@@ -4,8 +4,8 @@ import { daysLeft, nowUnix } from './format'
 
 // ---- Paths ------------------------------------------------------------------
 
-export const MODULE_ID = 'rkp_mini'
-const DEFAULT_MODULE_DIR = '/data/adb/modules/rkp_mini'
+export const MODULE_ID = 'rkp_mini_issuer'
+const DEFAULT_MODULE_DIR = '/data/adb/modules/rkp_mini_issuer'
 
 /** Only plain absolute paths are ever interpolated into shell commands. */
 export const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/
@@ -23,14 +23,14 @@ export function resolveModuleDir(fallback: string): string {
 }
 
 export const MODULE_DIR = resolveModuleDir(DEFAULT_MODULE_DIR)
-export const BIN = `${MODULE_DIR}/bin/rkp-mini`
+export const BIN = `${MODULE_DIR}/bin/rkp-mini-issuer`
 export const DATA = '/data/misc/keystore/rkp-mini'
 export const TMP = `${DATA}/tmp`
 export const CONFIG = `${DATA}/config.toml`
 export const STATUS_JSON = `${DATA}/status.json`
 export const LOGS = `${DATA}/logs`
 
-// ---- JSON contract (rkp-mini --json) -----------------------------------------
+// ---- JSON contract (rkp-mini-issuer --json) ----------------------------------
 
 export interface DeviceInfo {
   android_arm64: boolean

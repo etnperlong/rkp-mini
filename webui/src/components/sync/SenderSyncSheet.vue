@@ -232,7 +232,7 @@ async function toggleLog(): Promise<void> {
 
     <div class="sheet-body">
       <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-        这里只修改 [sync] 表中的非敏感字段；密钥经 root shell 写入 0600 文件后由 rkp-sync 接管，页面不会读回。
+        这里只修改 [sync] 表中的非敏感字段；密钥经 root shell 写入 0600 文件后由 rkp-mini-sync 接管，页面不会读回。
       </MiuixText>
 
       <MiuixText v-if="loading" type="body2" color="var(--m-color-on-surface-variant-summary)">正在读取配置…</MiuixText>

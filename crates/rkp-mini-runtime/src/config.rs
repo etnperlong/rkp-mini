@@ -1,8 +1,8 @@
-//! `rkp-sync` configuration (design §10.1, §11.1).
+//! `rkp-mini-sync` configuration (design §10.1, §11.1).
 //!
 //! One TOML file per role:
 //! - sender: the shared `rkp-mini` config (`/data/misc/keystore/rkp-mini/config.toml`);
-//!   `rkp-sync` reads top-level `output_dir` / `auto_issue_days` and owns `[sync]`.
+//!   `rkp-mini-sync` reads top-level `output_dir` / `auto_issue_days` and owns `[sync]`.
 //! - receiver: `/data/adb/rkp_sync/config.toml` with `[sync]` and `[deploy]`.
 //!
 //! The data root is the config file's directory. Secrets are referenced by
@@ -216,7 +216,7 @@ pub fn resolve_path(explicit: Option<&Path>, role: Option<Role>) -> Result<PathB
         (false, false) => Err(err(
             Stage::Config,
             "not_initialized",
-            "no rkp-sync configuration found; run `rkp-sync init --role sender|receiver`",
+            "no rkp-mini-sync configuration found; run `rkp-mini-sync init --role sender|receiver`",
         )),
     }
 }
@@ -236,7 +236,7 @@ pub fn load(path: &Path, expect: Option<Role>, url_policy: UrlPolicy) -> Result<
                 Stage::Config,
                 "not_initialized",
                 format!(
-                    "{} not found; run `rkp-sync init --role {}`",
+                    "{} not found; run `rkp-mini-sync init --role {}`",
                     path.display(),
                     expect.map_or("sender|receiver", Role::as_str)
                 ),
@@ -252,7 +252,7 @@ pub fn load(path: &Path, expect: Option<Role>, url_policy: UrlPolicy) -> Result<
             Stage::Config,
             "not_initialized",
             format!(
-                "{} has no [sync] section; run `rkp-sync init`",
+                "{} has no [sync] section; run `rkp-mini-sync init`",
                 path.display()
             ),
         )
@@ -436,14 +436,14 @@ impl Config {
             return Err(err(
                 Stage::Config,
                 "risk_not_acknowledged",
-                "remote keybox sync needs explicit risk acceptance; run `rkp-sync enable`",
+                "remote keybox sync needs explicit risk acceptance; run `rkp-mini-sync enable`",
             ));
         }
         if !self.sync.enabled {
             return Err(err(
                 Stage::Config,
                 "sync_disabled",
-                "sync is disabled; run `rkp-sync enable`",
+                "sync is disabled; run `rkp-mini-sync enable`",
             ));
         }
         Ok(())
@@ -456,10 +456,10 @@ impl Config {
                 "stream_missing",
                 match self.role {
                     Role::Sender => {
-                        "[sync].stream_id is empty; run `rkp-sync init --role sender`"
+                        "[sync].stream_id is empty; run `rkp-mini-sync init --role sender`"
                     }
                     Role::Receiver => {
-                        "no stream imported; run `rkp-sync import '<rkpsync://…>'`"
+                        "no stream imported; run `rkp-mini-sync import '<rkpsync://…>'`"
                     }
                 },
             ));
@@ -653,8 +653,8 @@ pub fn sender_sync_template(stream_id: &str, provider: &str, root: &Path) -> Str
     let sync = root.join("sync");
     format!(
         r#"
-# Remote keybox sync (rkp-sync). Disabled by default; enabling requires
-# `rkp-sync enable` (explicit risk acceptance). Secrets live in 0600 files;
+# Remote keybox sync (rkp-mini-sync). Disabled by default; enabling requires
+# `rkp-mini-sync enable` (explicit risk acceptance). Secrets live in 0600 files;
 # never put a password or token value in this file.
 [sync]
 role = "sender"
@@ -692,8 +692,8 @@ password_file = "{age}"           # 0600
 pub fn receiver_template(root: &Path) -> String {
     let secrets = root.join("secrets");
     format!(
-        r#"# rkp-sync receiver configuration.
-# The remote location is written by `rkp-sync import`; deployment targets are
+        r#"# rkp-mini-sync receiver configuration.
+# The remote location is written by `rkp-mini-sync import`; deployment targets are
 # local-only and are never taken from the remote side.
 [sync]
 role = "receiver"
@@ -729,7 +729,7 @@ identity_change_policy = "scheduled"  # scheduled | always | never
 rotation_lead_days = 30
 auto_deploy = true
 
-# Targets are added with `rkp-sync deploy add-target omk|teesim|tricky_store`
+# Targets are added with `rkp-mini-deployer add-target omk|teesim|tricky_store`
 # or by hand, e.g.:
 # [[deploy.targets]]
 # id = "omk"

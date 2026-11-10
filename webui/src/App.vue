@@ -47,7 +47,7 @@ const detailOpen = ref(false)
 const settingsOpen = ref(false)
 const settingsFocusLogs = ref(false)
 
-// Remote sync (rkp-sync). The status read is local-only; the card starts a
+// Remote sync (rkp-mini-sync). The status read is local-only; the card starts a
 // detached `push` task and no other sync command runs while it is busy.
 const syncStatus = ref<SyncStatus | null>(null)
 const syncNotInitialized = ref(false)
@@ -131,7 +131,7 @@ const runner = useIssueRunner(async (result) => {
 })
 
 /**
- * `rkp-sync status`. A fresh setup has no `[sync]` table yet: the command fails
+ * `rkp-mini-sync status`. A fresh setup has no `[sync]` table yet: the command fails
  * with `not_initialized`, which the card turns into the initialization choices
  * rather than an error.
  */

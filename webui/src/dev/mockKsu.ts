@@ -7,7 +7,7 @@
 //   ?outcome= success | failure                (result of an issue started here)
 //   ?sync=    uninit | disabled | ready | error | nosecret        (sync state)
 //   ?syncpush= ok | noop | fail                 (result of one push task)
-// rkp-sync commands are answered by ./mockSyncSender.ts.
+// rkp-mini-sync commands are answered by ./mockSyncSender.ts.
 import type { ExecResult } from '../lib/ksu'
 import type { StatusData } from '../lib/rkp'
 import { nowUnix } from '../lib/format'
@@ -45,15 +45,15 @@ proxy = ""                        # e.g. "http://127.0.0.1:7890"; empty = direct
 log_retention = 10                # keep the most recent N issue logs
 
 # Re-issue when the current leaf has <= N days left. Used only by the sync
-# loop (\`rkp-mini issue --if-expiring-days N\` before \`rkp-sync push\`) while
-# remote sync is enabled. 0 = off.
+# loop (\`rkp-mini-issuer issue --if-expiring-days N\` before \`rkp-mini-sync push\`)
+# while remote sync is enabled. 0 = off.
 auto_issue_days = 0
 `
 
 const logs: string[] = [`issue-${nowUnix() - 86_400 * 3}.log`, `issue-${nowUnix() - 86_400 * 40}.log`]
 
 function logBody(name: string): string {
-  return `# rkp-mini issue log (ok)
+  return `# rkp-mini-issuer issue log (ok)
 2026-11-06 10:00:00 UTC issue start
 2026-11-06 10:00:00 UTC prereq ok
 2026-11-06 10:00:01 UTC challenge 32 bytes
@@ -164,8 +164,9 @@ function sanitized(command: string): string {
   return command.replace(/(echo )[0-9a-f]+( >)/g, '$1<redacted>$2').replace(/[0-9a-f]{32,}/g, '<redacted>')
 }
 
-/** Commands owned by the remote-sync mock: its binary, runner, loop, inbox, log. */
-const SYNC_COMMAND = /\/bin\/rkp-sync|runner\/sync\.sh|sync-task\.|sync-loop\.sh|sync\/inbox|logs\/sync\.log/
+/** Commands owned by the remote-sync mocks: both binaries, runner, loop, inbox, log. */
+const SYNC_COMMAND =
+  /\/bin\/rkp-mini-(?:sync|deployer)|runner\/sync\.sh|sync-task\.|sync-loop\.sh|sync\/inbox|logs\/sync\.log/
 
 export async function mockExec(command: string): Promise<ExecResult> {
   await new Promise((resolve) => setTimeout(resolve, 200))
@@ -183,10 +184,12 @@ export async function mockExec(command: string): Promise<ExecResult> {
   if (command.startsWith('cat ') && command.includes('status.json')) {
     return ok(JSON.stringify(liveStatus(), null, 2))
   }
-  if (command.endsWith(' --version')) return ok('rkp-mini 0.1.0\n')
+  if (command.endsWith(' --version')) return ok('rkp-mini-issuer 0.1.0\n')
   if (command.startsWith('cat ') && command.includes('config.toml')) return ok(CONFIG_TOML)
   if (command.startsWith('cat ') && command.includes('module.prop')) {
-    return ok('id=rkp_mini\nname=RKP Mini · 证书签发\nversion=v0.1.0\nversionCode=1\nauthor=Evans Mike\n')
+    return ok(
+      'id=rkp_mini_issuer\nname=RKP-Mini Issuer\nversion=v0.1.0\nversionCode=1\nauthor=Evans Mike\n',
+    )
   }
   if (command.startsWith('ls -1t ')) return ok(logs.join('\n') + '\n')
   if (command.startsWith('tail -n 200 ')) {

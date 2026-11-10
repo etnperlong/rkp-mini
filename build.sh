@@ -1,25 +1,27 @@
 #!/usr/bin/env bash
-# Cross-compile rkp-mini for arm64 Android and package the KernelSU module zip.
+# Cross-compile the three RKP-Mini commands for arm64 Android and package the
+# two KernelSU modules (issuer + deployer).
+#
+#   issuer module   : rkp-mini-issuer + shared rkp-mini-sync   (+ issuer WebUI)
+#   deployer module : shared rkp-mini-sync + rkp-mini-deployer (+ deployer WebUI)
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 TARGET=aarch64-linux-android
 API=26
-VERSION="v$(grep -m1 '^version' crates/rkp-mini/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-SYNC_VERSION="v$(grep -m1 '^version' crates/rkp-sync/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-ZIP="dist/rkp_mini-${VERSION}.zip"
-SYNC_ZIP="dist/rkp_sync-${SYNC_VERSION}.zip"
+VERSION="v$(grep -m1 '^version' crates/rkp-mini-issuer/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+DEPLOY_VERSION="v$(grep -m1 '^version' crates/rkp-mini-deployer/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+ISSUER_ZIP="dist/rkp_mini_issuer-${VERSION}.zip"
+DEPLOYER_ZIP="dist/rkp_mini_deployer-${DEPLOY_VERSION}.zip"
 
 # --- Locate the NDK -----------------------------------------------------------
 NDK="${NDK:-}"
 if [ -z "$NDK" ]; then
-  for d in "$HOME/Android/Sdk/ndk"/*; do
-    [ -d "$d/toolchains/llvm/prebuilt" ] && NDK="$d"
-  done
+  NDK=$(ls -d "$HOME"/Android/Sdk/ndk/* 2>/dev/null | sort -V | tail -1 || true)
 fi
 if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
-  echo "! NDK not found. Set \$NDK to your Android NDK path." >&2
+  echo "! Android NDK not found; set NDK=/path/to/ndk" >&2
   exit 1
 fi
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
@@ -64,65 +66,120 @@ else
 fi
 
 echo "- Building release for $TARGET"
-cargo build --release --target "$TARGET" -p rkp-mini -p rkp-sync
+cargo build --release --locked --target "$TARGET" \
+  -p rkp-mini-issuer -p rkp-mini-sync -p rkp-mini-deployer
 
-BIN="target/$TARGET/release/rkp-mini"
-SYNC_BIN="target/$TARGET/release/rkp-sync"
-[ -f "$BIN" ] || { echo "! build produced no rkp-mini binary" >&2; exit 1; }
-[ -f "$SYNC_BIN" ] || { echo "! build produced no rkp-sync binary" >&2; exit 1; }
+ISSUER_BIN="target/$TARGET/release/rkp-mini-issuer"
+SYNC_BIN="target/$TARGET/release/rkp-mini-sync"
+DEPLOY_BIN="target/$TARGET/release/rkp-mini-deployer"
+for b in "$ISSUER_BIN" "$SYNC_BIN" "$DEPLOY_BIN"; do
+  [ -f "$b" ] || { echo "! build produced no $b" >&2; exit 1; }
+done
 
 # --- WebUI --------------------------------------------------------------------
 command -v bun >/dev/null 2>&1 || { echo "! bun is required to build the WebUI" >&2; exit 1; }
 echo "- Building WebUI"
 ( cd webui && bun install --frozen-lockfile && bun run build )
-[ -f webui/dist/index.html ] || { echo "! webui build produced no index.html" >&2; exit 1; }
-[ -f webui/dist-receiver/index.html ] || { echo "! receiver webui build produced no index.html" >&2; exit 1; }
+for page in dist dist-receiver; do
+  [ -f "webui/$page/index.html" ] || {
+    echo "! webui build produced no $page/index.html" >&2; exit 1; }
+done
 
-# --- Package: sender (rkp_mini) -----------------------------------------------
-echo "- Packaging $ZIP"
-rm -rf dist/module "$ZIP"
-mkdir -p dist/module/bin dist/module/webroot
-cp "$BIN" dist/module/bin/rkp-mini
-cp "$SYNC_BIN" dist/module/bin/rkp-sync
-cp module/module.prop module/customize.sh module/action.sh \
-   module/service.sh module/uninstall.sh module/sync-loop.sh dist/module/
-cp -R webui/dist/. dist/module/webroot/
-chmod 755 dist/module/bin/rkp-mini dist/module/bin/rkp-sync dist/module/*.sh
-( cd dist/module && zip -rq "../rkp_mini-${VERSION}.zip" . )
+# --- Package: issuer ----------------------------------------------------------
+# The issuer module carries the issuer and the shared sync command; never the
+# deployer.
+echo "- Packaging $ISSUER_ZIP"
+rm -rf dist/module-issuer "$ISSUER_ZIP"
+mkdir -p dist/module-issuer/bin dist/module-issuer/webroot
+cp "$ISSUER_BIN" dist/module-issuer/bin/rkp-mini-issuer
+cp "$SYNC_BIN" dist/module-issuer/bin/rkp-mini-sync
+cp modules/issuer/module.prop modules/issuer/customize.sh modules/issuer/action.sh \
+   modules/issuer/service.sh modules/issuer/uninstall.sh modules/issuer/sync-loop.sh \
+   dist/module-issuer/
+cp -R modules/issuer/webroot/runner dist/module-issuer/webroot/runner
+cp -R webui/dist/. dist/module-issuer/webroot/
+chmod 755 dist/module-issuer/bin/rkp-mini-issuer dist/module-issuer/bin/rkp-mini-sync \
+  dist/module-issuer/*.sh dist/module-issuer/webroot/runner/*.sh
+( cd dist/module-issuer && zip -rq "../$(basename "$ISSUER_ZIP")" . )
 
-# --- Package: receiver (rkp_sync) ---------------------------------------------
-# Receiver module carries only rkp-sync and the receiver page; never the issuer.
-echo "- Packaging $SYNC_ZIP"
-rm -rf dist/module-sync "$SYNC_ZIP"
-mkdir -p dist/module-sync/bin dist/module-sync/webroot
-cp "$SYNC_BIN" dist/module-sync/bin/rkp-sync
-cp module-sync/module.prop module-sync/customize.sh module-sync/action.sh \
-   module-sync/service.sh module-sync/uninstall.sh module-sync/sync-loop.sh dist/module-sync/
-cp -R webui/dist-receiver/. dist/module-sync/webroot/
-chmod 755 dist/module-sync/bin/rkp-sync dist/module-sync/*.sh
-( cd dist/module-sync && zip -rq "../rkp_sync-${SYNC_VERSION}.zip" . )
+# --- Package: deployer --------------------------------------------------------
+# The deployer module carries the shared sync command and the local deployer,
+# the combo runner and the deployer page; never the issuer.
+echo "- Packaging $DEPLOYER_ZIP"
+rm -rf dist/module-deployer "$DEPLOYER_ZIP"
+mkdir -p dist/module-deployer/bin dist/module-deployer/lib dist/module-deployer/webroot
+cp "$SYNC_BIN" dist/module-deployer/bin/rkp-mini-sync
+cp "$DEPLOY_BIN" dist/module-deployer/bin/rkp-mini-deployer
+cp modules/deployer/module.prop modules/deployer/customize.sh modules/deployer/action.sh \
+   modules/deployer/service.sh modules/deployer/uninstall.sh modules/deployer/sync-loop.sh \
+   modules/deployer/run.sh dist/module-deployer/
+cp modules/deployer/lib/run.sh dist/module-deployer/lib/run.sh
+cp -R modules/deployer/webroot/runner dist/module-deployer/webroot/runner
+cp -R webui/dist-receiver/. dist/module-deployer/webroot/
+chmod 755 dist/module-deployer/bin/rkp-mini-sync dist/module-deployer/bin/rkp-mini-deployer \
+  dist/module-deployer/*.sh dist/module-deployer/webroot/runner/*.sh
+chmod 644 dist/module-deployer/lib/run.sh   # sourced, never executed
+( cd dist/module-deployer && zip -rq "../$(basename "$DEPLOYER_ZIP")" . )
 
 # --- Verify -------------------------------------------------------------------
 echo "- Verify:"
-for b in "$BIN" "$SYNC_BIN"; do
-  file "$b" | sed 's/^/    /'
-  readelf -h "$b" | grep -E 'Machine|Class' | sed 's/^/    /'
+for b in "$ISSUER_BIN" "$SYNC_BIN" "$DEPLOY_BIN"; do
+  file "$b" | grep -q 'ARM aarch64' || { echo "! $b is not an AArch64 ELF" >&2; exit 1; }
+  readelf -h "$b" | grep -q 'AArch64' || { echo "! $b has no AArch64 header" >&2; exit 1; }
 done
+
+# Every required entry must be at the zip root (no wrapper directory).
 check_zip() {
-  local zip=$1; shift
-  echo "    $zip contents:"
-  local listing
-  listing=$(unzip -l "$zip")
-  sed 's/^/      /' <<<"$listing"
-  for f in "$@"; do
-    grep -q " $f\$" <<<"$listing" || { echo "! $f missing from $zip" >&2; exit 1; }
+  local zip="$1"; shift
+  local list
+  list=$(unzip -Z1 "$zip")
+  for entry in "$@"; do
+    if ! printf '%s\n' "$list" | grep -qx -- "$entry"; then
+      echo "! $zip is missing $entry" >&2
+      exit 1
+    fi
+  done
+  if printf '%s\n' "$list" | grep -q '^[^/]*/module\.prop$'; then
+    echo "! $zip has a wrapper directory" >&2
+    exit 1
+  fi
+}
+
+check_absent() {
+  local zip="$1"; shift
+  local list
+  list=$(unzip -Z1 "$zip")
+  for entry in "$@"; do
+    if printf '%s\n' "$list" | grep -qE "^${entry}$"; then
+      echo "! $zip must not contain $entry" >&2
+      exit 1
+    fi
   done
 }
-check_zip "$ZIP" module.prop customize.sh service.sh sync-loop.sh \
-  bin/rkp-mini bin/rkp-sync webroot/index.html webroot/runner/issue.sh webroot/runner/sync.sh
-check_zip "$SYNC_ZIP" module.prop customize.sh service.sh sync-loop.sh \
-  action.sh uninstall.sh bin/rkp-sync webroot/index.html webroot/runner/sync.sh
-if unzip -l "$SYNC_ZIP" | grep -qE ' (bin/rkp-mini|webroot/runner/issue\.sh)$'; then
-  echo "! receiver zip must not contain the issuer (rkp-mini / issue.sh)" >&2; exit 1
-fi
-echo "- Done: $ZIP $SYNC_ZIP"
+
+check_zip "$ISSUER_ZIP" module.prop customize.sh service.sh sync-loop.sh action.sh \
+  uninstall.sh bin/rkp-mini-issuer bin/rkp-mini-sync webroot/index.html \
+  webroot/runner/issue.sh webroot/runner/sync.sh
+check_absent "$ISSUER_ZIP" 'bin/rkp-mini-deployer' 'run\.sh' 'lib/run\.sh' 'bin/rkp-mini' 'bin/rkp-sync'
+check_zip "$DEPLOYER_ZIP" module.prop customize.sh service.sh sync-loop.sh action.sh \
+  uninstall.sh run.sh lib/run.sh bin/rkp-mini-sync bin/rkp-mini-deployer \
+  webroot/index.html webroot/runner/sync.sh
+check_absent "$DEPLOYER_ZIP" 'bin/rkp-mini-issuer' 'webroot/runner/issue\.sh' 'bin/rkp-mini' 'bin/rkp-sync'
+
+# Both modules must ship byte-identical sync binaries.
+a=$(unzip -p "$ISSUER_ZIP" bin/rkp-mini-sync | sha256sum | cut -d' ' -f1)
+b=$(unzip -p "$DEPLOYER_ZIP" bin/rkp-mini-sync | sha256sum | cut -d' ' -f1)
+[ "$a" = "$b" ] || { echo "! the two zips ship different rkp-mini-sync binaries" >&2; exit 1; }
+
+# module.prop id/version must match the owning crate; never patch it here.
+prop() { unzip -p "$1" module.prop | sed -n "s/^$2=//p" | head -1; }
+[ "$(prop "$ISSUER_ZIP" id)" = rkp_mini_issuer ] || {
+  echo "! issuer module.prop id must be rkp_mini_issuer" >&2; exit 1; }
+[ "$(prop "$ISSUER_ZIP" version)" = "$VERSION" ] || {
+  echo "! issuer module.prop version must be $VERSION (crates/rkp-mini-issuer)" >&2; exit 1; }
+[ "$(prop "$DEPLOYER_ZIP" id)" = rkp_mini_deployer ] || {
+  echo "! deployer module.prop id must be rkp_mini_deployer" >&2; exit 1; }
+[ "$(prop "$DEPLOYER_ZIP" version)" = "$DEPLOY_VERSION" ] || {
+  echo "! deployer module.prop version must be $DEPLOY_VERSION (crates/rkp-mini-deployer)" >&2; exit 1; }
+
+echo "- Done: $ISSUER_ZIP $DEPLOYER_ZIP"

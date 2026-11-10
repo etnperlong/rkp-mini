@@ -1,6 +1,0 @@
-id=rkp_sync
-name=RKP Sync · 接收端
-version=v0.1.0
-versionCode=1
-author=Evans Mike
-description=远程 keybox 接收端（默认关闭，WebUI 管理）：age 解密校验后部署到 OMK/TEESimulator；跨设备使用属于 keybox 克隆

@@ -1,11 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/rkp-mini",
+    "crates/rkp-mini-issuer",
     "crates/rkp-mini-core",
     "crates/rkp-mini-runtime",
+    "crates/rkp-mini-sync",
     "crates/rkp-mini-sync-core",
-    "crates/rkp-sync",
+    "crates/rkp-mini-deployer",
 ]
 
 [profile.release]

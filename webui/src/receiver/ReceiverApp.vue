@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Receiver page (`--mode receiver`, rkp_sync module). One page + bottom sheets:
+// Receiver page (`--mode receiver`, rkp_mini_deployer module). One page + bottom sheets:
 // KernelSU's WebView has no SPA history, so every flow stays on this page.
 // All commands go through lib/sync.ts; secrets only through SecretSheet.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -251,7 +251,7 @@ onBeforeUnmount(() => clearInterval(clock))
           <div class="notice">
             <MiuixText type="title4" weight="medium" color="var(--m-color-error)">未检测到 KernelSU 接口</MiuixText>
             <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-              请在 KernelSU 管理器的模块页中点击 rkp_sync 模块的“打开”进入此页面。当前环境无法执行命令。
+              请在 KernelSU 管理器的模块页中点击 rkp_mini_deployer 模块的“打开”进入此页面。当前环境无法执行命令。
             </MiuixText>
           </div>
         </MiuixCard>

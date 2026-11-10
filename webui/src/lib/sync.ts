@@ -1,12 +1,18 @@
-// rkp-sync WebUI contract (design docs/REMOTE_SYNC_DEVELOP.md §19).
+// rkp-mini-sync WebUI contract (design docs/REMOTE_SYNC_DEVELOP.md §19).
 // Single source of every path, command, JSON type and Chinese label used by
-// the sender section (rkp_mini module) and the receiver page (rkp_sync module).
+// the sender section (rkp_mini_issuer module) and the receiver page
+// (rkp_mini_deployer module).
+//
+// Two binaries with disjoint jobs (they never call each other):
+//   bin/rkp-mini-sync      every remote command (init/push/share/import/fetch/…)
+//   bin/rkp-mini-deployer  local plan/apply/add-target/remove-target/remove;
+//                          no network I/O and no age passphrase file.
 //
 // Secrets: only `setSecret` / `prepareRotation` handle them. They hex-encode
 // the value and write it with shell builtins (`umask`, `echo`, `>`) into a
 // 0600 inbox file; `ksu.exec` delivers the command over the root shell's
-// stdin, so the secret never appears in any process argv. rkp-sync consumes
-// and deletes the inbox file. Nothing here ever reads a secret back.
+// stdin, so the secret never appears in any process argv. rkp-mini-sync
+// consumes and deletes the inbox file. Nothing here ever reads a secret back.
 import { exec } from './ksu'
 import { CommandError, SAFE_PATH, parseLastJsonLine, resolveModuleDir } from './rkp'
 import { useTaskRunner, type TaskResult, type TaskRunner } from './runner'
@@ -15,21 +21,39 @@ import { useTaskRunner, type TaskResult, type TaskRunner } from './runner'
 
 export type SyncRole = 'sender' | 'receiver'
 
-/** Fixed per build: default mode = sender (rkp_mini), `--mode receiver` = rkp_sync. */
+/** Fixed per build: default mode = sender (rkp_mini_issuer), `--mode receiver` = rkp_mini_deployer. */
 export const SYNC_ROLE: SyncRole = import.meta.env.MODE === 'receiver' ? 'receiver' : 'sender'
 const RECEIVER = SYNC_ROLE === 'receiver'
 
-export const SYNC_MODULE_DIR = resolveModuleDir(RECEIVER ? '/data/adb/modules/rkp_sync' : '/data/adb/modules/rkp_mini')
-export const SYNC_BIN = `${SYNC_MODULE_DIR}/bin/rkp-sync`
-export const SYNC_DATA = RECEIVER ? '/data/adb/rkp_sync' : '/data/misc/keystore/rkp-mini'
+/** Receiver data root; unchanged by the module split (data compatibility). */
+const RECEIVER_DATA = '/data/adb/rkp_sync'
+
+export const SYNC_MODULE_DIR = resolveModuleDir(
+  RECEIVER ? '/data/adb/modules/rkp_mini_deployer' : '/data/adb/modules/rkp_mini_issuer',
+)
+export const SYNC_BIN = `${SYNC_MODULE_DIR}/bin/rkp-mini-sync`
+/** Local-only deployer binary; only the deployer module ships it. */
+export const DEPLOY_BIN = `${SYNC_MODULE_DIR}/bin/rkp-mini-deployer`
+export const SYNC_DATA = RECEIVER ? RECEIVER_DATA : '/data/misc/keystore/rkp-mini'
 export const SYNC_CONFIG = `${SYNC_DATA}/config.toml`
+/** The deployer only ever reads and writes the receiver's configuration. */
+export const DEPLOY_CONFIG = `${RECEIVER_DATA}/config.toml`
 export const SYNC_TMP = `${SYNC_DATA}/tmp`
 export const SYNC_INBOX = `${SYNC_DATA}/sync/inbox`
 export const SYNC_LOG = `${SYNC_DATA}/logs/sync.log`
 const SYNC_LOOP = `${SYNC_MODULE_DIR}/sync-loop.sh`
 const SYNC_RUNNER = `${SYNC_MODULE_DIR}/webroot/runner/sync.sh`
 
-for (const p of [SYNC_BIN, SYNC_CONFIG, SYNC_INBOX, SYNC_LOG, SYNC_LOOP, SYNC_RUNNER]) {
+for (const p of [
+  SYNC_BIN,
+  DEPLOY_BIN,
+  SYNC_CONFIG,
+  DEPLOY_CONFIG,
+  SYNC_INBOX,
+  SYNC_LOG,
+  SYNC_LOOP,
+  SYNC_RUNNER,
+]) {
   if (!SAFE_PATH.test(p)) throw new Error(`unsafe path: ${p}`)
 }
 
@@ -212,7 +236,7 @@ export interface SyncConfig {
   targets?: TargetConfig[]
 }
 
-/** Keys accepted by `config set` (mirrors rkp-sync's allow-list). */
+/** Keys accepted by `config set` (mirrors rkp-mini-sync's allow-list). */
 export type SenderConfigKey =
   | 'provider'
   | 'label'
@@ -336,7 +360,7 @@ export interface PlanWarning {
   message: string
 }
 
-/** `deploy plan` (read-only). */
+/** `rkp-mini-deployer ... --json plan` (read-only). */
 export interface DeployPlan {
   gate: Gate
   staged: Staged
@@ -357,7 +381,7 @@ export interface TargetReport {
   error: { code: string; message: string } | null
 }
 
-/** `deploy apply` data (also on `target_failed` errors). */
+/** `rkp-mini-deployer ... --json apply` data (also on `target_failed` errors). */
 export interface DeployReport {
   keybox_sha256: string
   seq: number
@@ -385,7 +409,10 @@ export function shq(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
-const PREFIX = `'${SYNC_BIN}' --config '${SYNC_CONFIG}' --json`
+/** Every sync invocation: role and config are pinned here, never by callers. */
+const PREFIX = `'${SYNC_BIN}' --role ${SYNC_ROLE} --config '${SYNC_CONFIG}' --json`
+/** Deployer is receiver-only; it needs no role flag of its own beyond this. */
+const DEPLOY_PREFIX = `'${DEPLOY_BIN}' --role receiver --config '${DEPLOY_CONFIG}' --json`
 
 export interface SyncCall<T> {
   envelope: SyncEnvelope<T>
@@ -393,11 +420,10 @@ export interface SyncCall<T> {
   stderr: string
 }
 
-/** Run `rkp-sync <args>`; non-zero exits still return their envelope. */
-async function call<T>(args: string, timeoutMs?: number): Promise<SyncCall<T>> {
+async function invoke<T>(prefix: string, args: string, timeoutMs?: number): Promise<SyncCall<T>> {
   let r
   try {
-    r = await exec(`${PREFIX} ${args}`, timeoutMs)
+    r = await exec(`${prefix} ${args}`, timeoutMs)
   } catch (e) {
     throw new CommandError('exec', e instanceof Error ? e.message : String(e))
   }
@@ -405,9 +431,28 @@ async function call<T>(args: string, timeoutMs?: number): Promise<SyncCall<T>> {
   return { envelope, errno: r.errno, stderr: r.stderr }
 }
 
+/** Run `rkp-mini-sync <args>`; non-zero exits still return their envelope. */
+async function call<T>(args: string, timeoutMs?: number): Promise<SyncCall<T>> {
+  return invoke<T>(PREFIX, args, timeoutMs)
+}
+
+/** Run `rkp-mini-deployer <args>` (local only: no network, no passphrase). */
+async function callDeploy<T>(args: string, timeoutMs?: number): Promise<SyncCall<T>> {
+  return invoke<T>(DEPLOY_PREFIX, args, timeoutMs)
+}
+
 /** Like `call` but throws a CommandError on `ok: false`. */
 async function data<T>(args: string, timeoutMs?: number): Promise<T> {
   const { envelope } = await call<T>(args, timeoutMs)
+  if (!envelope.ok) {
+    throw new CommandError('exit', syncErrorText(envelope.error), JSON.stringify(envelope.error))
+  }
+  return envelope.data
+}
+
+/** Like `data` for the deployer binary. */
+async function deployData<T>(args: string): Promise<T> {
+  const { envelope } = await callDeploy<T>(args)
   if (!envelope.ok) {
     throw new CommandError('exit', syncErrorText(envelope.error), JSON.stringify(envelope.error))
   }
@@ -433,9 +478,9 @@ export function setConfig(key: SenderConfigKey | ReceiverConfigKey, value: strin
   return data(`config set ${shq(key)} ${shq(String(value))}`)
 }
 
-/** Sender: add the disabled `[sync]` table to config.toml. */
+/** Sender: add the disabled `[sync]` table to config.toml (`--role` comes from PREFIX). */
 export function initSender(provider: 'gist' | 'webdav'): Promise<unknown> {
-  return data(`--role sender init --provider ${shq(provider)}`)
+  return data(`init --provider ${shq(provider)}`)
 }
 
 /** `version` must be the `RiskStatement.version` the user just accepted. */
@@ -515,8 +560,12 @@ export function importApply(uri: string): Promise<ImportResult> {
   return data<ImportResult>(`import ${shq(uri.trim())} --yes`)
 }
 
+// receiver — local deployment runs through bin/rkp-mini-deployer (no network,
+// no passphrase); its argv carries no `deploy` word.
+
+/** Read-only deployment plan (`rkp-mini-deployer --json plan`). */
 export function readDeployPlan(): Promise<SyncCall<DeployPlan>> {
-  return call<DeployPlan>('deploy plan')
+  return callDeploy<DeployPlan>('plan')
 }
 
 const SHA = /^[0-9a-f]{16,64}$/
@@ -528,9 +577,9 @@ export interface ApplyApproval {
   allowIdentityChange?: string
 }
 
-/** `deploy apply`; approvals are bound to the reviewed keybox (§19.3). */
+/** `apply`; approvals are bound to the reviewed keybox (§19.3). */
 export function deployApply(approval: ApplyApproval = {}): Promise<SyncCall<DeployReport>> {
-  let args = 'deploy apply'
+  let args = 'apply'
   for (const [flag, sha] of [
     ['--confirm-first', approval.confirmFirst],
     ['--allow-identity-change', approval.allowIdentityChange],
@@ -539,22 +588,22 @@ export function deployApply(approval: ApplyApproval = {}): Promise<SyncCall<Depl
     if (!SHA.test(sha)) throw new CommandError('exec', '非法的确认值')
     args += ` ${flag} ${sha}`
   }
-  return call<DeployReport>(args)
+  return callDeploy<DeployReport>(args)
 }
 
 export type BuiltinTarget = 'omk' | 'teesim' | 'tricky_store'
 
 export function addTarget(id: BuiltinTarget): Promise<unknown> {
-  return data(`deploy add-target ${id}`)
+  return deployData(`add-target ${id}`)
 }
 
 export function removeTarget(id: string): Promise<unknown> {
-  return data(`deploy remove-target ${shq(id)}`)
+  return deployData(`remove-target ${shq(id)}`)
 }
 
 /** Deletes deployed keybox files; UI must confirm twice (§13.3). */
 export function removeDeployed(ids: string[]): Promise<SyncCall<{ targets: TargetReport[] }>> {
-  return call(`deploy remove --yes${ids.map((i) => ` --target ${shq(i)}`).join('')}`)
+  return callDeploy(`remove --yes${ids.map((i) => ` --target ${shq(i)}`).join('')}`)
 }
 
 /** Start the module's unattended loop now (it exits by itself if not allowed). */

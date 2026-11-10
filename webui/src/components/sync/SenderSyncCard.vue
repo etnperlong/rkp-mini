@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Remote-keybox-sync card (design §19.5). Everything on it comes from
-// `rkp-sync status`, which is local-only: no keybox, private key, passphrase or
+// `rkp-mini-sync status`, which is local-only: no keybox, private key, passphrase or
 // token is ever read or rendered here. Push runs as a detached `sync.sh` task;
 // the card shows its progress and one result, and asks the page to re-read the
 // status afterwards. Other sync commands are unavailable while it runs.
@@ -222,7 +222,7 @@ function onEnabled(): void {
           </MiuixIconButton>
         </div>
         <div v-else-if="r.phase.value === 'launch_failed'" class="task">
-          <MiuixText type="body2" color="var(--m-color-error)">推送任务未能启动，请检查 rkp-sync 是否可执行。</MiuixText>
+          <MiuixText type="body2" color="var(--m-color-error)">推送任务未能启动，请检查 rkp-mini-sync 是否可执行。</MiuixText>
         </div>
         <div v-else-if="r.phase.value === 'stale'" class="task">
           <MiuixText type="body2" color="var(--m-color-error)">存在残留的同步任务锁，上次任务可能被中断。</MiuixText>

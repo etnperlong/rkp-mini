@@ -1,0 +1,6 @@
+id=rkp_mini_issuer
+name=RKP-Mini Issuer
+version=v0.1.0
+versionCode=1
+author=Evans Mike
+description=高通 KeyMint Native V2 签发 RKP 证书（RKP-Mini 签发端）；安装前必须先卸载旧的 rkp_mini 模块

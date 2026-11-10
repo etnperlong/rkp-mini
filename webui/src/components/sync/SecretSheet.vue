@@ -72,7 +72,7 @@ async function save(): Promise<void> {
         <SecretInput v-if="twice" v-model="second" label="再次输入" :disabled="busy" />
       </div>
       <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-        经 KernelSU root shell 写入 0600 临时文件后由 rkp-sync 保存并立即删除；不会出现在命令行参数、URL 或日志中。
+        经 KernelSU root shell 写入 0600 临时文件后由 rkp-mini-sync 保存并立即删除；不会出现在命令行参数、URL 或日志中。
       </MiuixText>
       <MiuixText v-if="error" type="footnote1" color="var(--m-color-error)">{{ error }}</MiuixText>
       <MiuixButton type="primary" :disabled="busy || problem !== null" @click="save">

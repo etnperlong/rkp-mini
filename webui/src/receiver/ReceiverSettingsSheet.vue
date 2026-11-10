@@ -205,7 +205,7 @@ async function confirmForget(): Promise<void> {
 
 const paths = computed(() => [
   { label: '模块目录', value: SYNC_MODULE_DIR },
-  { label: 'rkp-sync 二进制', value: SYNC_BIN },
+  { label: 'rkp-mini-sync 二进制', value: SYNC_BIN },
   { label: '配置', value: SYNC_CONFIG },
   { label: '数据目录', value: SYNC_DATA },
   { label: '同步日志', value: SYNC_LOG },

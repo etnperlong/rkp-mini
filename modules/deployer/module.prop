@@ -1,0 +1,6 @@
+id=rkp_mini_deployer
+name=RKP-Mini Deployer
+version=v0.1.0
+versionCode=1
+author=Evans Mike
+description=远程 keybox 接收端（默认关闭，WebUI 管理）：age 解密校验后部署到 OMK/TEESimulator；跨设备使用属于 keybox 克隆；安装前必须先卸载旧的 rkp_sync 模块

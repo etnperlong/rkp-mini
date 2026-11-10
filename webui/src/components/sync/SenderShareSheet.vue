@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Share sheet: renders the `rkp-sync share` URI and its QR matrix locally.
+// Share sheet: renders the `rkp-mini-sync share` URI and its QR matrix locally.
 // The URI carries location + stream metadata only (`contains_password: false`);
 // the age passphrase must be sent over a separate, secure channel.
 import { computed, ref, watch } from 'vue'

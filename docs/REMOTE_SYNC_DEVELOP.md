@@ -113,24 +113,44 @@
 
 ### 4.2 OhMyKeymint（OMK）
 
-- 活动 keybox：`/data/misc/keystore/omk/keybox.xml`。
-- 权限：`0600`，owner `1017:1017`（keystore uid）；由 `post-fs-data.sh` 设置。
-- 文件 watcher 自动重载 keybox；通常不需要重启。
-- 需要时重启命令：`touch /data/adb/omk/restart.keymint`（或 `restart.all`）。
-- 接受 EC-only keybox；至少有 EC 链即可。
+以下 §4.2–§4.3 于 2026-11-10 按上游源码复核（OMK `9069c6c`/1.2.6、TEESimulator `dev@06f9f2e`/canary-76、TEESimulator-RS `6d241e5`/v6.0.1、TrickyStore `master@3a515c5` 与 1.4.1 发布包）；均为读源码结论，未在真机验证。
+
+- 模块 id：`oh_my_keymint`（`/data/adb/modules/oh_my_keymint`）。
+- 活动 keybox：`/data/misc/keystore/omk/keybox.xml`，编译期常量，不可配置。
+- 权限：`0600`，owner `1017:1017`（keystore uid）；由 `post-fs-data.sh` 与 keymint 启动时设置。进程启动后降权到 1017，替换文件若是 `root:root 0600` 会读取失败（保留旧 keybox）。
+- 热重载：inotify 监听父目录，mask `IN_CLOSE_WRITE | IN_CREATE | IN_MOVED_TO`，只处理名字等于 `keybox.xml` 的事件 → 同目录临时文件 + `rename(2)` 会立即重载，临时文件自身的事件被忽略。**不要原地写** `keybox.xml`：`IN_CREATE` 时文件为空，解析失败后 OMK 会用内置模板覆盖它。
+- 重启开关：`/data/adb/omk/restart.keymint`（或 `restart.all`）由 wrapper 每 2 秒轮询是否存在，消费后删除并重启 keymint 进程；换 keybox 不需要它。
+- 解析是正则扫描而非 XML DOM：要求字面量 `<Key algorithm="ecdsa">`（或 `ec`）、`<PrivateKey>`、`<NumberOfCertificates>` 且数量与 `<Certificate>` 一致；EC 必需、RSA 可选。解析失败会用内置模板覆盖文件。`rkp-mini-issuer` 的输出满足这些要求；本仓库的校验把 `NumberOfCertificates` 视为可选，手工构造的 keybox 可能通过校验却被 OMK 拒绝。
 - `config.toml` 的 `[crypto]` 是设备唯一 secret；`injector.toml` 是设备/应用范围配置。**两者都不同步**。
 - `retire_stale_keybox_bound_keys` 默认 `true`：换 keybox 会删除旧 keybox 绑定的客户端 key。自动轮换必须警告。
 
-### 4.3 TEESimulator
+### 4.3 TEESimulator / TEESimulator-RS / TrickyStore
 
-- 当前 main 的活动 keybox：`/data/adb/teesim/keybox.xml`；数据目录 `/data/adb/teesim` 为 `0700`。
-- 旧版/TrickyStore 兼容路径：`/data/adb/tricky_store/keybox.xml`；TEESimulator 安装时会从旧路径拷贝。
-- `config.json` 的 profile 通过相对文件名引用 keybox，例如 `"keybox": "keybox.xml"`；文件必须在 `/data/adb/teesim` 下。
-- 文件 watcher 自动生效；无需重启。
-- 源码 `rust/teesim-km/src/attest.rs` 明确支持 EC-only，并注释 “an EC-only RKP keybox signs every leaf with its EC key”；每个 `<Key>` 链至少 2 张证书。
-- README 写“RSA + ECDSA”，与源码支持 EC-only 不一致；以目标版本实测为准。
+三者是不同项目，注意区分：
+
+| 项目 | 模块 id | keybox | watcher（目录级 inotify） |
+|---|---|---|---|
+| TEESimulator（JingMatrix，`dev`） | `teesim` | `/data/adb/teesim/<profile.keybox>`，默认 `keybox.xml` | `CLOSE_WRITE \| MOVED_TO \| DELETE`；只处理 `config.json`、`overrides.json` 与 `*.xml` |
+| TEESimulator-RS（Enginex0） | `tricky_store` | `/data/adb/tricky_store/keybox.xml`（`target.txt` 的 `[name.xml]` 段可按包指定其它文件） | `CLOSE_WRITE \| MOVED_TO \| DELETE`；`*.xml` 触发缓存失效，下次使用时重读 |
+| TrickyStore（5ec1cff） | `tricky_store` | `/data/adb/tricky_store/keybox.xml`，不可配置 | `CLOSE_WRITE \| DELETE \| MOVED_FROM \| MOVED_TO`；只处理名字等于 `keybox.xml` |
+
+共同点：读取进程是 root，文件 `0:0 / 0600` 可用；同目录临时文件 + `rename(2)` 产生的 `IN_MOVED_TO` 会触发重载，无需重启。临时文件名**不得以 `.xml` 结尾**（否则 TEESimulator 会对半成品触发一次重载）；`.<name>.tmp.<pid>` 满足。
+
+TEESimulator（`teesim`）：
+
+- 数据目录 `/data/adb/teesim` 为 `0700`；`/data/adb/tricky_store` 只在安装时用于一次性拷贝旧 keybox，运行期不读。
+- `config.json` 的 `profiles.<id>.keybox` 是相对文件名，例如 `"keybox": "keybox.xml"`；文件必须直接位于 `/data/adb/teesim` 下，且文件名以 `.xml` 结尾才会被 watcher 重载。
+- 重载后对已有 key 做 re-attest（`ReAttest`），key blob 不变。
+- `rust/teesim-km/src/attest.rs` 明确支持 EC-only；每个 `<Key>` 链至少 2 张证书。README 写“RSA + ECDSA”，与源码不一致；以目标版本实测为准。
+- 若某个 profile 的 keybox 解析失败，提交后的 profile 表可能为空，所有目标暂时失去 TA。
 - WebUI 导入 keybox 时写 `0644`，但目录 `0700`；接收端写 `0600` 由 root 读取也可行。
 - `config.json` 包含 profile、应用范围、设备身份等，**不同步**。
+
+TEESimulator-RS 与 TrickyStore（`tricky_store`，同一模块 id 与路径，二者互斥安装，共用 `tricky_store` 目标）：
+
+- 都接受 EC-only；TrickyStore 1.1.0 要求 `NumberOfCertificates` 与实际数量一致，1.4.1 不读该字段。
+- 不删除客户端 key。TEESimulator-RS 只清空 patched chain 缓存：替换前已生成/已缓存的 key 继续返回旧证书链，直到守护进程重启；TrickyStore 开源版同样不清理已生成 key 的缓存。
+- 解析失败不会回退到旧 keybox（表现为没有可用的 attestation key）。
 
 ### 4.4 Gist / WebDAV
 
@@ -819,10 +839,12 @@ rkp-mini-sync status [--json]        # sync + deploy 状态（只读）
 
 | id | 路径 | owner / mode | reload | 说明 |
 |---|---|---|---|---|
-| `omk` | `/data/misc/keystore/omk/keybox.xml` | `1017:1017` / `0600` | watcher 自动；必要时 `touch /data/adb/omk/restart.keymint` | 不同步 `config.toml`/`injector.toml`；警告 `retire_stale_keybox_bound_keys` |
-| `teesim` | `/data/adb/teesim/keybox.xml` | `0:0` / `0600`（目录 `0700`） | watcher 自动 | 需匹配 `config.json` profile 的 keybox 文件名；源码支持 EC-only，链 ≥2 |
-| `tricky_store` | `/data/adb/tricky_store/keybox.xml` | `0:0` / `0600` | watcher | 旧路径兼容 |
+| `omk` | `/data/misc/keystore/omk/keybox.xml` | `1017:1017` / `0600` | 模块 watcher（`reload = "auto"`）；`restart` 额外创建 `/data/adb/omk/restart.keymint` 重启 keymint | 模块 `oh_my_keymint`；不同步 `config.toml`/`injector.toml`；警告 `retire_stale_keybox_bound_keys` |
+| `teesim` | `/data/adb/teesim/<name>.xml`，默认 `keybox.xml` | `0:0` / `0600`（目录 `0700`） | 模块 watcher | 模块 `teesim`；需匹配 `config.json` profile 的 keybox 文件名，且必须以 `.xml` 结尾；源码支持 EC-only，链 ≥2 |
+| `tricky_store` | `/data/adb/tricky_store/keybox.xml` | `0:0` / `0600` | 模块 watcher | 模块 `tricky_store`：TrickyStore 或 TEESimulator-RS（同 id、同路径） |
 | `custom` | 本地显式配置 | 本地显式配置 | 本地显式配置 | 必须手动 opt-in；禁止远端下发路径/命令 |
+
+`rkp-mini-deployer targets [--json]` 只读地列出上表的内置目标，并检测对应模块是否安装（`/data/adb/modules/<模块 id>/module.prop` 存在；`disable`/`remove` 标记 → `enabled = false`；读取失败按未安装处理）。`data.builtin[]`：`id`、`path`、`owner`、`mode`、`module { id, installed, enabled, name, version }`。CLI 的 `add-target` 不受检测结果限制。
 
 TEESim 特别说明：
 
@@ -1152,6 +1174,7 @@ sha 参数接受完整 hex 或 ≥16 位前缀。TTY 交互路径不变（仍可
 
 - **发送端**（`rkp_mini_issuer` WebUI 新增“远程同步”卡片 + 底部弹层）：状态（启用、provider、位置、seq、上次推送/错误、本地 keybox 到期、自动循环是否运行）；初始化；provider 配置；设置 age 口令 / Gist token / WebDAV 密码；风险确认弹层（§13.2 每条独立复选框，默认全不勾，全勾才可提交，含 §19.1 debug manager 残余风险）；启用/禁用；立即推送；分享（URI + 由 `share --json` 的 `qr` 矩阵本地渲染的二维码 + “不含密码”提示）；轮换口令；清除本地数据；同步日志。
 - **接收端**（`rkp_mini_deployer` 模块 `webroot/`，同一 Vue 工程的第二个入口）：粘贴导入链接 → `import --check` 预览位置 → 确认后 `import --yes`；风险确认；口令/WebDAV 密码；目标增删（omk/teesim/tricky_store）；策略设置；拉取（TOFU 弹层展示事实后 `--accept-first <sha>`）；部署（先 `rkp-mini-deployer plan`，首次/身份变化弹层展示 old→new、OMK key 删除警告、TEESim re-attest、“未做根信任检查”，再带 sha 执行）；pending 提示；立即运行；禁用；清除；移除已部署 keybox（两步确认）；日志。
+- “部署目标”弹层先调用 `rkp-mini-deployer targets`：只有 `module.installed` 为 true 的内置目标可以添加；未检测到模块的目标显示为不可选并给出模块 id；检测失败时不提供任何添加入口。已停用的模块仍可选择，但会提示启用前不会重载。
 - 长任务（push、fetch、rotate-password）走 `webroot/runner/sync.sh <op> [非密钥参数]`，与 `issue.sh` 相同的 `setsid` + 状态文件 + 轮询模型；短命令（status/plan/config/secret/enable）直接 `exec`。
 - 启用后页面立即以 `setsid` 启动模块的 `sync-loop.sh`（脚本自带 pid 锁，重复启动无害）；禁用后循环在下一次唤醒时退出。
 - 页面从不读取或展示 keybox、私钥、口令、token；`staging/`、`secrets/`、`inbox/` 不出现在任何 `cat`/`ls` 命令里。

@@ -30,7 +30,7 @@ Two modules use them: **RKP-Mini Issuer** (`rkp_mini_issuer`, ships issuer + syn
 - `rkp-mini-issuer issue --acknowledge` — generate P-256 key → fetch RKP challenge → sign
   CSR via KeyMint `0x3122` → `signCertificates` → validate chain → write keybox.
 - `rkp-mini-sync` — sender: `push`, `share`, `rotate-password`; receiver: `import`, `fetch`.
-- `rkp-mini-deployer` — `plan`, `apply`, `add-target`, `remove-target`, `remove`.
+- `rkp-mini-deployer` — `plan`, `apply`, `targets`, `add-target`, `remove-target`, `remove`.
 - KernelSU WebUI — issuer page: status, prerequisite checks, one-tap issuance with
   result/failure diagnostics, certificate details, issue logs, read-only config and the
   remote-sync (sender) section. Deployer page: import, first-use confirmation, deployment
@@ -98,8 +98,12 @@ sees ciphertext; links and QR codes carry the location only, never the passphras
   `stream_id`/`seq`/`prev`/expiry and strict keybox checks (no DTD, EC-only, chain 2..8 leaf→root,
   key/leaf match, DeviceID derivation) and stage the keybox (`0600`). `rkp-mini-deployer apply`
   then writes it atomically to locally configured targets: OhMyKeymint
-  (`/data/misc/keystore/omk/keybox.xml`, `1017:1017`), TEESimulator (`/data/adb/teesim/`, must be
-  referenced by `config.json`), TrickyStore, or a custom opt-in path. Tool configs (OMK
+  (`/data/misc/keystore/omk/keybox.xml`, `1017:1017`), TEESimulator (a `.xml` file in
+  `/data/adb/teesim/`, must be referenced by `config.json`), TrickyStore or TEESimulator-RS
+  (both read `/data/adb/tricky_store/keybox.xml`), or a custom opt-in path. Each of these
+  modules watches its keybox directory and reloads the replaced file without a reboot.
+  `rkp-mini-deployer targets` lists the built-in targets and whether the owning module is
+  installed; the WebUI only offers targets whose module was detected. Tool configs (OMK
   `config.toml` / `injector.toml`, TEESim `config.json`) are never synced.
 - Certificate signatures, root trust and revocation are **not** verified.
 
@@ -132,6 +136,7 @@ Receiver, `SYNC` = `/data/adb/modules/rkp_mini_deployer/bin/rkp-mini-sync` and
 
 ```sh
 SYNC import 'rkpsync://v1/import?p=…'         # review location, accept risk, enter passphrase
+DEPLOY targets                               # which target modules are installed
 DEPLOY add-target omk                        # or teesim / tricky_store
 SYNC fetch                                   # first version: trust-on-first-use confirmation
                                              # (non-interactive: --accept-first <plaintext_sha256>)

@@ -2,166 +2,183 @@
 
 ## Project Overview
 
-RKP Mini is a Rust CLI suite shipped as two KernelSU modules, developed against a single Qualcomm reference device (arm64); other devices and firmware are untested, and no successful on-device issuance is recorded. It uses Qualcomm KeyMint Native V2 (`0x3122`) to obtain RKP certificates for a fresh userspace P-256 key and export a TrickyStore-compatible keybox.
+RKP-Mini is a Rust CLI suite shipped as two KernelSU modules, developed against a single Qualcomm reference device (arm64); other devices and firmware are untested, and no successful on-device issuance is recorded. It uses Qualcomm KeyMint Native V2 (`0x3122`) to obtain RKP certificates for a fresh userspace P-256 key and export a TrickyStore-compatible keybox; an opt-in sync layer moves that keybox, encrypted, to another device.
 
-Keep the original scope: Native V2 only; report unsupported firmware rather than adding V1/AIDL fallbacks. No TEE/boot-state spoofing. Issuance does not promise Play Integrity success.
+Scope is fixed: Native V2 only (report unsupported firmware instead of adding V1/AIDL fallbacks), no TEE/boot-state spoofing, no promise of Play Integrity success.
 
-Three commands, no shared `main` and no cross-invocation:
+Three independent commands. They never link or invoke each other; module scripts and users compose them.
 
-|Binary|Scope|
+|Binary|Commands|
 |---|---|
-|`rkp-mini-issuer`|`status`, `issue` (with `--if-expiring-days N`), `config init\|show`, internal `__ta-worker`|
+|`rkp-mini-issuer`|`status`, `issue` (`--if-expiring-days N`), `config init\|show`, internal `__ta-worker`|
 |`rkp-mini-sync`|`init`, `risk`, `enable`, `disable`, `forget`, `secret set`, `config show\|set`, `status`, `check-auto [--require-verified]`, `push`, `share`, `rotate-password`, `import`, `fetch`|
 |`rkp-mini-deployer`|`plan`, `apply`, `add-target`, `remove-target`, `remove` (local only)|
 
-The commands never call each other and never link each other; users combine them in their shell, and the module scripts combine them for the WebUI/Action/loop. Old names (`rkp-mini`, `rkp-sync`, the `sync-now` alias, `run`, and the `deploy …` subcommands) are gone: they are usage errors, not aliases.
+Removed names are usage errors (exit 2), not aliases: binaries `rkp-mini`/`rkp-sync`, `sync-now`, `run`, and every `deploy …` subcommand.
 
-Two modules: `rkp_mini_issuer` (`modules/issuer`, ships issuer + sync + issuer page) and `rkp_mini_deployer` (`modules/deployer`, ships sync + deployer + combo runner + deployer page). Each installer aborts when the same-role legacy module (`rkp_mini` / `rkp_sync`) is still installed; data roots and paths are unchanged, so a cutover keeps credentials and anti-replay state. The legacy `rkp_sync` uninstaller deletes `/data/adb/rkp_sync`, so the manual cutover backs that root up first.
+Two modules: `rkp_mini_issuer` (`modules/issuer`: issuer + sync + issuer page) and `rkp_mini_deployer` (`modules/deployer`: sync + deployer + combo runner + deployer page). Data identifiers deliberately keep their old spelling: sender root `/data/misc/keystore/rkp-mini`, receiver root `/data/adb/rkp_sync`, remote file `rkp-sync.age`, `rkpsync://v1/import`, DeviceID prefix `rkp-mini-`, TOML/JSON roles `sender`/`receiver`. Rename commands, never these.
 
-Remote private-key deployment is opt-in and disabled by default. It encrypts the keybox to user-controlled storage (Gist/WebDAV/public HTTPS) with an age passphrase. Enabling it requires explicit risk acceptance. It does not guarantee Play Integrity, and using a keybox on a different device is keybox cloning / spoofing, not a legitimate RKP provisioning path. The settled design — decisions, threat model, formats, acceptance list — is `docs/REMOTE_SYNC_DEVELOP.md`; read it before touching `rkp-mini-sync` and do not re-litigate its decisions. Unattended loops run only while sync is enabled; `auto_issue_days` is a remaining-days threshold used by the sender loop, and `rkp-mini-issuer` itself never schedules.
+Remote private-key deployment is opt-in, disabled by default, and gated on explicit risk acceptance. Using a keybox on another device is keybox cloning/spoofing, not legitimate RKP provisioning. Unattended loops run only while sync is enabled; `rkp-mini-issuer` itself never schedules.
 
-The module ships a KernelSU WebUI (`webui/` → `webroot/`) as a thin shell over the CLIs' `--json` contracts: it reads status, starts issuance and shows results, logs and read-only issuer config, and manages remote sync and local deployment. Neither page reads or renders keybox/private-key contents or stored secrets, edits the issuer's own config keys, or adds protocol paths; sync settings change only through `rkp-mini-sync config set` (allow-list), target edits only through `rkp-mini-deployer add-target|remove-target`. The Action button stays as the second entry point.
+Design records — read before changing the area, and treat their decisions as settled:
 
-For protocol or scope changes, consult the original external design note (kept outside this repository). Treat current source as the implementation reference; the design's proposed layout and acceptance checklist are not evidence of completed device validation.
+- `docs/REMOTE_SYNC_DEVELOP.md`: sync protocol, threat model, formats, risk statement (§13), WebUI secrets/approvals (§19). Required before touching `rkp-mini-sync*` or `rkp-mini-deployer`.
+- `docs/WEBUI_DEVELOP.md` (local, currently untracked): WebUI design record and KernelSU WebView facts. Required before touching `webui/`.
+- The original external design note (outside the repo): issuance protocol/scope. Its proposed layout and acceptance checklist are not evidence of device validation; current source is the implementation reference.
 
 ## Architecture & Data Flow
 
-Cargo workspace with six crates and a strictly acyclic dependency graph:
+Six crates, acyclic:
 
 ```text
-rkp-mini-issuer            (binary, self-contained: no rkp-mini-* dependency)
-rkp-mini-core              ← rkp-mini-runtime
-rkp-mini-core              ← rkp-mini-sync-core
-rkp-mini-core + runtime + sync-core ← rkp-mini-sync      (binary)
-rkp-mini-core + runtime    ← rkp-mini-deployer           (binary)
+rkp-mini-issuer   (bin)  no rkp-mini-* dependency; the only crate with vendor ABI (libloading)
+rkp-mini-core     (lib)  no age, no ureq, no libc
+rkp-mini-runtime  (lib)  ← core            (libc for flock/isatty/kill/getuid)
+rkp-mini-sync-core(lib)  ← core            (age, ciborium)
+rkp-mini-sync     (bin)  ← core + runtime + sync-core   (ureq, qrcode)
+rkp-mini-deployer (bin)  ← core + runtime  (no HTTP, no age)
 ```
 
-- `crates/rkp-mini-core`: local, network-free foundation — `error` (stage/code/exit model), `fsutil` (atomic 0600 writes), `keybox` (strict XML validation, no DTD), `locator` (`rkpsync://v1/import` + URL policy), `state` (`sync-state.json`, `deploy-state.json`, `staging/latest.json`), `confirmation` (`sha_confirms`/`confirmation_mismatch`), and the `PROTOCOL_VERSION`/`REMOTE_FILENAME`/limits/`sha256`/`valid_stream_id`/`DAY` constants. Real P-256 fixtures live here behind the non-default `test-support` feature. It must not depend on `age`, an HTTP client or vendor ABI.
-- `crates/rkp-mini-sync-core`: `envelope` (age scrypt + armor), `manifest` (canonical CBOR), `protocol` (push base selection, receiver replay/rollback), `secret` (0600 secret/inbox files), `transport`; re-exports `age::secrecy`.
-- `crates/rkp-mini-runtime`: `config` (TOML, roles, templates, comment-preserving edits, target policies), `targets` (builtin/custom target parsing only), `context` (`Global`/`Ctx`), `output` (`Output`, one envelope per command, exit mapping), `lock` (the shared non-blocking data lock), `cli` (`Flags`, `sha_arg`), `tty` (plain prompts), `util` (clock, UTC date, loop-pid check). No network, no `age`, no secret reading.
-- `crates/rkp-mini-issuer`: `src/rkp/` orchestrates issuance (acknowledge → config → prerequisites → key → challenge → request → TA worker → CSR → certificates → chain → artifacts → description). `protocol.rs` owns CBOR/COSE and the five TA frame layouts: preserve challenge/public-key binding, request limits, and field `57` as a byte string containing a CBOR key array. `keymint.rs` isolates vendor ABI calls by re-executing the binary (`RKP1` envelope, parent timeout, silenced child); keep unsafe vendor calls behind that boundary. `server.rs` does blocking CBOR HTTP via `ureq`; `chain.rs` checks DER structure/linkage/leaf key/validity; `keybox.rs` builds/inspects XML. Local validation does **not** cryptographically verify CSR or certificate signatures. `status.rs` is local-only and can rewrite `module.prop`.
-- `crates/rkp-mini-sync`: `app` (HTTP client, age passphrase, provider credentials, sync-state bookkeeping), `http` (manual redirects, DNS-level private-address guard, 256 KiB cap), `remote` (Gist/WebDAV/read-only URL), `sender`, `receiver` (import + fetch only), `common`, `cli`, `tty` (echo-off secret reader over `runtime::tty`).
-- `crates/rkp-mini-deployer`: `cli`, `commands` (plan/apply/add-target/remove-target/remove, the skip rules, sha-bound approvals), `deploy` (identity gate, atomic target write with SELinux label preservation, per-target report, reload, remove). Local only: no HTTP, no age, no sync state writes.
+- `rkp-mini-core`: `error` (`Stage`, `SyncError`, `Stage::exit_code`), `fsutil` (`atomic_write`, `ensure_private_dir`), `keybox` (strict XML validation, no DTD), `locator` (`rkpsync://` + URL/SSRF policy), `state` (`sync-state.json`, `deploy-state.json`, `staging/latest.json`), `confirmation` (`sha_confirms`, `confirmation_mismatch`), protocol constants. `test_support` (`TestKeybox`) sits behind the non-default `test-support` feature.
+- `rkp-mini-sync-core`: `envelope` (age scrypt + armor), `manifest` (canonical CBOR; decode re-encodes and requires byte equality), `protocol` (push base selection, receiver seq/prev/rollback rules over a `Transport`), `secret` (0600 secret/inbox files), `transport`.
+- `rkp-mini-runtime`: `config` (TOML, roles, templates, comment-preserving `edit_table`/`add_target`/`remove_target`, `lock_path`), `targets` (`resolve_targets`: parsing only, no I/O on targets), `context` (`Global`, `Ctx`), `output` (`Output`, `print_error`, `emit` returns the exit code), `lock` (shared non-blocking `flock`), `cli` (`Flags`, `sha_arg`), `tty` (plain prompts), `util`.
+- `rkp-mini-issuer` (`src/rkp/mod.rs`): acknowledge → config → prerequisites → key → challenge → request → TA worker → CSR → certificates → chain → artifacts → module description. `protocol.rs` owns CBOR/COSE and the five TA frame layouts: preserve challenge/public-key binding, request limits, and field `57` as a byte string containing a CBOR key array. `keymint.rs` re-executes the binary as `__ta-worker` (`RKP1` envelope via `request.bin`/`reply.bin`, parent timeout, silenced child); unsafe vendor calls stay behind that boundary. `server.rs` is blocking CBOR over `ureq`; `chain.rs` checks DER structure/linkage/leaf key/validity. Nothing verifies CSR or certificate signatures cryptographically. `status.rs` is local-only (no network, no TA).
+- `rkp-mini-sync`: `app` (HTTP client, passphrase, credentials, sync-state error recording), `http` (manual same-host redirects, DNS-level private-address guard, 256 KiB cap), `remote` (Gist API/raw, WebDAV PUT tmp+MOVE, read-only URL), `sender`, `receiver` (import + fetch only), `common` (init/risk/enable/forget/config/status/check-auto), `tty` (echo-off secret reader).
+- `rkp-mini-deployer`: `commands` (plan/apply/add-target/remove-target/remove, skip rules, sha-bound approvals), `deploy` (identity gate, temp + fsync + rename + dir fsync write preserving the SELinux label, read-back hash, reload, remove).
 
-Failures: `rkp-mini-issuer` keeps its own error contract (stage/code/`ta_status`/`head_hex`, exit 1/2/3/4/5/6/7). `rkp-mini-sync` and `rkp-mini-deployer` share `SyncError` (sync: 0 ok, 2 usage/config/risk, 8 sync/network/decrypt/validate/state, 1 other; deployer: 0 ok, 2 usage/config/approval, 9 deploy, 1 other).
+Data flow: `sync push` seals `output/keybox.xml` into one armored age file → `sync fetch` verifies `stream_id`/`seq`/`prev`/expiry/keybox structure and writes `staging/latest.json` + `staging/<sha>.xml` → `deployer apply` re-validates the staged bytes, evaluates the identity gate, writes each locally configured target, records `deploy-state.json`. `fetch` never reads deploy state; `plan`/`apply`/`remove` never read sync state; sync `status` reads both without locking. Mutating commands (`push`, `rotate-password`, `import`, `fetch`, `forget`, `apply`, `remove`, `add-target`, `remove-target`) take the non-blocking `<root>/sync/sync.lock`; contention is `locked` (exit 8), never a wait.
 
-Data flow for sync: `rkp-mini-sync push` seals `output/keybox.xml` into one armored age file; `rkp-mini-sync fetch` verifies `stream_id`/`seq`/`prev`/expiry/keybox structure and writes `staging/latest.json` + the staged XML; `rkp-mini-deployer apply` re-validates the staged bytes, evaluates the identity gate, writes each locally configured target, and records `deploy-state.json`. `fetch` never reads deploy state; `apply` never reads sync state.
+Exit contracts (`--json` prints exactly one envelope; only each `main` calls `process::exit`):
 
-Module scripts:
+|Binary|Codes|
+|---|---|
+|issuer (own `error.rs`)|1 generic, 2 config/usage, 3 prerequisites, 4 HTTP, 5 TA/CSR, 6 chain/keybox, 7 writes. `status` always exits 0 (blockers are data). `--json` is honoured only by `status` and `issue`|
+|sync|0, 2 config/usage/risk/`wrong_role`, 8 remote/decrypt/validate/state, 1 other|
+|deployer|0 (including `data.skipped` and `data.pending`), 2 config/usage/`wrong_role`/missing `--yes`, 8 state (`nothing_staged`, `staging_corrupt`, `locked`, `confirmation_mismatch`), 9 a target failed (envelope carries `data`), 1 other|
 
-- `modules/issuer`: `customize.sh` (legacy-module gate, arm64 gate, permissions, config init, non-fatal status), `service.sh` (status refresh; starts `sync-loop.sh` only when sender `check-auto` passes), `action.sh` (foreground `issue --acknowledge`), `sync-loop.sh` (12 h: optional `issue --if-expiring-days`, then `push --auto`), `uninstall.sh` (keeps data), `webroot/runner/issue.sh`, `webroot/runner/sync.sh` (sender `push`/`rotate` only).
-- `modules/deployer`: `customize.sh`, `service.sh`, `action.sh` (`exec sh run.sh action`), `sync-loop.sh` (8 h: `sh run.sh auto`, then logs each step from the auto sidecars), `uninstall.sh` (keeps `/data/adb/rkp_sync` and deployed keyboxes), `webroot/runner/sync.sh` (receiver `fetch [sha]`/`run`), and the combo runner:
-  - `run.sh` fixes the binaries/data root and accepts only `action` | `run` | `auto`.
-  - `lib/run.sh` exposes `run_receiver_steps MODE SYNC_BIN DEPLOY_BIN CONFIG RESULT_BASE` and `publish_run_result RESULT_BASE OVERALL`.
-  - `action` runs fetch then `apply --if-staged` in the foreground (stdio inherited, prompts intact) and still runs apply after a failed fetch; `run` (WebUI) does the same with `--json`; `auto` runs `check-auto --require-verified` first and stops on failure, then `fetch --auto` and `apply --auto --if-staged`.
-  - Result files in `<data root>/tmp`: `<base>.{preflight,fetch,deploy}.{json,err,code}`, `<base>.last.op`, `<base>.last.err`, `<base>.last.steps`, `<base>.last.code` (`<base>` = `sync-task` for WebUI, `sync-auto` for the loop; action writes none). Old results are deleted in a fixed order before the binary check; `last.steps` is an eight-section snapshot separated by `<<<RKP-SEP>>>` (overall, fetch code/JSON/stderr, deploy code/JSON/stderr, orchestration stderr, tails capped at 16 KiB), renamed into place before `last.code` is written. Shell never parses or synthesises JSON, uses no jq/python, and never falls back to a binary on `PATH`.
+Module scripts (`/system/bin/sh`):
 
-WebUI (`webui/src/`): one Bun package, two explicit apps. `entry.ts` resolves the app from `--mode issuer|deployer` only. `src/apps/issuer/` (issuer page + sender sync section) and `src/apps/deployer/` (deployer page) each have `main.ts`, `App.vue`, `components/`, `lib/`, `dev/` and a `config.ts` exporting `appConfig` (`moduleId`, `moduleDir`, `dataRoot`, `syncRole`). `src/shared/` holds `components/` (FoldBlock, StatusPill, RiskSheet, SecretSheet, SecretInput), `lib/` (`command.ts` errors/paths/JSON-line parsing, `ksu.ts` bridge, `runner.ts` `useTaskRunner`, `sync.ts` types + management commands, format/theme/debug/clipboard), and `styles/app.css`. Aliases: `@app` → the mode's `main.ts`, `@app-config` → its `config.ts`, `@app-mock` → its `dev/mock.ts`; `ksu.ts` imports the mock only inside `import.meta.env.DEV`. Deploy execution (`plan`/`apply`/`add-target`/`remove-target`/`remove`) lives in `apps/deployer/lib/deploy.ts` and calls `bin/rkp-mini-deployer --role receiver --config … --json`; `apps/deployer/lib/run.ts` parses `sync-task.last.steps` (requires `last.op == run`, exactly 8 sections, per-section JSON validated, empty code+envelope = not executed). Vite ships no shell: `publicDir: false`, no runner plugins, `base: './'`, ES2020, production CSP with `connect-src 'none'`.
+- Both modules: `customize.sh` and `service.sh` stop when the legacy same-role module (`rkp_mini` / `rkp_sync`) exists under `/data/adb/modules` or `modules_update`. `service.sh` starts `sync-loop.sh` only when `rkp-mini-sync check-auto` passes. `uninstall.sh` keeps the data root. Loops hold a pid file (`<root>/tmp/sync-loop.pid`) and log to `<root>/logs/sync.log` (256 KiB, one `.1` generation).
+- Issuer: `action.sh` = foreground `issue --acknowledge`; loop ≈12 h: optional `issue --if-expiring-days <auto_issue_days>`, then `push --auto`.
+- Deployer: `action.sh` = `exec sh run.sh action`; loop ≈8 h: `sh run.sh auto`, then appends each step sidecar to the log.
+- `webroot/runner/{issue,sync}.sh` are the WebUI's background tasks: `mkdir` lock `<root>/tmp/<name>.lock` (contention → exit 9), outputs `<name>.last.{json,err,op}`, `<name>.last.code` written last. Issuer `sync.sh` accepts `push`/`rotate`; deployer `sync.sh` accepts `fetch [sha]`/`run`. Roles are fixed per script.
 
-WebUI secrets (design §19.2): `ksu.exec` sends the command over the root shell's stdin, so only external commands' argv are visible. `shared/lib/sync.ts` hex-encodes a secret and writes it with builtins (`umask 077; echo <hex> > <inbox>/<kind>.hex`), then `rkp-mini-sync secret set … --from-file … --hex` consumes and deletes it. Never pass secrets as arguments, env, here-docs or localStorage. Debug builds of the KernelSU manager log shell commands; that residual risk is a risk-statement item. Approvals are bound to what was shown: `enable --accept-risk <version>`, `fetch --accept-first <plaintext sha>`, `apply --confirm-first/--allow-identity-change <keybox sha>`.
+Combo runner (`modules/deployer/run.sh` + sourced `lib/run.sh`), the only orchestration layer:
+
+- `run.sh action|run|auto`; anything else exits 2. Binaries come from the module directory only.
+- `action`: foreground fetch, then `apply --if-staged` even when fetch failed; stdio inherited, no sidecars. `run` (WebUI): same with `--json`. `auto`: `check-auto --require-verified` first, stop on failure; then `fetch --auto`, `apply --auto --if-staged`.
+- Exit priority: preflight failure, else deploy non-zero, else fetch non-zero, else 0.
+- Sidecars under `<root>/tmp/<base>` (`sync-task` for the WebUI, `sync-auto` for the loop): `.preflight|.fetch|.deploy.{json,err,code}`, `.last.{op,err,steps,code}`. Old results are deleted in a fixed order before the binary check. `publish_run_result` writes `last.steps` (eight sections split by `<<<RKP-SEP>>>`: overall, fetch code/JSON/stderr, deploy code/JSON/stderr, orchestration stderr; stderr tails capped at 16 KiB; no preflight section), renames it into place, then writes `last.code`. A failed publish exits 1 with no `last.code`: readers treat a missing code as "unknown".
+
+WebUI (`webui/`, one Bun package, two apps):
+
+- `vite.config.ts` accepts only `--mode issuer|deployer` (`resolveApp` throws otherwise, so bare `vite`, `vite build` and `bun run preview` fail), exposes it as `virtual:app-mode`, and aliases `@app` → `src/apps/<app>/main.ts`, `@app-config` → `config.ts`, `@app-mock` → `dev/mock.ts`. Output `dist/<app>/`. `publicDir: false`: Vite ships no shell; runners live in `modules/*/webroot/runner`.
+- `src/apps/issuer` (issue page + sender sync section) and `src/apps/deployer` each own `App.vue`, `components/`, `lib/`, `dev/`, and `config.ts` (`appConfig`: `moduleId`, `moduleDir`, `dataRoot`, `syncRole`). `src/shared` (`components/`, `lib/`, `styles/app.css`) never imports from `apps`; its only coupling is `@app-config` and a DEV-only dynamic `@app-mock` import in `shared/lib/ksu.ts`.
+- `shared/lib/ksu.ts` wraps `ksu.exec`; its 10 s timeout stops waiting but never kills the command, so long work goes through `shared/lib/runner.ts` (`useTaskRunner`: detached `setsid`/`nohup` launch, polls the runner files above).
+- Contract mirrors: `apps/issuer/lib/rkp.ts` ↔ issuer JSON; `shared/lib/sync.ts` ↔ sync JSON and management commands; `apps/deployer/lib/deploy.ts` ↔ deployer (`bin/rkp-mini-deployer --role receiver --config … --json`); `apps/deployer/lib/run.ts` ↔ `sync-task.last.steps` (requires `last.op == run`, exactly 8 sections, validates each envelope; empty code + envelope = step not executed).
+- The deployer page branches on `result.op === 'run'` before touching an envelope: a combined run publishes none.
+
+Secrets from the WebUI (design §19.2): `ksu.exec` pipes the command to the root shell's stdin, so only external commands' argv are visible. `shared/lib/sync.ts` hex-encodes the secret and writes it with builtins (`umask 077; mkdir -p <inbox>; echo <hex> > <inbox>/<kind>.hex`), then `rkp-mini-sync secret set <kind> --from-file … --hex` consumes and deletes it.
 
 ## Key Directories
 
 |Path|Purpose|
 |---|---|
 |`crates/rkp-mini-issuer/src/`, `…/src/rkp/`|Issuer CLI/config/status and the issuance pipeline|
-|`crates/rkp-mini-core/`, `crates/rkp-mini-runtime/`|Network-free foundation and shared local runtime|
-|`crates/rkp-mini-sync-core/`, `crates/rkp-mini-sync/`|Sync library (age/CBOR/protocol/transport) and sync CLI|
-|`crates/rkp-mini-deployer/`|Local deployment CLI (identity gate + atomic target writes)|
-|`modules/issuer/`|Issuer module: hooks, loop and the issuer WebUI runner|
-|`modules/deployer/`|Deployer module: hooks, loop, `run.sh`+`lib/run.sh`, deployer runner; never the issuer|
-|`dist/module-issuer/`, `dist/module-deployer/`, `dist/*.zip`|Generated staging trees and installable ZIPs; edit `modules*/` and `webui/`, not staged copies|
-|`webui/`|Vue 3 + `miuix-vue` source for both pages; `dist/issuer/`, `dist/deployer/` outputs|
-|`target/`|Generated host and Android build outputs|
-
-Tests live beside implementation, not in a `tests/` directory.
+|`crates/rkp-mini-core/`, `crates/rkp-mini-runtime/`|Network-free foundation; shared config/lock/output/targets|
+|`crates/rkp-mini-sync-core/`, `crates/rkp-mini-sync/`|Sync library and CLI (both roles)|
+|`crates/rkp-mini-deployer/`|Local deployment CLI|
+|`modules/issuer/`, `modules/deployer/`|Module sources: hooks, loops, WebUI runners, combo runner|
+|`webui/src/apps/{issuer,deployer}/`, `webui/src/shared/`|The two pages and their common layer; dev mocks and fixtures under each app's `dev/`|
+|`dist/module-issuer/`, `dist/module-deployer/`, `dist/*.zip`, `webui/dist/`, `target/`|Generated; edit `modules/` and `webui/src/` instead|
 
 ## Development Commands
 
 Run from the repository root:
 
 ```sh
-cargo build --locked                  # Host build (workspace)
-cargo run -p rkp-mini-issuer -- --help        # Safe CLI smoke check
-cargo run -p rkp-mini-issuer -- config show   # Effective configuration
-cargo run -p rkp-mini-sync -- --help          # Sync CLI smoke check
-cargo run -p rkp-mini-deployer -- --help      # Deployer CLI smoke check
-cargo test --locked                   # Host unit tests (all crates)
-cargo test --locked -p rkp-mini-sync-core protocol::tests   # Focused protocol tests
-cargo fmt --check                     # Standard formatting check
+cargo build --locked
+cargo test --locked                                         # all crates, offline
+cargo test --locked -p rkp-mini-sync-core protocol::tests   # focused example
+cargo fmt --all --check
 cargo clippy --locked -p rkp-mini-core -p rkp-mini-runtime -p rkp-mini-sync-core \
   -p rkp-mini-sync -p rkp-mini-deployer --all-targets -- -D warnings
-rustup target add aarch64-linux-android
-NDK=/path/to/android-ndk ./build.sh   # Android release build + WebUI + KernelSU ZIPs
-cd webui && bun install --frozen-lockfile && bun run build   # vue-tsc + both vite builds
-cd webui && bun run dev:issuer          # Issuer preview against fixtures
-cd webui && bun run dev:deployer        # Deployer preview against fixtures
+cargo run -p rkp-mini-issuer -- --help      # likewise -p rkp-mini-sync, -p rkp-mini-deployer
+cargo tree --locked -p rkp-mini-deployer -e normal          # dependency-direction check
+cd webui && bun install --frozen-lockfile && bun run build  # vue-tsc + both vite builds
+cd webui && bun run dev:issuer                              # or dev:deployer
+NDK=/path/to/android-ndk ./build.sh                         # arm64 release + both ZIPs
 ```
 
-Issuer dev scenarios: `?mock=ready|expiring|expired|invalid|missing|blocked|status-exit|status-parse|status-timeout`, `?runner=idle|running|overdue|success|failure|crashed|stale`, `?outcome=success|failure`; sender sync scenarios are described in `apps/issuer/dev/mockSyncSender.ts`. Deployer scenarios: `apps/deployer/dev/mockReceiver.ts` (including the combined-run sidecar scenarios).
+- The clippy gate leaves out `rkp-mini-issuer`: it has pre-existing findings under `-D warnings`.
+- `build.sh` builds the three binaries for `aarch64-linux-android` (API 26), runs `bun run build`, stages `modules/<role>` + `webui/dist/<role>` into `dist/module-<role>`, and zips `dist/rkp_mini_issuer-v<issuer version>.zip` and `dist/rkp_mini_deployer-v<deployer version>.zip`. It verifies AArch64 ELFs, a fixed required-entry and forbidden-entry list per ZIP, no wrapper directory, byte-identical `bin/rkp-mini-sync` in both ZIPs, and `module.prop` `id`/`version` against the owning crate. The version compare is literal: `module.prop` needs `version=v<crate version>`. `versionCode` is unchecked. Without `NDK` it picks the highest directory under `~/Android/Sdk/ndk/`.
+- Dev previews run against fixtures when no KernelSU bridge exists. Scenario query parameters:
 
-`build.sh` configures the NDK linker and `ring` C compiler variables, targets Android API 26, builds `rkp-mini-issuer`, `rkp-mini-sync` and `rkp-mini-deployer` with the committed lockfile, builds both WebUI pages with Bun (frozen lockfile), copies `modules/issuer` + `webui/dist/issuer` into `dist/module-issuer` and `modules/deployer` + `webui/dist/deployer` into `dist/module-deployer`, and checks the ELFs/ZIPs with `file`, `readelf` and `unzip`. Outputs: `dist/rkp_mini_issuer-v<issuer version>.zip` (root: `module.prop`, hooks, `sync-loop.sh`, `bin/rkp-mini-issuer`, `bin/rkp-mini-sync`, `webroot/index.html`, `webroot/runner/{issue,sync}.sh`) and `dist/rkp_mini_deployer-v<deployer version>.zip` (root: `module.prop`, hooks, `sync-loop.sh`, `run.sh`, `lib/run.sh`, `bin/rkp-mini-sync`, `bin/rkp-mini-deployer`, `webroot/index.html`, `webroot/runner/sync.sh`). No wrapper directory; the script fails when an entry is missing or extra, when the two ZIPs ship different `rkp-mini-sync` binaries, or when `module.prop` id/version disagrees with the owning crate.
+|App|Parameters|
+|---|---|
+|issuer (`dev/mock.ts`, `dev/mockSyncSender.ts`)|`mock=ready\|expiring\|expired\|invalid\|missing\|blocked\|status-exit\|status-parse\|status-timeout`, `runner=idle\|running\|overdue\|success\|failure\|crashed\|stale`, `outcome=success\|failure`, `sync=uninit\|disabled\|ready\|error\|nosecret`, `syncpush=ok\|noop\|fail`|
+|deployer (`dev/mock.ts`)|`sync=new\|imported\|ready\|pending_first\|pending_identity\|error`, `fetch=tofu\|ok\|fail\|mismatch`, `deploy=fail`, `run=ok\|fetch_fail\|missing_envelope\|skipped\|stale`|
 
-On a rooted target after installation:
+The deployer mock persists its runner files in `localStorage` (`rkp.mock.receiver.runner`) so a reload reproduces a finished task; clear storage for a clean scenario.
+
+On a rooted target:
 
 ```sh
 su -c '/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-issuer status --json'
-su -c '/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-issuer issue --acknowledge --json'
 su -c '/data/adb/modules/rkp_mini_deployer/bin/rkp-mini-deployer --role receiver --json plan'
+su -c '/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-issuer issue --acknowledge --json'
 ```
 
-The second command performs real network/TA issuance and creates new credentials; use it only for an intentional device test. Host `status` cannot satisfy the compile-time Android arm64 prerequisite and still attempts status-file writes.
+The last one performs real network/TA issuance and creates new credentials: intentional device tests only. Host `status` cannot satisfy the Android arm64 prerequisite and still attempts status-file writes.
 
 ## Code Conventions & Common Patterns
 
-- Use standard Rust formatting, `snake_case` functions/modules, `UpperCamelCase` types and `SCREAMING_SNAKE_CASE` constants. Keep module documentation and `SAFETY` explanations around unsafe operations.
-- Keep execution synchronous and command-scoped. Pass `&Config`, paths, keys and byte slices explicitly; pure encoders/parsers are separate from HTTP, process and filesystem boundaries. There is no async runtime, DI container or shared service state.
-- Keep the dependency direction: the issuer depends on no `rkp-mini-*` crate, the deployer on `core`+`runtime` only, and `core`/`runtime` on neither `age`, `ureq` nor `libc`-ABI vendor code. Verify with `cargo tree -p rkp-mini-deployer -e normal`.
-- Return `anyhow::Result` internally; use `error::err(Stage, code, message)` / `AppError` for stage-specific failures. Preserve machine-readable codes, raw `ta_status` and diagnostic `head_hex`. `rkp-mini-sync` and `rkp-mini-deployer` reuse `runtime::output::{print_error, emit}` so each `--json` command prints exactly one envelope and the `main` owns `process::exit`.
-- Configuration precedence is CLI > TOML > defaults. Only `issue` accepts server/output/fingerprint overrides; TOML is validated before overrides. Missing files use defaults; unknown keys warn. Persist custom `output_dir` in TOML if subsequent `status` must inspect it. The deployer accepts only `--config`, `--role receiver` and `--json`; a sender role is `wrong_role`.
-- Use Unix seconds and UTC. Reuse `fsutil::atomic_write` and `ensure_dir_0700`; enforce `0600` credential/data files and `0700` private directories. Installer `mkdir -p` does not enforce `0700` on output/log directories before first use. Keys use SEC1 `EC PRIVATE KEY`, not PKCS#8; certificates are leaf→root.
-- Preserve the old keybox on failure. Current writes are individually atomic, **not** a multi-file transaction: chain/key/meta files precede `keybox.xml`, with a best-effort `keybox.xml.prev` backup. Do not describe the whole output set as transactional or clear the output directory before issuance. Staging and target writes are separate steps: the combination is never a transaction, and `apply` re-validates the staged bytes and the approval digest itself.
-- `apply --if-staged` skips **only** when `staging/latest.json` is genuinely absent (a stat error other than `NotFound` is reported, and a corrupt file keeps its original error); `--auto` returns a successful no-op when `[deploy].auto_deploy` is false and takes precedence over `--if-staged`. Neither flag approves anything: enabled/risk/stream checks run before both, and an identity change still needs `--allow-identity-change <sha>`.
-- Treat private keys and keyboxes as credentials: never print, log, upload or commit them. Avoid logging complete CSRs. Keep fresh key/challenge generation for every issuance attempt.
-- Sync secrets (age passphrase, Gist token, WebDAV password) enter only via TTY (echo off), stdin or `0600` secret files; there is no CLI flag that takes one, and TOML holds paths only. URLs, QR codes, logs, errors, argv and env carry location/seq/hash/code only.
-- Deployment targets, owners, modes and reload actions come only from the receiver's local config; nothing from the remote side may select a path or command. Deploy failures keep the old target file (temp + fsync + rename + dir fsync, read-back hash).
-- Shell composed flows must stay JSON-free: no parsing, no synthesis, no jq/python, no `fetch && apply`. Result sidecars are written atomically, and the completion code is published last.
-- Keep the three binaries non-recursive: the deployer never invokes sync, and no command shells out to another RKP-Mini binary. The issuer's `__ta-worker` re-executes itself only.
+- Execution is synchronous and command-scoped: pass `&Config`, paths, keys and byte slices explicitly; pure encoders/parsers stay apart from HTTP, process and filesystem boundaries. No async runtime, DI container or shared service state.
+- CLI parsing is hand-written per binary (`cli.rs`). No flag takes a secret value; the sync parser rejects secret-looking flags.
+- Errors: `anyhow::Result` internally. Sync/deployer raise `rkp_mini_core::error::err(Stage, code, message)`; the `Stage` decides the exit code, so pick the stage for the contract above. Issuer uses its own `error::err`/`AppError` and preserves raw `ta_status` and `head_hex`. Machine-readable codes are API: the WebUI maps them to labels.
+- Atomic writes and private dirs: `rkp_mini_core::fsutil::{atomic_write, ensure_private_dir}` in sync/deployer/runtime; the issuer keeps its own `util::{atomic_write, ensure_dir_0700}`. Credential/data files are `0600`, private directories `0700`. Time is Unix seconds, UTC.
+- Role resolution (`runtime::config`): explicit `--config`/`--role`, else whichever default config exists; both existing is `role_ambiguous`. `sync init` requires `--role`. A sender config rejects `[deploy]` (the file is shared with the issuer, which ignores `[sync]`). Scripts and the WebUI always pass `--role` and `--config`.
+- Issuer config precedence is CLI > TOML > defaults; only `issue` takes server/output/fingerprint overrides. Persist a custom `output_dir` in TOML if later `status` calls must see it.
+- Approvals bind to what was shown: `enable --accept-risk <version>`, `fetch --accept-first <plaintext sha>`, `apply --confirm-first|--allow-identity-change <keybox sha>` (16–64 lowercase hex; checked under the lock against the current staging → `confirmation_mismatch`). Composition never approves anything.
+- `apply` order: lock → enabled/risk/stream → `--auto` skip when `[deploy].auto_deploy = false` → `--if-staged` skip only when `staging/latest.json` is genuinely absent (other stat errors and corrupt files keep their error) → gate. Manual `apply` ignores `auto_deploy`. A first deploy or blocked identity change without its flag returns exit 0 with `data.pending`.
+- Issuer output writes are individually atomic, not one transaction: chain/key/meta precede `keybox.xml`, with a best-effort `keybox.xml.prev`. The old keybox survives a failure. Fetch and apply are likewise separate steps.
+- Deployment targets, owners, modes and reload actions come only from the receiver's local config; remote input selects neither a path nor a command.
+- Secrets (age passphrase, Gist token, WebDAV password) enter via TTY (echo off), stdin, a `0600` file, or the WebUI inbox file; TOML holds paths only. URLs, QR codes, logs, errors, argv and env carry location/seq/hash/code only. Private keys, keyboxes and full CSRs stay out of stdout, logs and commits. Every issuance attempt generates a fresh key and challenge.
+- Shell composition stays JSON-blind: `lib/run.sh` copies envelopes verbatim, records numeric exit codes, and runs both steps unconditionally (never `fetch && apply`). POSIX `sh` only; a new hook needs a `set_perm … 0755` line in that module's `customize.sh` (it resets everything to `0644`; `lib/run.sh` stays `0644` because it is sourced).
+- WebUI: one page plus bottom sheets with explicit close buttons (the WebView has no history; back closes the UI), self-painted background, nothing remote (build-only CSP with `connect-src 'none'`). Shell strings interpolate only constant paths and validated arguments. Pages never render keybox/private-key contents or stored secrets. Type-check target is ES2022 but the bundle target is ES2020: stay within ES2020 runtime APIs.
+- Keep each binary crate version equal to its module's `module.prop` (`rkp-mini-issuer` ↔ `modules/issuer`, `rkp-mini-deployer` ↔ `modules/deployer`); `rkp-mini-sync` has its own `--version`.
 
 ## Important Files
 
-- `crates/rkp-mini-issuer/src/config.rs`: defaults, validation and commented config template. Default config is `/data/misc/keystore/rkp-mini/config.toml`; default output is its sibling `output/`; logs, worker temp files and `status.{json,txt}` stay under the fixed data root even with a custom output directory.
-- `crates/rkp-mini-runtime/src/config.rs`: the sync/deploy TOML (roles, sender/receiver templates, `[sync]`/`[deploy]`, secret paths, `edit_table`/`add_target`/`remove_target`, `lock_path`). The sender config is the shared `rkp-mini` file (`output_dir`, `auto_issue_days`, `[sync]`); the receiver root is `/data/adb/rkp_sync/` (`sync/`, `deploy/`, `staging/`, `secrets/`).
-- `crates/rkp-mini-runtime/src/targets.rs`: builtin/custom target resolution (paths, `uid:gid`, modes, reload specs, duplicate detection). `crates/rkp-mini-deployer/src/deploy.rs`: identity gate, atomic writes, SELinux label copy, TEESim profile check, reload, remove. `…/src/commands.rs`: plan/apply/add-target/remove-target/remove plus the skip rules.
-- `crates/rkp-mini-core/src/{confirmation,state,keybox}.rs`: the approval digest rules, the three state files (no target/path fields in `sync-state.json`) and strict keybox validation shared by fetch and apply.
-- `Cargo.toml` (workspace + release profile; dev-profile `opt-level = 3` for scrypt/ChaCha so host tests stay fast), `crates/*/Cargo.toml`, `Cargo.lock`, `build.sh`: dependencies and cross-build/package behavior. Keep each binary crate version and its module's `module.prop` version/versionCode synchronized (`rkp-mini-issuer` ↔ `modules/issuer/`, `rkp-mini-deployer` ↔ `modules/deployer/`); `rkp-mini-sync` has its own `--version` and is not a module version source.
-- `modules/deployer/lib/run.sh`: the only orchestration layer; the sidecar/publish order and the exit-code priority (deploy, then fetch, then 0) live here.
-- Installer permission caveat: `customize.sh` resets files to `0644` and restores execution only for the binaries and listed hooks; add new hooks there and verify uninstall invocation when changing hook permissions. `lib/run.sh` stays `0644` (it is sourced).
-- `README.md`: installation and firmware failure guidance. Its bare design-document link is external, and its stated default NDK version is not enforced by `build.sh`.
-- `webui/src/shared/lib/sync.ts` mirrors `rkp-mini-sync`'s JSON contract; `apps/deployer/lib/deploy.ts` mirrors `rkp-mini-deployer`'s; `apps/deployer/lib/run.ts` mirrors the combo sidecar snapshot. Changing `--json` output, codes, stages or sidecars requires updating them and the dev mocks/fixtures, then `bun run build`.
+- `crates/rkp-mini-issuer/src/config.rs`: issuer defaults and template. Config `/data/misc/keystore/rkp-mini/config.toml`, output `output/` beside it; logs (`logs/issue-<unix>.log`), worker temp files and `status.{json,txt}` stay under the fixed data root even with a custom output directory.
+- `crates/rkp-mini-runtime/src/config.rs`: sync/deploy TOML, both role templates, `RISK_VERSION`, receiver layout under `/data/adb/rkp_sync/` (`sync/`, `deploy/`, `staging/`, `secrets/`, `tmp/`, `logs/`). Bump `RISK_VERSION` whenever a risk item changes, together with the WebUI fixtures.
+- `crates/rkp-mini-runtime/src/targets.rs`: builtin targets (`omk`, `teesim`, `tricky_store`) with fixed paths/owners, plus `Custom`.
+- `crates/rkp-mini-deployer/src/{commands,deploy}.rs`: skip rules, approvals, identity gate, per-target report.
+- `crates/rkp-mini-core/src/error.rs`: stage → exit code table shared by sync and deployer.
+- `modules/deployer/lib/run.sh`: step order, sidecar names, publish order, exit priority. `webui/src/apps/deployer/lib/run.ts` and `apps/deployer/dev/mock.ts` must change with it.
+- `webui/vite.config.ts`, `webui/src/entry.ts`, `webui/src/env.d.ts`: mode validation, aliases and their type declarations.
+- `build.sh`: packaging lists. A new module file must be added to its copy list and `check_zip` list or it will not ship.
+- `README.md`: user-facing install/CLI guide; "Migrating from the old single-module layout" is the cutover note (the legacy `rkp_sync` uninstaller deletes `/data/adb/rkp_sync`, so back it up first).
+
+Changing any `--json` field, error code, stage, exit code or sidecar means updating the matching WebUI mirror, its dev mock/fixtures, then `bun run build`.
 
 ## Runtime/Tooling Preferences
 
-Use Cargo/Rust 2021 and the committed lockfile. No Rust toolchain/MSRV pin is declared. Android packaging assumes an x86_64 Linux host, Bash, Android NDK, Bun, `zip`, `unzip`, `file` and `readelf`. Set `NDK` explicitly for reproducibility; otherwise the script selects the last matching directory under `~/Android/Sdk/ndk/`, not a pinned version.
-
-WebUI stack: Vue 3 + TypeScript + Vite, Bun for install/scripts, committed `webui/bun.lock`. `miuix-vue` is pinned to exactly `0.1.1`; its published type entry is broken, so `tsconfig.json` maps `miuix-vue` and `miuix-vue/icons` via `paths` (TypeScript 6, no `baseUrl`). Use Miuix tokens from `miuix-vue/style.css`; app-owned tokens (`--app-warning`, `--app-sheet-group`) live in `src/shared/styles/app.css`. KernelSU's WebView is transparent and has no SPA history (back closes the WebUI), so each page paints its own background, uses one page plus bottom sheets with explicit close buttons, and loads nothing remote (production CSP sets `connect-src 'none'`). Shell commands only interpolate constant paths and log names matching `issue-<digits>.log`.
-
-Keep the small synchronous stack: hand-written CLI parsing, `ureq` with Rust TLS, `ciborium`, `p256` and `x509-cert`. Do not introduce `clap`, an async runtime, `reqwest`, or a runtime OpenSSL executable dependency. Module hooks use `/system/bin/sh`, not Bash.
-
-Device prerequisites include root, Qualcomm hardware, `/vendor/lib64/libkeymasterdeviceutils.so`, `/dev/smcinvoke` and a fingerprint. Report SELinux/path failures rather than silently relocating data.
+- Rust 2021, committed `Cargo.lock`, always `--locked`. No toolchain/MSRV pin, no `rustfmt.toml`/`clippy.toml`, no CI.
+- Keep the small synchronous stack: `ureq` 2 with rustls, `ciborium`, `p256`, `x509-cert`, `age` (armor), `toml`/`toml_edit`, `roxmltree`. Adding `clap`, an async runtime, `reqwest` or an OpenSSL dependency is out of scope.
+- Root `Cargo.toml` sets `opt-level = 3` for the scrypt/ChaCha dependency chain in the dev profile so host tests stay fast; release is `opt-level = "z"`, LTO, `panic = "abort"` (the worker's `catch_unwind` is not release panic recovery).
+- WebUI: Bun for install and scripts (`webui/bun.lock`, frozen), Vue 3, Vite 8, TypeScript 6, `miuix-vue` pinned to exactly `0.1.1`. Its published type entry is broken, so `tsconfig.json` maps `miuix-vue` and `miuix-vue/icons` through `paths` without `baseUrl`. Use Miuix tokens; app-owned tokens live in `src/shared/styles/app.css`.
+- Packaging host: x86_64 Linux with Bash, Android NDK, Bun, `zip`, `unzip`, `file`, `readelf`, `sha256sum`. Only NDK and Bun are pre-checked.
+- Device prerequisites: root, Qualcomm hardware, `/vendor/lib64/libkeymasterdeviceutils.so`, `/dev/smcinvoke`, a fingerprint. Report SELinux/path failures; do not relocate data to work around them.
 
 ## Testing & QA
 
-Use Rust's built-in `#[test]` framework in inline `#[cfg(test)] mod tests`. Reuse the shared fixtures: `rkp-mini-core`'s `test_support` (behind the `test-support` feature) provides `TestKeybox`; `rkp-mini-issuer` keeps its own `test_support.rs`; use `tempfile` for isolated files. Keep host tests offline and independent of root/vendor libraries. Sync tests run the full push/fetch/replay protocol over `DirTransport` and HTTP providers against in-process `TcpListener` servers with `--allow-insecure-http/--allow-private` policy; nothing contacts GitHub or a real WebDAV server.
-
-Existing coverage includes config/templates, frame/CSR parsing and binding, server response parsing/HTTP error mapping, chain/keybox handling, worker reply framing, description states, protocol replay rules, secret/permission handling, target resolution, the deploy identity gate and per-target failures, the `apply --if-staged`/`--auto` skip and error precedence, stale sha approvals, the shared lock, and `check-auto --require-verified`.
-
-No coverage percentage, coverage tooling or CI workflow is configured. Add behavioral regression coverage for changed boundaries and failure paths; parser tests do not establish end-to-end HTTP, worker timeout, output rollback or installed-module correctness.
-
-Reference-device firmware acceptance remains a device-only go/no-go check; the repository contains no recorded successful device result. Record actual KeyMint version, TA status and issuance outcome when tested. Host tests and a valid AArch64 ZIP cannot substitute for this. Diagnose `-18`, `-40`, `-100` and HTTP `444` explicitly rather than changing protocols. Device QA must check JSON/errors, key-to-leaf binding, leaf→root ordering, `0700`/`0600` permissions, old-keybox preservation, Action exit status and boot refresh without issuance. Release uses `panic = "abort"`; worker `catch_unwind` is not release panic recovery.
-
-Sync device QA (not yet recorded): real Gist create/update and token-less raw read, a real WebDAV provider (e.g. Jianguoyun), OMK watcher reload with owner `1017:1017`, TEESimulator `config.json` reference and EC-only acceptance, SELinux labels on deployed files, loops after reboot and under Doze, and attestation behaviour on the receiving device.
-
-Combination-script QA: the Action path keeps its final exit code (deploy failures win over fetch failures), a failed fetch still repairs a damaged target from already-verified staging, `auto` stops before any network access when `check-auto --require-verified` fails, `auto_deploy = false` changes nothing, and a missing binary yields exit 2 with a diagnostic in `last.err` instead of an eternal spinner.
-
-The WebUI has no automated tests: `bun run build` (vue-tsc) plus the dev-mock scenarios cover host checks. Device-only WebUI QA: the Open button renders without a transparent/white background, status matches `status --json`, blockers disable issuance, issuance survives closing and reopening the WebUI, a double tap launches one task, and failures show stage/code/`ta_status` with the old keybox intact. Deployer page additionally: the combined run shows the fetch and deploy halves separately (including a failed fetch with a successful repair), a missing step envelope reads as an abnormal exit rather than success, TOFU/deploy dialogs show the facts before any write, `auto` never overwrites the last WebUI result, secrets entered in the page land as 0600 files with no `inbox/*.hex` left behind and never appear in `ps`/logcat (release manager), risk items start unchecked, and closing the page does not interrupt push/fetch/run tasks.
+- Rust tests are inline `#[cfg(test)] mod tests`; there is no `tests/` directory. Host-only, offline, Unix-only, independent of root and vendor libraries.
+- Fixtures: `rkp_mini_core::test_support::TestKeybox::new(leaf_days)` mints a fresh CA + leaf relative to the current clock; `rkp-mini-sync-core` and `rkp-mini-deployer` enable it through the `test-support` dev-dependency feature. The issuer has its own `src/test_support.rs` (`test_chain()`). Use `tempfile` for files.
+- Network code is tested against in-process loopback `TcpListener` servers and `DirTransport`, with a permissive `UrlPolicy { allow_insecure_http, allow_private }` built directly in the test; nothing contacts GitHub or a real WebDAV server.
+- Permission tests return early when run as root; run the suite as a normal user.
+- Covered: issuer config, frames/CSR binding, server parsing and HTTP error mapping, chain/keybox, worker reply framing, description states; core keybox/locator/state/confirmation; protocol replay rules; secret-file permissions; config templates and target resolution; the lock primitive; deploy identity gate, per-target failure, `--if-staged`/`--auto` precedence, stale approvals; `check-auto --require-verified`.
+- Not covered by any automated test: `rkp-mini-sync` command flows (`sender`, `receiver`, `app`), lock acquisition by the commands, the module shell scripts, and the WebUI. Verify those with a throwaway harness: real host binaries plus a sourced `modules/deployer/lib/run.sh` against temp configs, and `bun run build` plus the dev-mock scenarios in a browser.
+- Add behavioural regression tests for changed boundaries and failure paths; skip tests that pin wording or wiring.
+- Device-only, none recorded in the repository: reference-device issuance go/no-go (record KeyMint version, TA status, outcome; diagnose `-18`, `-40`, `-100`, HTTP `444` explicitly instead of changing protocols), module install/Action/boot loops, both modules side by side, the legacy cutover, real Gist/WebDAV round trips, OMK reload with owner `1017:1017`, TEESimulator `config.json` reference and EC-only acceptance, SELinux labels on deployed files, loops under Doze. Host tests and a valid AArch64 ZIP do not substitute for these; report them as unverified.
+- Device WebUI checks: Open renders without a transparent/white background, status matches `status --json`, blockers disable issuance, tasks survive closing and reopening the page, a double tap launches one task, failures show stage/code/`ta_status` with the old keybox intact, entered secrets land as `0600` files with no `inbox/*.hex` left behind, risk items start unchecked, TOFU/deploy sheets show the facts before any write, and the loop's `sync-auto` results never replace the page's `sync-task` result.

@@ -23,7 +23,7 @@ Remote private-key deployment is opt-in, disabled by default, and gated on expli
 Design records — read before changing the area, and treat their decisions as settled:
 
 - `docs/REMOTE_SYNC_DEVELOP.md`: sync protocol, threat model, formats, risk statement (§13), WebUI secrets/approvals (§19). Required before touching `rkp-mini-sync*` or `rkp-mini-deployer`.
-- `docs/WEBUI_DEVELOP.md` (local, currently untracked): WebUI design record and KernelSU WebView facts. Required before touching `webui/`.
+- `docs/WEBUI_DEVELOP.md`: WebUI design record and KernelSU WebView facts. Required before touching `webui/`.
 - The original external design note (outside the repo): issuance protocol/scope. Its proposed layout and acceptance checklist are not evidence of device validation; current source is the implementation reference.
 
 ## Architecture & Data Flow

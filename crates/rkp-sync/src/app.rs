@@ -218,6 +218,18 @@ pub fn secret_status(path: &Path) -> Value {
     }
 }
 
+/// Whether the module's `sync-loop.sh` (pid file) is alive.
+pub fn loop_running(cfg: &Config) -> bool {
+    let Ok(text) = std::fs::read_to_string(cfg.loop_pid_path()) else {
+        return false;
+    };
+    match text.trim().parse::<i32>() {
+        // SAFETY: signal 0 only checks for existence/permission.
+        Ok(pid) if pid > 1 => unsafe { libc::kill(pid, 0) == 0 },
+        _ => false,
+    }
+}
+
 pub fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

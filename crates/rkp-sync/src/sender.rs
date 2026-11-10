@@ -12,9 +12,9 @@ use rkp_sync_core::{fsutil, limits, secret, state};
 use serde_json::json;
 
 use crate::app::{self, Ctx, Output};
+use crate::common;
 use crate::config::{self, Config, PasswordMode, Role, Value};
 use crate::remote::Remote;
-use crate::tty;
 
 /// Retries after a `remote_conflict` (re-read, new seq, try again).
 const CONFLICT_RETRIES: usize = 2;
@@ -236,11 +236,22 @@ pub fn share(ctx: &Ctx, label: Option<String>) -> Result<Output> {
     // the receiver would reject.
     let (uri, json_text) = encode_import(&spec);
     rkp_sync_core::locator::parse_import(&uri, ctx.url_policy())?;
-    let qr = qrcode::QrCode::new(uri.as_bytes())
-        .map_err(|e| err(Stage::Generic, "qr", format!("QR encode: {e}")))?
+    let code = qrcode::QrCode::new(uri.as_bytes())
+        .map_err(|e| err(Stage::Generic, "qr", format!("QR encode: {e}")))?;
+    let qr = code
         .render::<qrcode::render::unicode::Dense1x2>()
         .quiet_zone(true)
         .build();
+    // Module matrix for the WebUI to draw locally (no QR library in the page).
+    let rows: Vec<String> = code
+        .to_colors()
+        .chunks(code.width())
+        .map(|row| {
+            row.iter()
+                .map(|c| if *c == qrcode::Color::Dark { '1' } else { '0' })
+                .collect()
+        })
+        .collect();
     let text = format!(
         "Import link (location only — it does NOT contain the passphrase):\n\n{uri}\n\n{qr}\n\nJSON: {json_text}\n\n\
          The link and QR code may be shared. Send the age passphrase separately over a\n\
@@ -248,12 +259,22 @@ pub fn share(ctx: &Ctx, label: Option<String>) -> Result<Output> {
          Prefer scanning/pasting inside the receiver over opening rkpsync:// links in a browser."
     );
     Ok(Output::ok(
-        json!({ "uri": uri, "json": serde_json::from_str::<serde_json::Value>(&json_text).expect("json"), "contains_password": false }),
+        json!({
+            "uri": uri,
+            "json": serde_json::from_str::<serde_json::Value>(&json_text).expect("json"),
+            "contains_password": false,
+            "qr": { "size": code.width(), "rows": rows },
+        }),
         text,
     ))
 }
 
-pub fn rotate_password(ctx: &Ctx) -> Result<Output> {
+pub fn rotate_password(ctx: &Ctx, from_file: Option<PathBuf>, hex: bool) -> Result<Output> {
+    // Consume an inbox file first so it never outlives this command.
+    let inboxed = from_file
+        .as_deref()
+        .map(|f| rkp_sync_core::secret::take_inbox_file(f, hex, "new age passphrase"))
+        .transpose()?;
     let cfg = ctx.load(Some(Role::Sender))?;
     if !ctx.interactive(false) && cfg.sync.password_mode == PasswordMode::Prompt {
         return Err(err(
@@ -280,8 +301,13 @@ pub fn rotate_password(ctx: &Ctx) -> Result<Output> {
         ));
     }
     let current = app::passphrase(ctx, &cfg, false)?;
-    eprintln!("Enter the NEW age passphrase (6+ random words or 20+ random characters).");
-    let new = tty::read_secret("new age passphrase", true)?;
+    let new = match inboxed {
+        Some(n) => n,
+        None => {
+            eprintln!("Enter the NEW age passphrase (6+ random words or 20+ random characters).");
+            common::read_secret_input(ctx, None, false, "new age passphrase", true)?
+        }
+    };
     if new.expose_secret() == current.expose_secret() {
         return Err(err(
             Stage::Config,

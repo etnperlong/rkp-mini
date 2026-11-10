@@ -17,6 +17,36 @@ use crate::deploy::{self, ApplyOptions, Gate};
 use crate::remote::Remote;
 use crate::tty;
 
+/// `full` (lowercase hex) matches a confirmation value (full or >= 16-char prefix).
+fn sha_confirms(full: &str, given: &str) -> bool {
+    given.len() >= 16 && full.starts_with(given)
+}
+
+fn confirmation_mismatch(what: &str) -> SyncError {
+    SyncError::new(
+        Stage::State,
+        "confirmation_mismatch",
+        format!("the {what} changed since it was reviewed; review it again"),
+    )
+}
+
+/// Credential-free location fields for previews.
+fn location_json(loc: &Location) -> Json {
+    match loc {
+        Location::Gist {
+            url,
+            gist_id,
+            filename,
+        } => json!({ "provider": "gist", "url": url, "gist_id": gist_id, "filename": filename }),
+        Location::Webdav {
+            endpoint,
+            path,
+            user,
+        } => json!({ "provider": "webdav", "endpoint": endpoint, "path": path, "user": user }),
+        Location::Url { url } => json!({ "provider": "url", "url": url }),
+    }
+}
+
 fn describe(spec: &ImportSpec) -> String {
     let mut s = format!(
         "provider:  {}\nlocation:  {}\nstream:    {}\n",
@@ -33,8 +63,41 @@ fn describe(spec: &ImportSpec) -> String {
     s
 }
 
-pub fn import(ctx: &Ctx, input: &str, yes: bool, test: bool) -> Result<Output> {
+/// Parse-only preview for the WebUI (`import --check`): writes nothing.
+fn import_check(ctx: &Ctx, spec: &ImportSpec) -> Result<Output> {
+    let path = ctx.config_path(Some(Role::Receiver))?;
+    let current = config::load(&path, Some(Role::Receiver), ctx.url_policy()).ok();
+    let current_stream = current
+        .as_ref()
+        .map(|c| c.sync.stream_id.clone())
+        .filter(|s| !s.is_empty());
+    let verified = current
+        .as_ref()
+        .and_then(|c| app::load_sync_state(c).ok().flatten())
+        .filter(|s| s.has_verified());
+    let stream_change = current_stream
+        .as_deref()
+        .is_some_and(|s| s != spec.stream_id);
+    Ok(Output::ok(
+        json!({
+            "location": location_json(&spec.location),
+            "display": spec.location.display(),
+            "stream_id": spec.stream_id,
+            "label": spec.label,
+            "current_stream_id": current_stream,
+            "stream_change": stream_change,
+            "blocked": stream_change && verified.is_some(),
+            "verified_seq": verified.map(|s| s.verified_seq),
+        }),
+        describe(spec),
+    ))
+}
+
+pub fn import(ctx: &Ctx, input: &str, yes: bool, test: bool, check: bool) -> Result<Output> {
     let spec = locator::parse_import(input, ctx.url_policy())?;
+    if check {
+        return import_check(ctx, &spec);
+    }
     let path = ctx.config_path(Some(Role::Receiver))?;
     if !path.exists() {
         let root = path.parent().filter(|p| p.is_absolute()).ok_or_else(|| {
@@ -141,7 +204,7 @@ pub fn import(ctx: &Ctx, input: &str, yes: bool, test: bool) -> Result<Output> {
 
     // Risk acceptance on first enable (§11.2 step 3).
     if cfg.sync.risk_ack_version < RISK_VERSION {
-        if interactive && common::accept_risk(ctx, &cfg, false)? {
+        if interactive && common::accept_risk(ctx, &cfg, None)? {
             config::edit_table(&cfg.path, "sync", &[("enabled", Value::Bool(true))])?;
             notes.push("risk accepted; sync enabled".into());
         } else {
@@ -248,15 +311,16 @@ fn received_summary(r: &Received) -> String {
 }
 
 struct FetchResult {
-    changed: bool,
     data: Json,
     text: String,
+    /// Set when the fetch stopped for confirmation; `data` carries the facts.
+    failure: Option<SyncError>,
 }
 
 fn fetch_inner(
     ctx: &Ctx,
     cfg: &Config,
-    accept_first: bool,
+    accept_first: Option<&str>,
     no_cache: bool,
     auto: bool,
 ) -> Result<FetchResult> {
@@ -284,38 +348,64 @@ fn fetch_inner(
             s.last_error = None;
             state::save(&cfg.sync_state_path(), &s)?;
             return Ok(FetchResult {
-                changed: false,
                 data: json!({ "provider": t.provider(), "stream_id": stream_id, "changed": false, "seq": s.verified_seq }),
                 text: format!("unchanged (seq {})", s.verified_seq),
+                failure: None,
             });
         }
         FetchOutcome::Received(r) => *r,
     };
     let mut warnings = Vec::new();
     if r.first_import {
-        // TOFU (§7.4 step 9): explicit confirmation of what is being trusted.
+        // TOFU (§7.4 step 9): explicit confirmation of exactly what is trusted.
         let summary = received_summary(&r);
-        let ok = if accept_first {
-            eprintln!("first import (trust on first use):\n{summary}");
-            true
-        } else if ctx.interactive(auto) {
-            eprintln!(
-                "First import from this stream (trust on first use). Verify with the sender:\n{summary}\
-                 Deployment targets: {}\n",
-                deploy::resolve_targets(cfg)
-                    .map(|ts| ts.iter().map(|t| t.path.display().to_string()).collect::<Vec<_>>().join(", "))
-                    .unwrap_or_else(|_| "none configured".into())
-            );
-            tty::confirm("Trust this version?")?
-        } else {
-            false
-        };
-        if !ok {
-            return Err(err(
+        let plaintext_hex = hex::encode(r.plaintext_sha256);
+        let targets: Vec<String> = deploy::resolve_targets(cfg)
+            .map(|ts| ts.iter().map(|t| t.path.display().to_string()).collect())
+            .unwrap_or_default();
+        let facts = json!({
+            "provider": t.provider(),
+            "location": t.location(),
+            "stream_id": stream_id,
+            "seq": r.manifest.seq,
+            "issued_at": r.manifest.issued_at,
+            "device_id": r.facts.device_id,
+            "leaf_not_before": r.facts.leaf_not_before,
+            "leaf_not_after": r.facts.leaf_not_after,
+            "keybox_sha256": hex::encode(r.facts.sha256),
+            "plaintext_sha256": plaintext_hex,
+            "targets": targets,
+            "root_trust_checked": false,
+        });
+        let failure = match accept_first {
+            Some(given) if sha_confirms(&plaintext_hex, given) => {
+                eprintln!("first import (trust on first use):\n{summary}");
+                None
+            }
+            Some(_) => Some(confirmation_mismatch("remote version")),
+            None if ctx.interactive(auto) => {
+                eprintln!(
+                    "First import from this stream (trust on first use). Verify with the sender:\n{summary}\
+                     Deployment targets: {}\n",
+                    if targets.is_empty() { "none configured".into() } else { targets.join(", ") }
+                );
+                (!tty::confirm("Trust this version?")?).then(|| {
+                    SyncError::new(Stage::State, "first_import_needs_confirmation", "first import declined")
+                })
+            }
+            None => Some(SyncError::new(
                 Stage::State,
                 "first_import_needs_confirmation",
-                "first import must be confirmed interactively or with --accept-first",
-            ));
+                "first import must be confirmed: review the facts and pass --accept-first <plaintext_sha256>",
+            )),
+        };
+        if failure.is_some() {
+            // Nothing staged, no state written.
+            return Ok(FetchResult {
+                data: facts,
+                text: format!("first import needs confirmation:\n{summary}"),
+                failure,
+            });
         }
     }
     if r.gap {
@@ -364,17 +454,26 @@ fn fetch_inner(
         staged_path.display()
     );
     Ok(FetchResult {
-        changed: !r.idempotent,
         data,
         text,
+        failure: None,
     })
 }
 
-pub fn fetch(ctx: &Ctx, accept_first: bool, no_cache: bool, auto: bool) -> Result<Output> {
+pub fn fetch(
+    ctx: &Ctx,
+    accept_first: Option<String>,
+    no_cache: bool,
+    auto: bool,
+) -> Result<Output> {
     let cfg = ctx.load(Some(Role::Receiver))?;
     let _lock = app::lock(&cfg.lock_path())?;
-    match fetch_inner(ctx, &cfg, accept_first, no_cache, auto) {
-        Ok(r) => Ok(Output::ok(r.data, r.text)),
+    match fetch_inner(ctx, &cfg, accept_first.as_deref(), no_cache, auto) {
+        Ok(r) => Ok(Output {
+            data: r.data,
+            text: r.text,
+            failure: r.failure,
+        }),
         Err(e) => {
             app::record_error(&cfg, &e, app::now());
             Err(e)
@@ -382,17 +481,68 @@ pub fn fetch(ctx: &Ctx, accept_first: bool, no_cache: bool, auto: bool) -> Resul
     }
 }
 
+fn gate_json(gate: &Gate) -> Json {
+    match gate {
+        Gate::Same => json!({ "kind": "same" }),
+        Gate::FirstDeploy => json!({ "kind": "first_deploy" }),
+        Gate::Allowed { reason } => json!({ "kind": "allowed", "reason": reason }),
+        Gate::Blocked { reason } => json!({ "kind": "blocked", "reason": reason }),
+    }
+}
+
+fn plan_json(plan: &deploy::Plan) -> Json {
+    json!({
+        "gate": gate_json(&plan.gate),
+        "staged": plan.staged,
+        "old_keybox_sha256": plan.old_sha256,
+        "old_leaf_not_after": plan.old_not_after,
+        "warnings": plan.warnings,
+        "targets": plan.targets.iter().map(|t| json!({
+            "id": t.id,
+            "path": t.path.display().to_string(),
+            "owner": t.owner_string(),
+            "mode": t.mode_string(),
+            "reload": t.reload.as_string(),
+        })).collect::<Vec<_>>(),
+        "root_trust_checked": false,
+    })
+}
+
+/// Read-only preview of what `deploy apply` would do (§19.3).
+pub fn deploy_plan(ctx: &Ctx) -> Result<Output> {
+    let cfg = ctx.load(Some(Role::Receiver))?;
+    cfg.require_stream()?;
+    let plan = deploy::plan(&cfg, app::now(), false)?;
+    let text = format!(
+        "staged seq {} keybox {} → gate {}",
+        plan.staged.seq,
+        &plan.staged.keybox_sha256[..16],
+        gate_json(&plan.gate)
+    );
+    Ok(Output::ok(plan_json(&plan), text))
+}
+
 fn apply_inner(
     ctx: &Ctx,
     cfg: &Config,
-    allow_identity_change: bool,
-    confirm_first: bool,
+    allow_identity_change: Option<&str>,
+    confirm_first: Option<&str>,
     auto: bool,
 ) -> Result<Output> {
     cfg.require_enabled()?;
     cfg.require_stream()?;
     let now = app::now();
-    let plan = deploy::plan(cfg, now, allow_identity_change)?;
+    let plan = deploy::plan(cfg, now, allow_identity_change.is_some())?;
+    // Approvals name the reviewed keybox; a different staged one is refused.
+    for given in [allow_identity_change, confirm_first].into_iter().flatten() {
+        if !sha_confirms(&plan.staged.keybox_sha256, given) {
+            return Ok(Output {
+                data: plan_json(&plan),
+                text: "the staged keybox changed since it was reviewed".into(),
+                failure: Some(confirmation_mismatch("staged keybox")),
+            });
+        }
+    }
     if let (Some(old), Gate::Allowed { reason } | Gate::Blocked { reason }) =
         (&plan.old_sha256, &plan.gate)
     {
@@ -407,7 +557,7 @@ fn apply_inner(
     for w in &plan.warnings {
         eprintln!("warning [{}]: {}", w.code, w.message);
     }
-    let mut confirm = confirm_first;
+    let mut confirm = confirm_first.is_some();
     if matches!(plan.gate, Gate::FirstDeploy) && !confirm && ctx.interactive(auto) {
         eprintln!(
             "First deployment of keybox {} (seq {}, device {}, expires {}) to:",
@@ -422,7 +572,7 @@ fn apply_inner(
         confirm = tty::confirm("Write the keybox to these targets?")?;
     }
     let mut opts = ApplyOptions::new(now);
-    opts.allow_identity_change = allow_identity_change;
+    opts.allow_identity_change = allow_identity_change.is_some();
     opts.confirm_first = confirm;
     let report = deploy::apply(cfg, &opts)?;
     let failed: Vec<&str> = report
@@ -438,10 +588,10 @@ fn apply_inner(
             p.seq, p.reason
         ));
         text.push_str(match p.reason.as_str() {
-            "first_deploy" => "Run `rkp-sync deploy apply --confirm-first` to deploy it.",
+            "first_deploy" => "Review it with `rkp-sync deploy plan`, then run `rkp-sync deploy apply --confirm-first <keybox_sha256>`.",
             _ => {
-                "The identity change is outside the rotation policy; review the warnings and run\n\
-                  `rkp-sync deploy apply --allow-identity-change` to deploy it now."
+                "The identity change is outside the rotation policy; review `rkp-sync deploy plan` and run\n\
+                  `rkp-sync deploy apply --allow-identity-change <keybox_sha256>` to deploy it now."
             }
         });
     } else {
@@ -488,13 +638,19 @@ fn apply_inner(
 
 pub fn deploy_apply(
     ctx: &Ctx,
-    allow_identity_change: bool,
-    confirm_first: bool,
+    allow_identity_change: Option<String>,
+    confirm_first: Option<String>,
     auto: bool,
 ) -> Result<Output> {
     let cfg = ctx.load(Some(Role::Receiver))?;
     let _lock = app::lock(&cfg.lock_path())?;
-    apply_inner(ctx, &cfg, allow_identity_change, confirm_first, auto)
+    apply_inner(
+        ctx,
+        &cfg,
+        allow_identity_change.as_deref(),
+        confirm_first.as_deref(),
+        auto,
+    )
 }
 
 pub fn add_target(
@@ -624,11 +780,8 @@ pub fn run(ctx: &Ctx, auto: bool) -> Result<Output> {
         ));
     }
     let _lock = app::lock(&cfg.lock_path())?;
-    let (fetch_data, fetch_err, fetch_text) = match fetch_inner(ctx, &cfg, false, false, auto) {
-        Ok(r) => {
-            let _ = r.changed;
-            (r.data, None, r.text)
-        }
+    let (fetch_data, fetch_err, fetch_text) = match fetch_inner(ctx, &cfg, None, false, auto) {
+        Ok(r) => (r.data, r.failure, r.text),
         Err(e) => {
             app::record_error(&cfg, &e, app::now());
             let se = to_sync_error(&e);
@@ -646,7 +799,7 @@ pub fn run(ctx: &Ctx, auto: bool) -> Result<Output> {
     } else if !staged_exists {
         (Json::Null, None, "nothing staged".to_string())
     } else {
-        match apply_inner(ctx, &cfg, false, false, auto) {
+        match apply_inner(ctx, &cfg, None, None, auto) {
             Ok(o) => (o.data, o.failure, o.text),
             Err(e) => {
                 let se = to_sync_error(&e);

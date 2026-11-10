@@ -1,9 +1,11 @@
-//! Role-independent commands: init, enable/disable, forget, secrets, status.
+//! Role-independent commands: init, risk/enable/disable, forget, secrets,
+//! config show/set, status.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use rkp_sync_core::error::{err, Stage};
+use rkp_sync_core::secrecy::{ExposeSecret, SecretString};
 use rkp_sync_core::secret;
 use rkp_sync_core::state::{self, DeployState};
 use serde_json::json;
@@ -13,31 +15,86 @@ use crate::cli::SecretKind;
 use crate::config::{self, Config, PasswordMode, Role, Value, RISK_VERSION};
 use crate::{deploy, tty};
 
-/// Risk statement (§13.2). Bump `RISK_VERSION` whenever this text changes.
-pub const RISK_STATEMENT: &str = "\
-Remote keybox sync — risk statement (v1) / 远程 keybox 同步风险说明
+/// One risk statement item (§13.2), English and Chinese.
+pub struct RiskItem {
+    pub id: &'static str,
+    pub en: &'static str,
+    pub zh: &'static str,
+}
 
- 1. The keybox is the issuing device's RKP identity. Using it on another
-    device is keybox cloning/spoofing, not legitimate RKP provisioning.
-    该 keybox 是签发设备的 RKP 身份；在新设备上使用属于克隆/冒充，不是合法 provisioning。
- 2. Play Integrity, Key Attestation and banking/payment apps may reject it,
-    and Google may revoke it.
-    Play Integrity、Key Attestation、银行/支付应用可能拒绝；Google 可能吊销。
- 3. The private key is copied to another device; if either device leaks,
-    both are compromised.
-    私钥会被复制到新设备；任一台泄露，另一台一起失守。
- 4. For unattended runs the age passphrase is stored in a 0600 file. Losing
-    the device or root compromise leaks it; then change the passphrase AND
-    re-issue the keybox.
-    自动运行时 age 密码保存在 0600 文件；设备丢失/root 失守即泄露，需换密码并重新签发。
- 5. OhMyKeymint's retire_stale_keybox_bound_keys (default true) deletes
-    client keys bound to the previous keybox when the keybox changes.
-    OMK 的 retire_stale_keybox_bound_keys=true 会在换 keybox 时删除旧 key。
- 6. Disabling sync does not revoke anything; the risk is yours.
-    禁用不等于撤销；风险由使用者承担。
-";
+/// Risk statement. Bump `config::RISK_VERSION` whenever an item changes, so
+/// every UI/CLI must ask again (`enable --accept-risk` checks the version).
+pub const RISK_ITEMS: &[RiskItem] = &[
+    RiskItem {
+        id: "cloning",
+        en: "The keybox is the issuing device's RKP identity. Using it on another device is keybox cloning/spoofing, not legitimate RKP provisioning.",
+        zh: "该 keybox 是签发设备的 RKP 身份；在新设备上使用属于 keybox 克隆/冒充，不是合法的 RKP provisioning。",
+    },
+    RiskItem {
+        id: "integrity",
+        en: "Play Integrity, Key Attestation and banking/payment apps may reject it, and Google may revoke it.",
+        zh: "Play Integrity、Key Attestation、银行/支付应用可能拒绝；Google 可能吊销。",
+    },
+    RiskItem {
+        id: "key_copy",
+        en: "The private key is copied to another device; if either device leaks, both are compromised.",
+        zh: "私钥会被复制到新设备；任一台设备泄露，另一台一起失守。",
+    },
+    RiskItem {
+        id: "passphrase_on_disk",
+        en: "For unattended runs the age passphrase is stored in a 0600 file. Losing the device or a root compromise leaks it; then change the passphrase AND re-issue the keybox.",
+        zh: "为支持自动运行，age 密码保存在 0600 文件；设备丢失或 root 被攻破即视为泄露，必须换密码并重新签发 keybox。",
+    },
+    RiskItem {
+        id: "debug_manager",
+        en: "Secrets entered in the WebUI pass through the KernelSU manager's root shell; a debug build of the manager logs shell commands to logcat.",
+        zh: "在 WebUI 输入的密钥会经过 KernelSU 管理器的 root shell；debug 版管理器会把 shell 命令写入 logcat。",
+    },
+    RiskItem {
+        id: "omk_retire",
+        en: "OhMyKeymint's retire_stale_keybox_bound_keys (default true) deletes client keys bound to the previous keybox when the keybox changes.",
+        zh: "OMK 的 retire_stale_keybox_bound_keys=true 会在轮换 keybox 时删除绑定旧 keybox 的 key。",
+    },
+    RiskItem {
+        id: "no_revocation",
+        en: "Disabling sync does not revoke anything; this is not legitimate cross-device provisioning and the risk is yours.",
+        zh: "禁用不等于撤销；这不是合法的跨设备 provisioning，风险由使用者承担。",
+    },
+];
 
 pub const ACCEPT_PHRASE: &str = "I ACCEPT";
+
+fn risk_text() -> String {
+    let mut s = format!(
+        "Remote keybox sync — risk statement (v{RISK_VERSION}) / 远程 keybox 同步风险说明\n\n"
+    );
+    for (i, item) in RISK_ITEMS.iter().enumerate() {
+        s.push_str(&format!("{:2}. {}\n    {}\n", i + 1, item.en, item.zh));
+    }
+    s
+}
+
+pub fn risk(ctx: &Ctx) -> Result<Output> {
+    // Works before init too; the passphrase path is shown when known.
+    let cfg = ctx.load(None).ok();
+    let items: Vec<_> = RISK_ITEMS
+        .iter()
+        .map(|i| json!({ "id": i.id, "en": i.en, "zh": i.zh }))
+        .collect();
+    let passphrase_path = cfg
+        .as_ref()
+        .filter(|c| c.sync.password_mode == PasswordMode::SecretFile)
+        .map(|c| c.password_file().display().to_string());
+    Ok(Output::ok(
+        json!({
+            "version": RISK_VERSION,
+            "items": items,
+            "passphrase_path": passphrase_path,
+            "accepted_version": cfg.as_ref().map(|c| c.sync.risk_ack_version),
+        }),
+        risk_text().trim_end().to_string(),
+    ))
+}
 
 pub fn init(ctx: &Ctx, provider: Option<String>, stream_id: Option<String>) -> Result<Output> {
     let role = ctx
@@ -131,24 +188,40 @@ pub fn init(ctx: &Ctx, provider: Option<String>, stream_id: Option<String>) -> R
 }
 
 /// Show the risk statement and record acceptance. Returns false if declined.
-pub fn accept_risk(ctx: &Ctx, cfg: &Config, accept_flag: bool) -> Result<bool> {
-    eprintln!("{RISK_STATEMENT}");
-    if cfg.sync.password_mode == PasswordMode::SecretFile {
-        eprintln!(
-            "The age passphrase will be stored at {} (0600) for unattended runs.\n",
-            cfg.password_file().display()
-        );
-    }
-    let accepted = if accept_flag {
-        true
-    } else if ctx.interactive(false) {
-        tty::ask(&format!("Type `{ACCEPT_PHRASE}` to accept: "))?.trim() == ACCEPT_PHRASE
-    } else {
-        return Err(err(
-            Stage::Config,
-            "risk_not_acknowledged",
-            "risk acceptance needs a TTY (type the phrase) or an explicit --accept-risk",
-        ));
+///
+/// Non-interactive acceptance must name the exact current version, so a UI or
+/// script written for an older statement cannot accept a newer one.
+pub fn accept_risk(ctx: &Ctx, cfg: &Config, accept_version: Option<u32>) -> Result<bool> {
+    let accepted = match accept_version {
+        Some(v) if v == RISK_VERSION => true,
+        Some(v) => {
+            return Err(err(
+                Stage::Config,
+                "risk_version_mismatch",
+                format!(
+                    "--accept-risk {v} does not match the current statement v{RISK_VERSION}; review `rkp-sync risk`"
+                ),
+            ))
+        }
+        None if ctx.interactive(false) => {
+            eprintln!("{}", risk_text());
+            if cfg.sync.password_mode == PasswordMode::SecretFile {
+                eprintln!(
+                    "The age passphrase will be stored at {} (0600) for unattended runs.\n",
+                    cfg.password_file().display()
+                );
+            }
+            tty::ask(&format!("Type `{ACCEPT_PHRASE}` to accept: "))?.trim() == ACCEPT_PHRASE
+        }
+        None => {
+            return Err(err(
+                Stage::Config,
+                "risk_not_acknowledged",
+                format!(
+                    "risk acceptance needs a TTY (type the phrase) or --accept-risk {RISK_VERSION} after reviewing `rkp-sync risk`"
+                ),
+            ))
+        }
     };
     if !accepted {
         return Ok(false);
@@ -164,9 +237,9 @@ pub fn accept_risk(ctx: &Ctx, cfg: &Config, accept_flag: bool) -> Result<bool> {
     Ok(true)
 }
 
-pub fn enable(ctx: &Ctx, accept_flag: bool) -> Result<Output> {
+pub fn enable(ctx: &Ctx, accept_version: Option<u32>) -> Result<Output> {
     let cfg = ctx.load(None)?;
-    if cfg.sync.risk_ack_version < RISK_VERSION && !accept_risk(ctx, &cfg, accept_flag)? {
+    if cfg.sync.risk_ack_version < RISK_VERSION && !accept_risk(ctx, &cfg, accept_version)? {
         return Err(err(
             Stage::Config,
             "risk_not_acknowledged",
@@ -261,55 +334,237 @@ pub fn forget(ctx: &Ctx, yes: bool, staging: bool) -> Result<Output> {
     ))
 }
 
-pub fn secret_set(ctx: &Ctx, kind: SecretKind) -> Result<Output> {
-    let cfg = ctx.load(None)?;
-    let (path, what, twice) = match kind {
-        SecretKind::Age => {
-            if cfg.sync.password_mode != PasswordMode::SecretFile {
-                return Err(err(
-                    Stage::Config,
-                    "usage",
-                    "password_mode is \"prompt\"; nothing is stored",
-                ));
-            }
-            (cfg.password_file(), "age passphrase", true)
-        }
-        SecretKind::GistToken => {
-            if cfg.role != Role::Sender {
-                return Err(err(
-                    Stage::Config,
-                    "usage",
-                    "receivers read Gists without a token",
-                ));
-            }
-            (cfg.gist_token_file(), "Gist token", false)
-        }
-        SecretKind::WebdavPassword => (cfg.webdav_password_file(), "WebDAV app password", false),
-    };
+/// Read a secret from an inbox file (§19.2) or, without one, the TTY/stdin.
+pub fn read_secret_input(
+    ctx: &Ctx,
+    from_file: Option<&Path>,
+    hex: bool,
+    what: &str,
+    twice: bool,
+) -> Result<SecretString> {
+    if let Some(f) = from_file {
+        return secret::take_inbox_file(f, hex, what);
+    }
     if ctx.global.json && tty::stdin_is_tty() {
         return Err(err(
             Stage::Config,
             "usage",
-            "with --json pipe the secret on stdin",
+            "with --json pipe the secret on stdin or use --from-file",
         ));
     }
-    let value = tty::read_secret(what, twice)?;
-    if kind == SecretKind::Age {
-        use rkp_sync_core::secrecy::ExposeSecret;
-        if value.expose_secret().chars().count() < 12 {
-            eprintln!(
-                "warning: short passphrase; use 6+ random words or 20+ random characters, unique per stream"
-            );
+    tty::read_secret(what, twice)
+}
+
+pub fn secret_set(
+    ctx: &Ctx,
+    kind: SecretKind,
+    from_file: Option<PathBuf>,
+    hex: bool,
+) -> Result<Output> {
+    // Consume the inbox even when the command is refused below.
+    let cfg = match ctx.load(None) {
+        Ok(c) => c,
+        Err(e) => {
+            if let Some(f) = &from_file {
+                let _ = std::fs::remove_file(f);
+            }
+            return Err(e);
         }
+    };
+    let target = match kind {
+        SecretKind::Age if cfg.sync.password_mode != PasswordMode::SecretFile => Err(err(
+            Stage::Config,
+            "usage",
+            "password_mode is \"prompt\"; nothing is stored",
+        )),
+        SecretKind::Age => Ok((cfg.password_file(), "age passphrase", true)),
+        SecretKind::GistToken if cfg.role != Role::Sender => Err(err(
+            Stage::Config,
+            "usage",
+            "receivers read Gists without a token",
+        )),
+        SecretKind::GistToken => Ok((cfg.gist_token_file(), "Gist token", false)),
+        SecretKind::WebdavPassword => {
+            Ok((cfg.webdav_password_file(), "WebDAV app password", false))
+        }
+    };
+    let (path, what, twice) = match target {
+        Ok(t) => t,
+        Err(e) => {
+            if let Some(f) = &from_file {
+                let _ = std::fs::remove_file(f);
+            }
+            return Err(e);
+        }
+    };
+    let value = read_secret_input(ctx, from_file.as_deref(), hex, what, twice)?;
+    let short = kind == SecretKind::Age && value.expose_secret().chars().count() < 12;
+    if short {
+        eprintln!(
+            "warning: short passphrase; use 6+ random words or 20+ random characters, unique per stream"
+        );
     }
-    {
-        use rkp_sync_core::secrecy::ExposeSecret;
-        secret::write_secret_file(&path, value.expose_secret().as_bytes(), what)?;
-    }
+    secret::write_secret_file(&path, value.expose_secret().as_bytes(), what)?;
     Ok(Output::ok(
-        json!({ "path": path.display().to_string(), "mode": "0600" }),
+        json!({ "path": path.display().to_string(), "mode": "0600", "weak": short }),
         format!("{what} saved to {} (0600)", path.display()),
     ))
+}
+
+#[derive(Clone, Copy)]
+enum Kind {
+    Str,
+    Uint,
+    Bool,
+}
+
+/// Keys the WebUI/CLI may change with `config set` (§19.4), per role.
+/// Location (receiver), enablement, risk acknowledgement, secrets and targets
+/// have dedicated commands and are deliberately absent.
+fn settable(role: Role, key: &str) -> Option<(&'static str, Kind)> {
+    let common = match key {
+        "label" | "proxy" => Some(("sync", Kind::Str)),
+        "min_validity_days" | "request_timeout_seconds" => Some(("sync", Kind::Uint)),
+        "password_mode" => Some(("sync", Kind::Str)),
+        _ => None,
+    };
+    common.or(match (role, key) {
+        (
+            Role::Sender,
+            "provider" | "gist_id" | "gist_filename" | "webdav_endpoint" | "webdav_path"
+            | "webdav_user",
+        ) => Some(("sync", Kind::Str)),
+        (Role::Sender, "auto_issue_days") => Some(("", Kind::Uint)),
+        (Role::Receiver, "identity_change_policy") => Some(("deploy", Kind::Str)),
+        (Role::Receiver, "rotation_lead_days") => Some(("deploy", Kind::Uint)),
+        (Role::Receiver, "auto_deploy") => Some(("deploy", Kind::Bool)),
+        _ => None,
+    })
+}
+
+pub fn config_set(ctx: &Ctx, key: &str, value: &str) -> Result<Output> {
+    let cfg = ctx.load(None)?;
+    let (table, kind) = settable(cfg.role, key).ok_or_else(|| {
+        err(
+            Stage::Config,
+            "key_not_settable",
+            format!(
+                "`{key}` cannot be changed with `config set` for a {}",
+                cfg.role.as_str()
+            ),
+        )
+    })?;
+    let int;
+    let v = match kind {
+        Kind::Str => Value::Str(value),
+        Kind::Uint => {
+            int = value.parse::<u32>().map_err(|_| {
+                err(
+                    Stage::Config,
+                    "config_invalid",
+                    format!("`{key}` needs a non-negative integer"),
+                )
+            })?;
+            Value::Int(i64::from(int))
+        }
+        Kind::Bool => match value {
+            "true" => Value::Bool(true),
+            "false" => Value::Bool(false),
+            _ => {
+                return Err(err(
+                    Stage::Config,
+                    "config_invalid",
+                    format!("`{key}` needs true or false"),
+                ))
+            }
+        },
+    };
+    // Field-level checks that `load` does not perform for incomplete locations.
+    if !value.is_empty() {
+        use rkp_sync_core::locator;
+        match key {
+            "webdav_endpoint" => {
+                locator::check_url(value, ctx.url_policy(), "webdav_endpoint")?;
+            }
+            "webdav_path" => {
+                locator::normalize_path(value)?;
+            }
+            "gist_id" => locator::check_gist_id(value)?,
+            _ => {}
+        }
+    }
+    let backup = std::fs::read(&cfg.path).map_err(|e| {
+        err(
+            Stage::Config,
+            "config_invalid",
+            format!("read {}: {e}", cfg.path.display()),
+        )
+    })?;
+    let mut values = vec![(key, v)];
+    // A hand-set gist id invalidates the owner-specific raw URL from an earlier push.
+    if key == "gist_id" {
+        values.push(("gist_url", Value::Str("")));
+    }
+    config::edit_table(&cfg.path, table, &values)?;
+    if let Err(e) = config::load(&cfg.path, Some(cfg.role), ctx.url_policy()) {
+        config::write_config(&cfg.path, &backup)?;
+        return Err(e);
+    }
+    Ok(Output::ok(
+        json!({ "key": key, "value": value }),
+        format!("{key} = {value:?}"),
+    ))
+}
+
+pub fn config_show(ctx: &Ctx) -> Result<Output> {
+    let cfg = ctx.load(None)?;
+    let s = &cfg.sync;
+    let mut data = json!({
+        "role": cfg.role.as_str(),
+        "config": cfg.path.display().to_string(),
+        "enabled": s.enabled,
+        "risk_ack_version": s.risk_ack_version,
+        "risk_version": RISK_VERSION,
+        "provider": s.provider,
+        "stream_id": s.stream_id,
+        "label": s.label,
+        "min_validity_days": cfg.min_validity_days(),
+        "request_timeout_seconds": s.request_timeout_seconds,
+        "proxy": s.proxy,
+        "gist_id": s.gist_id,
+        "gist_filename": s.gist_filename,
+        "gist_url": s.gist_url,
+        "webdav_endpoint": s.webdav_endpoint,
+        "webdav_path": s.webdav_path,
+        "webdav_user": s.webdav_user,
+        "url": s.url,
+        "password_mode": match s.password_mode { PasswordMode::SecretFile => "secret-file", PasswordMode::Prompt => "prompt" },
+        "secret_files": {
+            "age": cfg.password_file().display().to_string(),
+            "gist_token": cfg.gist_token_file().display().to_string(),
+            "webdav_password": cfg.webdav_password_file().display().to_string(),
+        },
+        "inbox": cfg.inbox_dir().display().to_string(),
+    });
+    match cfg.role {
+        Role::Sender => {
+            data["output_dir"] = json!(cfg.output_dir.display().to_string());
+            data["auto_issue_days"] = json!(cfg.auto_issue_days);
+        }
+        Role::Receiver => {
+            data["identity_change_policy"] = json!(cfg.deploy.identity_change_policy.as_str());
+            data["rotation_lead_days"] = json!(cfg.deploy.rotation_lead_days);
+            data["auto_deploy"] = json!(cfg.deploy.auto_deploy);
+            data["targets"] = json!(cfg
+                .deploy
+                .targets
+                .iter()
+                .map(|t| json!({ "id": t.id, "path": t.path, "owner": t.owner, "mode": t.mode, "reload": t.reload }))
+                .collect::<Vec<_>>());
+        }
+    }
+    let text = serde_json::to_string_pretty(&data).expect("json");
+    Ok(Output::ok(data, text))
 }
 
 /// Exit 0 when unattended runs may proceed; reason on stderr otherwise.
@@ -357,6 +612,8 @@ pub fn status(ctx: &Ctx) -> Result<Output> {
         "enabled": cfg.sync.enabled,
         "risk_ack_version": cfg.sync.risk_ack_version,
         "risk_ack_current": cfg.sync.risk_ack_version >= RISK_VERSION,
+        "risk_version": RISK_VERSION,
+        "loop_running": app::loop_running(&cfg),
         "provider": cfg.sync.provider,
         "location": loc,
         "stream_id": cfg.sync.stream_id,

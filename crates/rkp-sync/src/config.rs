@@ -20,8 +20,9 @@ pub const SENDER_CONFIG: &str = "/data/misc/keystore/rkp-mini/config.toml";
 pub const RECEIVER_CONFIG: &str = "/data/adb/rkp_sync/config.toml";
 pub const SENDER_DEFAULT_OUTPUT: &str = "/data/misc/keystore/rkp-mini/output";
 
-/// Current risk statement version (§13.2). Bump when the text changes.
-pub const RISK_VERSION: u32 = 1;
+/// Current risk statement version (§13.2). Bump when `common::RISK_ITEMS` changes.
+/// v2: adds the WebUI/debug-manager item.
+pub const RISK_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -377,6 +378,16 @@ impl Config {
         self.sync_dir().join("sync.lock")
     }
 
+    /// WebUI secret inbox (§19.2).
+    pub fn inbox_dir(&self) -> PathBuf {
+        self.sync_dir().join("inbox")
+    }
+
+    /// pid file written by the module's `sync-loop.sh`.
+    pub fn loop_pid_path(&self) -> PathBuf {
+        self.root.join("tmp").join("sync-loop.pid")
+    }
+
     fn secrets_dir(&self) -> PathBuf {
         match self.role {
             Role::Sender => self.sync_dir(),
@@ -507,7 +518,8 @@ pub enum Value<'a> {
     Bool(bool),
 }
 
-/// Set keys in a table (created if missing) and write the file atomically (0600).
+/// Set keys in a table (created if missing; `""` = top level) and write the
+/// file atomically (0600).
 pub fn edit_table(path: &Path, table: &str, values: &[(&str, Value)]) -> Result<()> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
@@ -517,12 +529,16 @@ pub fn edit_table(path: &Path, table: &str, values: &[(&str, Value)]) -> Result<
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| cfg_err(format!("{}: {e}", path.display())))?;
-    if !doc.contains_key(table) {
+    if !table.is_empty() && !doc.contains_key(table) {
         doc[table] = toml_edit::table();
     }
-    let t = doc[table]
-        .as_table_mut()
-        .ok_or_else(|| cfg_err(format!("[{table}] is not a table")))?;
+    let t = if table.is_empty() {
+        doc.as_table_mut()
+    } else {
+        doc[table]
+            .as_table_mut()
+            .ok_or_else(|| cfg_err(format!("[{table}] is not a table")))?
+    };
     for (k, v) in values {
         let item = match v {
             Value::Str(s) => toml_edit::value(*s),

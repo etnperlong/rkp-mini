@@ -98,7 +98,9 @@ sees ciphertext; links and QR codes carry the location only, never the passphras
   `stream_id`/`seq`/`prev`/expiry and strict keybox checks (no DTD, EC-only, chain 2..8 leaf→root,
   key/leaf match, DeviceID derivation) and stage the keybox (`0600`). `rkp-mini-deployer apply`
   then writes it atomically to locally configured targets: OhMyKeymint
-  (`/data/misc/keystore/omk/keybox.xml`, `1017:1017`), TEESimulator (a `.xml` file in
+  (`/data/misc/keystore/omk/keybox.xml`, `1017:1017`; skipped with `omk_incompatible` when a
+  precheck mirroring OMK's own scanner predicts OMK would reject the keybox and replace it with
+  its bundled template), TEESimulator (a `.xml` file in
   `/data/adb/teesim/`, must be referenced by `config.json`), TrickyStore or TEESimulator-RS
   (both read `/data/adb/tricky_store/keybox.xml`), or a custom opt-in path. Each of these
   modules watches its keybox directory and reloads the replaced file without a reboot.

@@ -338,7 +338,10 @@ export type Gate =
   | { kind: 'blocked'; reason: string }
 
 export interface PlanWarning {
-  /** `omk_key_retirement` | `teesim_reattest` | `teesim_config_missing` | `no_root_trust_check` | … */
+  /**
+   * `omk_key_retirement` | `omk_incompatible` | `teesim_reattest` |
+   * `teesim_config_missing` | `no_root_trust_check` | …
+   */
   code: string
   message: string
 }
@@ -620,6 +623,7 @@ const CODE: Record<string, string> = {
   no_targets: '尚未配置部署目标',
   target_failed: '部分部署目标失败',
   target_unreferenced: 'TEESimulator 配置未引用该文件名',
+  omk_incompatible: 'OhMyKeymint 无法解析该 keybox，未写入',
   target_dir_missing: '目标目录不存在（对应模块未安装？）',
   target_modified: '目标文件已被其他程序修改，未删除',
   key_not_settable: '该设置不能在此修改',
@@ -659,6 +663,7 @@ export const TARGET_LABEL: Record<string, string> = {
 
 export const WARNING_LABEL: Record<string, string> = {
   omk_key_retirement: 'OMK 会删除绑定旧 keybox 的客户端密钥（retire_stale_keybox_bound_keys）',
+  omk_incompatible: 'OhMyKeymint 无法解析该 keybox（会被其内置模板覆盖），omk 目标不会写入',
   teesim_reattest: 'TEESimulator 会用新 keybox 重新为已有密钥生成证明',
   teesim_config_missing: '未找到 TEESimulator config.json，按默认文件名部署',
   no_root_trust_check: '只做了结构与密钥匹配校验，未验证证书签名/根信任/吊销',

@@ -34,6 +34,8 @@ use rkp_mini_runtime::targets::{
 };
 use serde::Serialize;
 
+use crate::omk;
+
 /// Upper bound for the TEESimulator profile file.
 const MAX_TEESIM_CONFIG: usize = 256 * 1024;
 /// SELinux extended-attribute name copied onto a replaced target.
@@ -75,6 +77,9 @@ pub struct Plan {
     /// Previously deployed leaf expiry, kept for CLI/UI reporting.
     pub old_not_after: Option<i64>,
     pub warnings: Vec<Warning>,
+    /// Why OhMyKeymint would reject the staged keybox (only when an `omk`
+    /// target is configured); such a target is never written.
+    pub omk_incompatible: Option<&'static str>,
     pub targets: Vec<Target>,
 }
 
@@ -213,8 +218,26 @@ fn identity_gate(
     }
 }
 
-fn plan_warnings(gate: Gate, targets: &[Target]) -> Vec<Warning> {
+/// Why OhMyKeymint would reject the staged keybox (fixed, secret-free reason).
+fn omk_incompatible_message(reason: &str) -> String {
+    format!(
+        "OhMyKeymint would reject this keybox and overwrite it with its bundled template \
+         ({reason}); the omk target will not be written."
+    )
+}
+
+fn plan_warnings(
+    gate: Gate,
+    targets: &[Target],
+    omk_incompatible: Option<&'static str>,
+) -> Vec<Warning> {
     let mut warnings = Vec::new();
+    if let Some(reason) = omk_incompatible {
+        warnings.push(Warning {
+            code: "omk_incompatible",
+            message: omk_incompatible_message(reason),
+        });
+    }
     let changes_identity = !matches!(gate, Gate::Same | Gate::Blocked { .. });
     if changes_identity {
         if targets.iter().any(|t| t.kind == TargetKind::Omk) {
@@ -261,6 +284,11 @@ pub fn plan(cfg: &Config, now: i64, allow_identity_change: bool) -> Result<Plan>
         ));
     }
     let facts = verify_staged(&staged, &bytes, &staged_path)?;
+    let omk_incompatible = if targets.iter().any(|t| t.kind == TargetKind::Omk) {
+        omk::check(&bytes, &facts).err()
+    } else {
+        None
+    };
     let old_sha256 = state
         .as_ref()
         .and_then(|s| s.deployed_keybox_sha256.clone());
@@ -274,7 +302,7 @@ pub fn plan(cfg: &Config, now: i64, allow_identity_change: bool) -> Result<Plan>
         now,
         allow_identity_change,
     );
-    let warnings = plan_warnings(gate, &targets);
+    let warnings = plan_warnings(gate, &targets, omk_incompatible);
     Ok(Plan {
         staged,
         staged_path,
@@ -283,6 +311,7 @@ pub fn plan(cfg: &Config, now: i64, allow_identity_change: bool) -> Result<Plan>
         old_sha256,
         old_not_after,
         warnings,
+        omk_incompatible,
         targets,
     })
 }
@@ -788,17 +817,24 @@ fn deploy_one(target: &Target, bytes: &[u8], sha: &str, opts: &ApplyOptions) -> 
 }
 
 /// Deploy every target independently. TEESim profile checks run for the whole
-/// target list first so warnings are recorded before the first write.
+/// target list first so warnings are recorded before the first write; an
+/// OhMyKeymint target whose staged keybox OMK cannot parse fails before any
+/// filesystem access.
 fn deploy_all(
     targets: &[Target],
     bytes: &[u8],
     sha: &str,
     opts: &ApplyOptions,
+    omk_incompatible: Option<&'static str>,
     warnings: &mut Vec<Warning>,
 ) -> Vec<TargetReport> {
     let mut prechecked: Vec<Option<TargetReport>> = Vec::with_capacity(targets.len());
     for target in targets {
-        let failure = if target.kind == TargetKind::Teesim {
+        let failure = if target.kind == TargetKind::Omk {
+            omk_incompatible.map(|reason| {
+                TargetError::new("omk_incompatible", omk_incompatible_message(reason))
+            })
+        } else if target.kind == TargetKind::Teesim {
             let (failure, warning) = teesim_precheck(target, &opts.teesim_config);
             if let Some(w) = warning {
                 warnings.push(w);
@@ -821,15 +857,26 @@ fn deploy_all(
 
 /// Idempotent pass: rewrite targets whose content is missing/different and fix
 /// permissions in place otherwise. Reload only fires for rewritten targets.
+/// An OhMyKeymint target whose staged keybox OMK cannot parse fails before any
+/// filesystem access, even when the file on disk already matches.
 fn repair_all(
     targets: &[Target],
     bytes: &[u8],
     sha: &str,
     opts: &ApplyOptions,
+    omk_incompatible: Option<&'static str>,
 ) -> Vec<TargetReport> {
     targets
         .iter()
         .map(|target| {
+            if target.kind == TargetKind::Omk {
+                if let Some(reason) = omk_incompatible {
+                    return fail_report(
+                        target,
+                        TargetError::new("omk_incompatible", omk_incompatible_message(reason)),
+                    );
+                }
+            }
             let path = &target.path;
             match fs::symlink_metadata(path) {
                 Ok(meta) if meta.is_file() => {
@@ -979,6 +1026,7 @@ pub fn apply(cfg: &Config, opts: &ApplyOptions) -> Result<Report> {
                     &bytes,
                     &prepared.staged.keybox_sha256,
                     opts,
+                    prepared.omk_incompatible,
                 )
             } else {
                 deploy_all(
@@ -986,6 +1034,7 @@ pub fn apply(cfg: &Config, opts: &ApplyOptions) -> Result<Report> {
                     &bytes,
                     &prepared.staged.keybox_sha256,
                     opts,
+                    prepared.omk_incompatible,
                     &mut warnings,
                 )
             };
@@ -1148,7 +1197,7 @@ mod tests {
 
     use base64::Engine;
     use p256::elliptic_curve::sec1::ToEncodedPoint;
-    use p256::pkcs8::{EncodePrivateKey, LineEnding};
+    use p256::pkcs8::EncodePrivateKey;
     use p256::SecretKey;
     use rand_core::OsRng;
     use rcgen::{
@@ -1243,8 +1292,25 @@ mod tests {
         ];
         let sec1 = secret.public_key().to_encoded_point(false);
         let device_id = format!("rkp-mini-{}", &sha256_hex(sec1.as_bytes())[..12]);
-        let key_pem = secret.to_sec1_pem(LineEnding::LF).unwrap().to_string();
+        let key_pem = pem("EC PRIVATE KEY", &sec1_key_der(&secret));
         keybox_xml(&key_pem, &chain_pems, &device_id)
+    }
+
+    /// secp256r1 (`1.2.840.10045.3.1.7`), required by OhMyKeymint.
+    const SECP256R1: der::asn1::ObjectIdentifier =
+        der::asn1::ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
+
+    /// SEC1 `ECPrivateKey` DER with the named curve, as `rkp-mini-issuer` writes
+    /// it (`SecretKey::to_sec1_der` omits `parameters`).
+    fn sec1_key_der(secret: &SecretKey) -> Vec<u8> {
+        let private = zeroize::Zeroizing::new(secret.to_bytes());
+        let public = secret.public_key().to_encoded_point(false);
+        der::Encode::to_der(&sec1::EcPrivateKey {
+            private_key: &private[..],
+            parameters: Some(sec1::EcParameters::NamedCurve(SECP256R1)),
+            public_key: Some(public.as_bytes()),
+        })
+        .unwrap()
     }
 
     const STREAM: &str = "st_deploytest01";
@@ -1276,8 +1342,7 @@ mod tests {
         }
     }
 
-    fn stage_keybox(cfg: &Config, leaf_days: i64, seq: u64) -> (String, String, KeyboxFacts) {
-        let xml = make_keybox(leaf_days);
+    fn stage_xml(cfg: &Config, xml: &str, seq: u64) -> (String, KeyboxFacts) {
         let facts = keybox::validate_structure(xml.as_bytes()).unwrap();
         let sha = sha256_hex(xml.as_bytes());
         let staged = Staged {
@@ -1292,6 +1357,12 @@ mod tests {
             staged_at: facts.leaf_not_before,
         };
         state::write_staging(&cfg.staging_dir(), &staged, xml.as_bytes()).unwrap();
+        (sha, facts)
+    }
+
+    fn stage_keybox(cfg: &Config, leaf_days: i64, seq: u64) -> (String, String, KeyboxFacts) {
+        let xml = make_keybox(leaf_days);
+        let (sha, facts) = stage_xml(cfg, &xml, seq);
         (xml, sha, facts)
     }
 
@@ -1786,6 +1857,7 @@ mod tests {
             xml.as_bytes(),
             &sha,
             &opts,
+            None,
             &mut warnings,
         );
         assert_eq!(reports.len(), 2);
@@ -1797,6 +1869,174 @@ mod tests {
         assert!(reports[1].ok);
         assert!(!targets.join("keybox.xml").exists());
         assert!(targets.join("custom.xml").exists());
+    }
+
+    // -- OMK compatibility precheck ----------------------------------------
+
+    fn omk_target(path: PathBuf) -> Target {
+        Target {
+            id: "omk".to_string(),
+            kind: TargetKind::Omk,
+            path,
+            uid: uid(),
+            gid: gid(),
+            mode: 0o600,
+            reload: Reload::Restart,
+        }
+    }
+
+    /// Drop the optional `<NumberOfCertificates>` element: valid for our DOM
+    /// validator, fatal for OhMyKeymint's scanner.
+    fn without_cert_count(xml: &str) -> String {
+        let open = "<NumberOfCertificates>";
+        let close = "</NumberOfCertificates>";
+        let start = xml.find(open).expect("fixture has a certificate count");
+        let end = start + xml[start..].find(close).expect("count element is closed") + close.len();
+        let mut out = xml.to_string();
+        out.replace_range(start..end, "");
+        out
+    }
+
+    #[test]
+    fn omk_incompatible_target_fails_while_others_continue() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, targets, cfg) = fail_setup(dir.path());
+        let (xml, sha, _) = stage_keybox(&cfg, 300, 1);
+        fs::create_dir_all(dir.path().join("omk")).unwrap();
+        let opts = opts_for(dir.path());
+
+        let omk_path = targets.join("keybox.xml");
+        let custom_target = Target {
+            id: "custom".to_string(),
+            kind: TargetKind::Custom,
+            path: targets.join("custom.xml"),
+            uid: uid(),
+            gid: gid(),
+            mode: 0o600,
+            reload: Reload::None,
+        };
+        let mut warnings = Vec::new();
+        let reports = deploy_all(
+            &[omk_target(omk_path.clone()), custom_target],
+            xml.as_bytes(),
+            &sha,
+            &opts,
+            Some("synthetic incompatibility"),
+            &mut warnings,
+        );
+
+        assert_eq!(reports.len(), 2);
+        assert!(!reports[0].ok);
+        assert_eq!(
+            reports[0].error.as_ref().unwrap().code.as_str(),
+            "omk_incompatible"
+        );
+        assert!(reports[0].reload_status.is_none());
+        assert!(!omk_path.exists());
+        // No reload side effect either.
+        assert!(!opts.omk_restart_flag.exists());
+        assert!(reports[1].ok);
+        assert_eq!(
+            fs::read(targets.join("custom.xml")).unwrap(),
+            xml.as_bytes()
+        );
+    }
+
+    #[test]
+    fn compatible_keybox_writes_the_omk_target() {
+        // The fixed fixture carries the named-curve OID OhMyKeymint requires.
+        let dir = tempfile::tempdir().unwrap();
+        let (_, targets, cfg) = fail_setup(dir.path());
+        let (xml, sha, facts) = stage_keybox(&cfg, 300, 1);
+        assert_eq!(omk::check(xml.as_bytes(), &facts), Ok(()));
+        let omk_path = targets.join("keybox.xml");
+        let opts = opts_for(dir.path());
+        let mut warnings = Vec::new();
+
+        let reports = deploy_all(
+            &[omk_target(omk_path.clone())],
+            xml.as_bytes(),
+            &sha,
+            &opts,
+            None,
+            &mut warnings,
+        );
+        assert!(reports[0].ok, "{:?}", reports[0].error);
+        assert_eq!(fs::read(&omk_path).unwrap(), xml.as_bytes());
+    }
+
+    #[test]
+    fn omk_incompatible_repair_leaves_an_identical_file_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, targets, cfg) = fail_setup(dir.path());
+        let (xml, sha, _) = stage_keybox(&cfg, 300, 1);
+        let omk_path = targets.join("keybox.xml");
+        fs::write(&omk_path, xml.as_bytes()).unwrap();
+        fs::set_permissions(&omk_path, fs::Permissions::from_mode(0o644)).unwrap();
+        let opts = opts_for(dir.path());
+
+        let reports = repair_all(
+            &[omk_target(omk_path.clone())],
+            xml.as_bytes(),
+            &sha,
+            &opts,
+            Some("synthetic incompatibility"),
+        );
+        assert_eq!(reports.len(), 1);
+        assert!(!reports[0].ok);
+        assert_eq!(
+            reports[0].error.as_ref().unwrap().code.as_str(),
+            "omk_incompatible"
+        );
+        assert!(reports[0].reload_status.is_none());
+        assert_eq!(fs::read(&omk_path).unwrap(), xml.as_bytes());
+        // Attribute repair did not run either.
+        assert_eq!(
+            fs::symlink_metadata(&omk_path).unwrap().mode() & 0o777,
+            0o644
+        );
+    }
+
+    #[test]
+    fn plan_reports_omk_incompatibility_only_with_an_omk_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, targets, mut cfg) = fail_setup(dir.path());
+        let xml = without_cert_count(&make_keybox(300));
+        assert!(!xml.contains("<NumberOfCertificates>"));
+        let (sha, _) = stage_xml(&cfg, &xml, 1);
+
+        cfg.deploy.targets = vec![TargetConfig {
+            id: "omk".to_string(),
+            path: None,
+            owner: None,
+            mode: None,
+            reload: None,
+        }];
+        let planned = plan(&cfg, now(), false).unwrap();
+        assert_eq!(planned.gate, Gate::FirstDeploy);
+        assert!(planned.omk_incompatible.is_some());
+        assert!(planned
+            .warnings
+            .iter()
+            .any(|w| w.code == "omk_incompatible"));
+
+        // The warning is not gated on the identity change.
+        save_deployed(&cfg, &sha, 1, None);
+        let planned = plan(&cfg, now(), false).unwrap();
+        assert_eq!(planned.gate, Gate::Same);
+        assert!(planned
+            .warnings
+            .iter()
+            .any(|w| w.code == "omk_incompatible"));
+
+        // Same staged bytes, no omk target: the check never runs.
+        cfg.deploy.targets = vec![custom("custom", &targets.join("elsewhere.xml"), "none")];
+        let planned = plan(&cfg, now(), false).unwrap();
+        assert!(planned.omk_incompatible.is_none());
+        assert!(!planned
+            .warnings
+            .iter()
+            .any(|w| w.code == "omk_incompatible"));
     }
 
     // -- reload ------------------------------------------------------------

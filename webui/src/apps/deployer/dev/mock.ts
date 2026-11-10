@@ -3,7 +3,10 @@
 //
 // Scenarios (?sync=): new | imported | ready | pending_first | pending_identity | error
 // Fetch result (?fetch=): tofu | ok | fail | mismatch  (default ok)
-// Deploy result (&deploy=fail): one configured target reports a write failure.
+// Deploy result (&deploy=ok|fail|omk_incompatible): `fail` makes one configured
+// target report a write failure; `omk_incompatible` makes the omk target report
+// `omk_incompatible` (plan warns for every gate) while the others succeed, and
+// behaves like `ok` when no omk target is configured.
 // Combined run (&run=): ok | fetch_fail | missing_envelope | skipped | stale
 // Installed target modules (&modules=): comma list of omk | teesim | tricky_store,
 //   each optionally `:disabled`; `none`; `fail` (detection error). Default omk,tricky_store.
@@ -492,8 +495,14 @@ function gateFor(allow: boolean): Gate {
   }
 }
 
+const OMK_INCOMPATIBLE_WARNING =
+  'OhMyKeymint would reject this keybox and overwrite it with its bundled template (no `<Key algorithm="ecdsa">` block in the literal form OhMyKeymint scans for); the omk target will not be written.'
+
 function planWarnings(gate: Gate): { code: string; message: string }[] {
   const warnings: { code: string; message: string }[] = []
+  if (deployMode === 'omk_incompatible' && state.targets.some((t) => t.id === 'omk')) {
+    warnings.push({ code: 'omk_incompatible', message: OMK_INCOMPATIBLE_WARNING })
+  }
   const changes = gate.kind === 'allowed' || gate.kind === 'first_deploy'
   if (changes && state.targets.some((t) => t.id === 'omk')) {
     warnings.push({
@@ -538,16 +547,30 @@ function planData(allow: boolean): DeployPlan {
   }
 }
 
-function reportTargets(failingId: string | null): TargetReport[] {
+function targetFailure(id: string, path: string, lastId: string | null): TargetReport['error'] {
+  if (deployMode === 'omk_incompatible' && id === 'omk') {
+    return {
+      code: 'omk_incompatible',
+      message:
+        'OhMyKeymint would reject this keybox and overwrite it with its bundled template; the omk target was not written.',
+    }
+  }
+  if (deployMode === 'fail' && id === lastId) {
+    return {
+      code: 'target_dir_missing',
+      message: `target directory for ${path} does not exist (module not installed?)`,
+    }
+  }
+  return null
+}
+
+function reportTargets(): TargetReport[] {
+  const lastId = state.targets.length ? state.targets[state.targets.length - 1].id : null
   return state.targets.map((t) => {
-    const ok = t.id !== failingId
+    const error = targetFailure(t.id, t.path, lastId)
+    const ok = error === null
     t.reload_status = ok ? 'ok' : null
-    t.last_error = ok
-      ? null
-      : {
-          code: 'target_dir_missing',
-          message: `target directory for ${t.path} does not exist (module not installed?)`,
-        }
+    t.last_error = error
     return {
       id: t.id,
       path: t.path,
@@ -555,20 +578,13 @@ function reportTargets(failingId: string | null): TargetReport[] {
       sha256: ok ? (state.staged?.keybox_sha256 ?? null) : null,
       reload: t.reload ?? 'auto',
       reload_status: ok ? 'ok' : null,
-      error: ok
-        ? null
-        : {
-            code: 'target_dir_missing',
-            message: `target directory for ${t.path} does not exist (module not installed?)`,
-          },
+      error,
     }
   })
 }
 
 function applyPrepared(plan: DeployPlan): { report: DeployReport; failed: TargetReport[] } {
-  const failingId =
-    deployMode === 'fail' && state.targets.length ? state.targets[state.targets.length - 1].id : null
-  const reports = reportTargets(failingId)
+  const reports = reportTargets()
   const anyOk = reports.some((r) => r.ok)
   if (anyOk) {
     state.deployed = {
@@ -597,7 +613,7 @@ function applyPrepared(plan: DeployPlan): { report: DeployReport; failed: Target
   }
 }
 
-function holdPending(reason: 'first_deploy' | 'identity_change'): DeployReport {
+function holdPending(reason: 'first_deploy' | 'identity_change', gate: Gate): DeployReport {
   const staged = state.staged!
   state.pending = {
     seq: staged.seq,
@@ -610,7 +626,7 @@ function holdPending(reason: 'first_deploy' | 'identity_change'): DeployReport {
     seq: staged.seq,
     deployed: false,
     pending: buildPending(),
-    warnings: [],
+    warnings: planWarnings(gate),
     targets: [],
   }
 }
@@ -919,10 +935,10 @@ function deployStep(): { code: number; json: string; err: string } {
   try {
     const plan = planData(false)
     if (plan.gate.kind === 'first_deploy') {
-      return { code: 0, json: JSON.stringify(okEnv(holdPending('first_deploy'))), err: '' }
+      return { code: 0, json: JSON.stringify(okEnv(holdPending('first_deploy', plan.gate))), err: '' }
     }
     if (plan.gate.kind === 'blocked') {
-      return { code: 0, json: JSON.stringify(okEnv(holdPending('identity_change'))), err: '' }
+      return { code: 0, json: JSON.stringify(okEnv(holdPending('identity_change', plan.gate))), err: '' }
     }
     const { report, failed } = applyPrepared(plan)
     if (failed.length) {
@@ -1100,10 +1116,10 @@ function handleDeploy(args: string[]): ExecResult {
     )
   }
   if (plan.gate.kind === 'first_deploy' && confirmFirst === null) {
-    return toExec(okOutcome(holdPending('first_deploy')))
+    return toExec(okOutcome(holdPending('first_deploy', plan.gate)))
   }
   if (plan.gate.kind === 'blocked' && !allow) {
-    return toExec(okOutcome(holdPending('identity_change')))
+    return toExec(okOutcome(holdPending('identity_change', plan.gate)))
   }
   const { report, failed } = applyPrepared(plan)
   const failure = failed.length

@@ -108,7 +108,11 @@ const actionLabel = computed(() => {
 })
 
 const omkWarning = computed(() => plan.value?.warnings.find((w) => w.code === 'omk_key_retirement') ?? null)
-const otherWarnings = computed(() => (plan.value?.warnings ?? []).filter((w) => w.code !== 'omk_key_retirement'))
+/** OhMyKeymint would reject the staged keybox and overwrite it; the omk target is skipped. */
+const omkIncompatible = computed(() => plan.value?.warnings.find((w) => w.code === 'omk_incompatible') ?? null)
+const otherWarnings = computed(() =>
+  (plan.value?.warnings ?? []).filter((w) => w.code !== 'omk_key_retirement' && w.code !== 'omk_incompatible'),
+)
 
 function warningLabel(w: PlanWarning): string {
   return WARNING_LABEL[w.code] ?? w.code
@@ -212,6 +216,10 @@ async function apply(): Promise<void> {
           </div>
         </div>
 
+        <div v-if="omkIncompatible" class="warn warn--danger">
+          <MiuixText type="body2" weight="medium" color="var(--m-color-error)">{{ warningLabel(omkIncompatible) }}</MiuixText>
+          <MiuixText type="footnote1" color="var(--m-color-error)">{{ omkIncompatible.message }}</MiuixText>
+        </div>
         <div v-if="omkWarning" class="warn warn--danger">
           <MiuixText type="body2" weight="medium" color="var(--m-color-error)">{{ warningLabel(omkWarning) }}</MiuixText>
           <MiuixText type="footnote1" color="var(--m-color-error)">{{ omkWarning.message }}</MiuixText>

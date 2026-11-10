@@ -8,6 +8,7 @@ mod cli;
 mod commands;
 mod deploy;
 mod modules;
+mod omk;
 
 use cli::Command;
 use rkp_mini_core::error::{err, to_sync_error, Stage, SyncError};

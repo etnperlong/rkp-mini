@@ -120,7 +120,7 @@
 - 权限：`0600`，owner `1017:1017`（keystore uid）；由 `post-fs-data.sh` 与 keymint 启动时设置。进程启动后降权到 1017，替换文件若是 `root:root 0600` 会读取失败（保留旧 keybox）。
 - 热重载：inotify 监听父目录，mask `IN_CLOSE_WRITE | IN_CREATE | IN_MOVED_TO`，只处理名字等于 `keybox.xml` 的事件 → 同目录临时文件 + `rename(2)` 会立即重载，临时文件自身的事件被忽略。**不要原地写** `keybox.xml`：`IN_CREATE` 时文件为空，解析失败后 OMK 会用内置模板覆盖它。
 - 重启开关：`/data/adb/omk/restart.keymint`（或 `restart.all`）由 wrapper 每 2 秒轮询是否存在，消费后删除并重启 keymint 进程；换 keybox 不需要它。
-- 解析是正则扫描而非 XML DOM：要求字面量 `<Key algorithm="ecdsa">`（或 `ec`）、`<PrivateKey>`、`<NumberOfCertificates>` 且数量与 `<Certificate>` 一致；EC 必需、RSA 可选。解析失败会用内置模板覆盖文件。`rkp-mini-issuer` 的输出满足这些要求；本仓库的校验把 `NumberOfCertificates` 视为可选，手工构造的 keybox 可能通过校验却被 OMK 拒绝。
+- 解析是正则扫描而非 XML DOM：要求字面量 `<Key algorithm="ecdsa">`（或 `ec`）、`<PrivateKey>`、`<NumberOfCertificates>` 且数量与 `<Certificate>` 一致；EC 必需、RSA 可选。SEC1 私钥必须带 `parameters`（namedCurve secp256r1），`common/src/crypto/ec.rs::import_sec1_private_key` 缺该字段即报错。解析失败会用内置模板覆盖文件。`rkp-mini-issuer` 现在按此要求编码私钥（SEC1 + named curve OID）；本仓库的 DOM 校验把 `NumberOfCertificates` 视为可选、也不要求 SEC1 `parameters`，所以手工构造或旧版签发的 keybox 可能通过校验却被 OMK 拒绝。部署层因此在写入前做 OMK 兼容性预检查（§11.4），不兼容时以 `omk_incompatible` 跳过 `omk` 目标；本次改动前签发的 keybox 缺少 `parameters`，必须重新签发。
 - `config.toml` 的 `[crypto]` 是设备唯一 secret；`injector.toml` 是设备/应用范围配置。**两者都不同步**。
 - `retire_stale_keybox_bound_keys` 默认 `true`：换 keybox 会删除旧 keybox 绑定的客户端 key。自动轮换必须警告。
 
@@ -158,7 +158,7 @@ TEESimulator-RS 与 TrickyStore（`tricky_store`，同一模块 id 与路径，�
 - TEESimulator-RS（`6d241e5` + BouncyCastle 1.83）**拒绝**：同一个 `JcaPEMKeyConverter` 失败（"EC domain parameters must be encoded in the algorithm identifier"）；只丢弃该 `<Key>`，EC-only keybox 因此没有可用 attestation key（-75）。
 - TEESimulator（JingMatrix `06f9f2e`）**接受**：私钥只是不透明 DER，内置 BoringSSL 补丁（`rust/patches/kmr-crypto-boring-ec-group.patch`）用调用方提供的 group 解析 SEC1，`parameters` 可选。
 
-因此旧 keybox 只在 TEESimulator 上可用；要在 OhMyKeymint / TrickyStore / TEESimulator-RS 上工作必须重新签发。
+因此旧 keybox 只在 TEESimulator 上可用；要在 OhMyKeymint / TrickyStore / TEESimulator-RS 上工作必须重新签发。只有 `omk` 目标有写入前预检查（`omk_incompatible`），`tricky_store` 没有。
 
 ### 4.4 Gist / WebDAV
 
@@ -865,6 +865,10 @@ OMK 特别说明：
 - OMK 固定读取 `/data/misc/keystore/omk/keybox.xml`，不需要改配置。
 - `retire_stale_keybox_bound_keys=true` 时换 keybox 会删除旧 keybox 绑定的客户端 key；部署前必须警告。
 - `chown 1017:1017` 必须成功；失败则报错，不继续。
+- 写入前有 OMK 兼容性预检查（`crates/rkp-mini-deployer/src/omk.rs`）：手写扫描器复刻 OMK 1.2.6（`9069c6c`）的 `src/keybox.rs` 四条正则、`decode_pem` 与 `common/src/crypto/ec.rs::import_sec1_private_key`，确认 OMK 会读到与本地校验完全相同的私钥和证书链（链 DER 哈希、DeviceID、SEC1 namedCurve）；只是比 OMK 更严，绝不更宽松。
+- 结果：配置了 `omk` 目标时，`plan` 的 `data.warnings[]` 在**每个** gate 都带 `omk_incompatible`；`apply` 在访问该目标文件之前就让 `omk` 目标以 `targets[].error.code = "omk_incompatible"` 失败（deploy 与 gate `same` 的修复路径一致，不写、不改权限、不 reload），其它目标照常继续。原因文本固定，不含 keybox 文本、base64 或密钥字节。
+- 已知残余：OMK 还会比较叶子证书完整 SPKI DER 与 BoringSSL 由私钥导出的 SPKI；SPKI 使用非 namedCurve `AlgorithmIdentifier` 编码时预检查发现不了。
+- 本次改动前签发的 keybox 私钥缺少 SEC1 `parameters`，会被判为不兼容；重新签发（`rkp-mini-issuer issue`）后再部署。其它目标对该格式的处理见 §4.3：只有 `omk` 目标有预检查，`tricky_store` 没有。
 
 ### 11.5 identity gate 与 rotation policy
 
@@ -1047,6 +1051,7 @@ UI 必须展示并让用户勾选确认：
 | 叶子不足 `min_validity_days` | 拒绝；发送端重新 issue |
 | 身份变化未允许 | 记录 `pending`；通知；不写目标 |
 | OMK key retirement 触发 | 部署成功但可能删 key；UI 提前警告 |
+| keybox 通过本地校验但 OMK 读不了 | `omk_incompatible`；`omk` 目标不写入（不触发 OMK 模板覆盖），其它目标照常；提示重新签发或改用 OMK 可解析的 keybox |
 | 目标写文件失败 | 保留旧文件；报 path/errno/SELinux |
 | reload 失败 | 文件已落盘；标记 degraded；提示手动重启/查日志 |
 | 禁用同步 | 停任务；保留已部署 keybox；不自动删除 |

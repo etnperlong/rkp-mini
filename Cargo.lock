@@ -1487,16 +1487,19 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
+ "der",
  "libc",
  "p256",
  "rand_core",
  "rcgen",
  "rkp-mini-core",
  "rkp-mini-runtime",
+ "sec1",
  "serde",
  "serde_json",
  "tempfile",
  "time",
+ "zeroize",
 ]
 
 [[package]]

@@ -610,7 +610,9 @@ fn reload_target(target: &Target, opts: &ApplyOptions) -> (String, Option<Target
         Reload::Auto => ("watcher".to_string(), None),
         Reload::None => ("skipped".to_string(), None),
         Reload::Restart => {
-            // A fresh file (atomic rename) is what OhMyKeymint watches for.
+            // OhMyKeymint's wrapper polls for this file, removes it and
+            // restarts keymint; the keybox itself is already reloaded by the
+            // module's watcher on rename.
             match rkp_mini_core::fsutil::atomic_write(&opts.omk_restart_flag, b"", 0o600, None) {
                 Ok(()) => ("ok".to_string(), None),
                 Err(e) => degraded(format!(

@@ -28,6 +28,8 @@ COMMANDS:
   apply [--confirm-first KEYBOX_SHA256] [--allow-identity-change KEYBOX_SHA256]
         [--auto] [--if-staged]
                            write the staged keybox to every local target
+  targets                  list the built-in targets and whether the module
+                           that reads each keybox is installed
   add-target omk|teesim|tricky_store [--path PATH] [--reload auto|restart|none]
                            edit the local target list
   remove-target ID         drop a target from the config (file untouched)
@@ -52,6 +54,7 @@ pub enum Command {
         auto: bool,
         if_staged: bool,
     },
+    Targets,
     AddTarget {
         id: String,
         path: Option<String>,
@@ -113,6 +116,7 @@ pub fn parse(args: &[String]) -> Result<(Global, Command)> {
             auto: flags.flag("--auto"),
             if_staged: flags.flag("--if-staged"),
         },
+        "targets" => Command::Targets,
         "add-target" => {
             let path = flags.value("--path")?;
             let reload = flags.value("--reload")?;
@@ -183,6 +187,7 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(matches!(p(&["plan"]).unwrap().1, Command::Plan));
+        assert!(matches!(p(&["targets"]).unwrap().1, Command::Targets));
         assert!(matches!(
             p(&["add-target", "teesim", "--reload", "auto"]).unwrap().1,
             Command::AddTarget { .. }
@@ -202,5 +207,6 @@ mod tests {
         assert!(p(&["plan", "--allow-insecure-http"]).is_err());
         assert!(p(&["apply", "--confirm-first", "abcdef"]).is_err());
         assert!(p(&["add-target"]).is_err());
+        assert!(p(&["targets", "omk"]).is_err());
     }
 }

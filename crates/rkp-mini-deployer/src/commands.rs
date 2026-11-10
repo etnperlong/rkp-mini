@@ -1,15 +1,19 @@
 //! Deployer commands: preview, apply, and the local target list.
 
+use std::path::Path;
+
 use anyhow::Result;
 use rkp_mini_core::confirmation::{confirmation_mismatch, sha_confirms};
 use rkp_mini_core::error::{err, Stage, SyncError};
 use rkp_mini_runtime::config::{self, Config, Role};
 use rkp_mini_runtime::context::Ctx;
 use rkp_mini_runtime::output::Output;
+use rkp_mini_runtime::targets::{self, BUILTINS, BUILTIN_MODE};
 use rkp_mini_runtime::{lock, tty, util};
 use serde_json::{json, Value as Json};
 
 use crate::deploy::{self, ApplyOptions, Gate};
+use crate::modules;
 
 fn gate_json(gate: &Gate) -> Json {
     match gate {
@@ -220,6 +224,49 @@ pub fn apply(
     )
 }
 
+/// `targets`: the builtin targets and whether the module that reads each one
+/// is installed. Read-only and independent of the config.
+pub fn targets(modules_dir: &Path) -> Output {
+    let mut text = String::new();
+    let builtin: Vec<Json> = BUILTINS
+        .iter()
+        .map(|b| {
+            let module = modules::detect(modules_dir, b.module_id);
+            let state = match (module.installed, module.enabled) {
+                (false, _) => "not installed".to_string(),
+                (true, enabled) => format!(
+                    "{}{}{}",
+                    if enabled {
+                        "installed"
+                    } else {
+                        "installed, disabled"
+                    },
+                    module
+                        .name
+                        .as_ref()
+                        .map_or(String::new(), |n| format!(": {n}")),
+                    module
+                        .version
+                        .as_ref()
+                        .map_or(String::new(), |v| format!(" {v}")),
+                ),
+            };
+            text.push_str(&format!(
+                "{} → {} (module {}: {state})\n",
+                b.id, b.path, b.module_id
+            ));
+            json!({
+                "id": b.id,
+                "path": b.path,
+                "owner": format!("{}:{}", b.uid, b.gid),
+                "mode": format!("{BUILTIN_MODE:04o}"),
+                "module": module,
+            })
+        })
+        .collect();
+    Output::ok(json!({ "builtin": builtin }), text.trim_end())
+}
+
 pub fn add_target(
     ctx: &Ctx,
     id: &str,
@@ -227,19 +274,15 @@ pub fn add_target(
     reload: Option<String>,
 ) -> Result<Output> {
     let cfg = ctx.load(Some(Role::Receiver))?;
-    let (default_path, owner) = match id {
-        "omk" => ("/data/misc/keystore/omk/keybox.xml", "1017:1017"),
-        "teesim" => ("/data/adb/teesim/keybox.xml", "0:0"),
-        "tricky_store" => ("/data/adb/tricky_store/keybox.xml", "0:0"),
-        _ => {
-            return Err(err(
-                Stage::Config,
-                "usage",
-                "built-in targets: omk, teesim, tricky_store (custom targets are added by editing the config)",
-            ))
-        }
+    let Some(builtin) = targets::builtin(id) else {
+        return Err(err(
+            Stage::Config,
+            "usage",
+            "built-in targets: omk, teesim, tricky_store (custom targets are added by editing the config)",
+        ));
     };
-    let path = path.unwrap_or_else(|| default_path.to_string());
+    let owner = format!("{}:{}", builtin.uid, builtin.gid);
+    let path = path.unwrap_or_else(|| builtin.path.to_string());
     let reload = reload.unwrap_or_else(|| "auto".to_string());
     let _lock = lock::lock(&cfg.lock_path())?;
     config::add_target(
@@ -247,14 +290,14 @@ pub fn add_target(
         id,
         &[
             ("path", &path),
-            ("owner", owner),
-            ("mode", "0600"),
+            ("owner", &owner),
+            ("mode", &format!("{BUILTIN_MODE:04o}")),
             ("reload", &reload),
         ],
     )?;
     // Validate the result; roll back on error.
     let reloaded = config::load(&cfg.path, Some(Role::Receiver), ctx.url_policy())?;
-    if let Err(e) = rkp_mini_runtime::targets::resolve_targets(&reloaded) {
+    if let Err(e) = targets::resolve_targets(&reloaded) {
         config::remove_target(&cfg.path, id)?;
         return Err(e);
     }
@@ -577,6 +620,37 @@ mod tests {
         let repaired = apply(&fx.ctx(), None, None, true, true).unwrap();
         assert!(repaired.failure.is_none(), "{:?}", repaired.failure);
         assert_eq!(std::fs::read(&fx.target).unwrap(), kb.xml.as_bytes());
+    }
+
+    #[test]
+    fn targets_reports_only_installed_modules() {
+        let dir = tempfile::tempdir().unwrap();
+        // TrickyStore and TEESimulator-RS both install as `tricky_store`.
+        let module = dir.path().join("tricky_store");
+        std::fs::create_dir_all(&module).unwrap();
+        std::fs::write(
+            module.join("module.prop"),
+            "id=tricky_store\nname=TEESimulator-RS\nversion=v6.0.1\n",
+        )
+        .unwrap();
+
+        let out = targets(dir.path());
+        let builtin = out.data["builtin"].as_array().unwrap();
+        let by_id = |id: &str| builtin.iter().find(|b| b["id"] == id).unwrap();
+        assert_eq!(builtin.len(), 3);
+
+        let ts = by_id("tricky_store");
+        assert_eq!(ts["path"], "/data/adb/tricky_store/keybox.xml");
+        assert_eq!(ts["owner"], "0:0");
+        assert_eq!(ts["mode"], "0600");
+        assert_eq!(ts["module"]["installed"], true);
+        assert_eq!(ts["module"]["name"], "TEESimulator-RS");
+
+        let omk = by_id("omk");
+        assert_eq!(omk["owner"], "1017:1017");
+        assert_eq!(omk["module"]["id"], "oh_my_keymint");
+        assert_eq!(omk["module"]["installed"], false);
+        assert_eq!(by_id("teesim")["module"]["installed"], false);
     }
 
     #[test]

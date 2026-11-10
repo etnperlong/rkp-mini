@@ -19,12 +19,64 @@ pub const OMK_PATH: &str = "/data/misc/keystore/omk/keybox.xml";
 pub const TEESIM_DIR: &str = "/data/adb/teesim";
 /// TEESimulator default keybox.
 pub const TEESIM_PATH: &str = "/data/adb/teesim/keybox.xml";
-/// Legacy TrickyStore keybox path.
+/// Keybox read by TrickyStore and by TEESimulator-RS (both install as the
+/// `tricky_store` module and share this directory).
 pub const TRICKY_STORE_PATH: &str = "/data/adb/tricky_store/keybox.xml";
 /// TEESimulator profile file (read only, never modified).
 pub const DEFAULT_TEESIM_CONFIG: &str = "/data/adb/teesim/config.json";
 /// OhMyKeymint "restart keymint" trigger file.
 pub const DEFAULT_OMK_RESTART: &str = "/data/adb/omk/restart.keymint";
+
+/// A builtin target: fixed keybox location plus the root module that reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Builtin {
+    pub id: &'static str,
+    pub kind: TargetKind,
+    /// `id=` of the owning module, i.e. its directory under `/data/adb/modules`.
+    pub module_id: &'static str,
+    /// Default (for `teesim`) or only keybox path.
+    pub path: &'static str,
+    pub uid: u32,
+    pub gid: u32,
+}
+
+/// Mode of every builtin keybox.
+pub const BUILTIN_MODE: u32 = 0o600;
+
+/// Every builtin target. Each module reloads on its own: all of them watch the
+/// keybox directory with inotify and react to the `IN_MOVED_TO` of the atomic
+/// rename (OhMyKeymint and TrickyStore match the name `keybox.xml`,
+/// TEESimulator and TEESimulator-RS any `*.xml`).
+pub const BUILTINS: [Builtin; 3] = [
+    Builtin {
+        id: "omk",
+        kind: TargetKind::Omk,
+        module_id: "oh_my_keymint",
+        path: OMK_PATH,
+        uid: 1017,
+        gid: 1017,
+    },
+    Builtin {
+        id: "teesim",
+        kind: TargetKind::Teesim,
+        module_id: "teesim",
+        path: TEESIM_PATH,
+        uid: 0,
+        gid: 0,
+    },
+    Builtin {
+        id: "tricky_store",
+        kind: TargetKind::TrickyStore,
+        module_id: "tricky_store",
+        path: TRICKY_STORE_PATH,
+        uid: 0,
+        gid: 0,
+    },
+];
+
+pub fn builtin(id: &str) -> Option<&'static Builtin> {
+    BUILTINS.iter().find(|b| b.id == id)
+}
 
 // ---------------------------------------------------------------------------
 // Targets
@@ -40,9 +92,10 @@ pub enum TargetKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reload {
-    /// Rely on the tool's own file watcher.
+    /// Rely on the module's own directory watcher (see [`BUILTINS`]).
     Auto,
-    /// OhMyKeymint only: `touch /data/adb/omk/restart.keymint`.
+    /// OhMyKeymint only: create `/data/adb/omk/restart.keymint`, which its
+    /// wrapper polls to restart the keymint process.
     Restart,
     /// No reload.
     None,
@@ -208,6 +261,105 @@ fn builtin_reload(t: &TargetConfig, allowed: &[(&str, Reload)]) -> Result<Reload
         })
 }
 
+/// TEESimulator loads `<data dir>/<profile keybox>`; its watcher only reacts
+/// to names ending in `.xml`, so anything else would never be reloaded.
+fn teesim_path(t: &TargetConfig) -> Result<PathBuf> {
+    let Some(raw) = t.path.as_deref() else {
+        return Ok(PathBuf::from(TEESIM_PATH));
+    };
+    let p = check_path(raw, "teesim target path")?;
+    let xml = p
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.len() > ".xml".len() && n.ends_with(".xml"));
+    if p.parent() != Some(Path::new(TEESIM_DIR)) || !xml {
+        return Err(config_err(
+            "builtin_path_override",
+            format!(
+                "teesim keybox must be a `.xml` file directly inside {TEESIM_DIR}, not `{raw}`"
+            ),
+        ));
+    }
+    Ok(p)
+}
+
+fn resolve_builtin(t: &TargetConfig, b: &Builtin) -> Result<Target> {
+    let (uid, gid) = builtin_owner(t, b.uid, b.gid)?;
+    let mode = builtin_mode(t, BUILTIN_MODE)?;
+    let (path, reload) = match b.kind {
+        TargetKind::Omk => (
+            builtin_path(t, b.path)?,
+            builtin_reload(t, &[("auto", Reload::Auto), ("restart", Reload::Restart)])?,
+        ),
+        TargetKind::Teesim => (
+            teesim_path(t)?,
+            builtin_reload(t, &[("auto", Reload::Auto)])?,
+        ),
+        TargetKind::TrickyStore | TargetKind::Custom => (
+            builtin_path(t, b.path)?,
+            builtin_reload(t, &[("auto", Reload::Auto)])?,
+        ),
+    };
+    Ok(Target {
+        id: t.id.clone(),
+        kind: b.kind,
+        path,
+        uid,
+        gid,
+        mode,
+        reload,
+    })
+}
+
+/// Any id that is not builtin is an explicit local opt-in target.
+fn resolve_custom(t: &TargetConfig) -> Result<Target> {
+    let id = t.id.as_str();
+    let raw = t.path.as_deref().ok_or_else(|| {
+        config_err(
+            "custom_target_incomplete",
+            format!("custom target `{id}` requires an absolute `path`"),
+        )
+    })?;
+    let path = check_path(raw, "custom target path")?;
+    let owner = t.owner.as_deref().ok_or_else(|| {
+        config_err(
+            "custom_target_incomplete",
+            format!("custom target `{id}` requires `owner` as `uid:gid`"),
+        )
+    })?;
+    let (uid, gid) = parse_owner(owner)?;
+    let mode = t.mode.as_deref().ok_or_else(|| {
+        config_err(
+            "custom_target_incomplete",
+            format!("custom target `{id}` requires an octal `mode`"),
+        )
+    })?;
+    let reload = match t.reload.as_deref() {
+        None | Some("auto") => Reload::Auto,
+        Some("none") => Reload::None,
+        Some(spec) => match spec.strip_prefix("touch:") {
+            Some(p) => Reload::Touch(check_path(p, "custom reload touch path")?),
+            None => {
+                return Err(config_err(
+                    "invalid_target_reload",
+                    format!(
+                        "custom target `{id}` reload `{spec}` must be `auto`, `none` or `touch:<abs path>`"
+                    ),
+                ))
+            }
+        },
+    };
+    Ok(Target {
+        id: id.to_string(),
+        kind: TargetKind::Custom,
+        path,
+        uid,
+        gid,
+        mode: parse_mode(mode)?,
+        reload,
+    })
+}
+
 fn resolve_one(t: &TargetConfig) -> Result<Target> {
     if t.id.is_empty() || t.id.contains('/') {
         return Err(config_err(
@@ -215,105 +367,9 @@ fn resolve_one(t: &TargetConfig) -> Result<Target> {
             format!("target id `{}` is empty or contains `/`", t.id),
         ));
     }
-    match t.id.as_str() {
-        "omk" => {
-            let (uid, gid) = builtin_owner(t, 1017, 1017)?;
-            Ok(Target {
-                id: t.id.clone(),
-                kind: TargetKind::Omk,
-                path: builtin_path(t, OMK_PATH)?,
-                uid,
-                gid,
-                mode: builtin_mode(t, 0o600)?,
-                reload: builtin_reload(t, &[("auto", Reload::Auto), ("restart", Reload::Restart)])?,
-            })
-        }
-        "teesim" => {
-            let path = match t.path.as_deref() {
-                None => PathBuf::from(TEESIM_PATH),
-                Some(raw) => {
-                    let p = check_path(raw, "teesim target path")?;
-                    if p.parent() != Some(Path::new(TEESIM_DIR)) || p.file_name().is_none() {
-                        return Err(config_err(
-                            "builtin_path_override",
-                            format!(
-                                "teesim keybox must be directly inside {TEESIM_DIR}, not `{raw}`"
-                            ),
-                        ));
-                    }
-                    p
-                }
-            };
-            let (uid, gid) = builtin_owner(t, 0, 0)?;
-            Ok(Target {
-                id: t.id.clone(),
-                kind: TargetKind::Teesim,
-                path,
-                uid,
-                gid,
-                mode: builtin_mode(t, 0o600)?,
-                reload: builtin_reload(t, &[("auto", Reload::Auto)])?,
-            })
-        }
-        "tricky_store" => {
-            let (uid, gid) = builtin_owner(t, 0, 0)?;
-            Ok(Target {
-                id: t.id.clone(),
-                kind: TargetKind::TrickyStore,
-                path: builtin_path(t, TRICKY_STORE_PATH)?,
-                uid,
-                gid,
-                mode: builtin_mode(t, 0o600)?,
-                reload: builtin_reload(t, &[("auto", Reload::Auto)])?,
-            })
-        }
-        // Any other id is an explicit local opt-in target.
-        id => {
-            let raw = t.path.as_deref().ok_or_else(|| {
-                config_err(
-                    "custom_target_incomplete",
-                    format!("custom target `{id}` requires an absolute `path`"),
-                )
-            })?;
-            let path = check_path(raw, "custom target path")?;
-            let owner = t.owner.as_deref().ok_or_else(|| {
-                config_err(
-                    "custom_target_incomplete",
-                    format!("custom target `{id}` requires `owner` as `uid:gid`"),
-                )
-            })?;
-            let (uid, gid) = parse_owner(owner)?;
-            let mode = t.mode.as_deref().ok_or_else(|| {
-                config_err(
-                    "custom_target_incomplete",
-                    format!("custom target `{id}` requires an octal `mode`"),
-                )
-            })?;
-            let reload = match t.reload.as_deref() {
-                None | Some("auto") => Reload::Auto,
-                Some("none") => Reload::None,
-                Some(spec) => match spec.strip_prefix("touch:") {
-                    Some(p) => Reload::Touch(check_path(p, "custom reload touch path")?),
-                    None => {
-                        return Err(config_err(
-                            "invalid_target_reload",
-                            format!(
-                                "custom target `{id}` reload `{spec}` must be `auto`, `none` or `touch:<abs path>`"
-                            ),
-                        ))
-                    }
-                },
-            };
-            Ok(Target {
-                id: id.to_string(),
-                kind: TargetKind::Custom,
-                path,
-                uid,
-                gid,
-                mode: parse_mode(mode)?,
-                reload,
-            })
-        }
+    match builtin(&t.id) {
+        Some(b) => resolve_builtin(t, b),
+        None => resolve_custom(t),
     }
 }
 
@@ -516,5 +572,21 @@ mod tests {
             reload: None,
         }];
         assert_eq!(code_of(resolve_targets(&cfg)), "builtin_path_override");
+
+        // TEESimulator's watcher ignores names that do not end in `.xml`.
+        for name in ["keybox.pem", ".xml", "keybox.xml.bak"] {
+            cfg.deploy.targets = vec![TargetConfig {
+                id: "teesim".to_string(),
+                path: Some(format!("/data/adb/teesim/{name}")),
+                owner: None,
+                mode: None,
+                reload: None,
+            }];
+            assert_eq!(
+                code_of(resolve_targets(&cfg)),
+                "builtin_path_override",
+                "{name}"
+            );
+        }
     }
 }

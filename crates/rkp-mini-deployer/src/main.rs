@@ -7,6 +7,7 @@
 mod cli;
 mod commands;
 mod deploy;
+mod modules;
 
 use cli::Command;
 use rkp_mini_core::error::{err, to_sync_error, Stage, SyncError};
@@ -66,6 +67,9 @@ fn dispatch(ctx: &Ctx, cmd: Command, wrong_role: bool) -> anyhow::Result<Output>
             auto,
             if_staged,
         } => commands::apply(ctx, allow_identity_change, confirm_first, auto, if_staged),
+        Command::Targets => Ok(commands::targets(std::path::Path::new(
+            modules::MODULES_DIR,
+        ))),
         Command::AddTarget { id, path, reload } => commands::add_target(ctx, &id, path, reload),
         Command::RemoveTarget { id } => commands::remove_target(ctx, &id),
         Command::Remove { targets, yes } => commands::remove(ctx, targets, yes),

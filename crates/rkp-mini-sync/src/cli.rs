@@ -140,9 +140,9 @@ impl Command {
             Command::Push { .. } | Command::Share { .. } | Command::RotatePassword { .. } => {
                 Some(Role::Sender)
             }
-            Command::Import { .. } | Command::Fetch { .. } | Command::CheckAuto { .. } => {
-                Some(Role::Receiver)
-            }
+            // `check-auto` is used by both module loops; only the
+            // `--require-verified` flag is receiver-only (checked in common).
+            Command::Import { .. } | Command::Fetch { .. } => Some(Role::Receiver),
             _ => None,
         }
     }
@@ -339,6 +339,26 @@ mod tests {
                 require_verified: false
             }
         ));
+    }
+
+    #[test]
+    fn check_auto_is_valid_for_both_roles() {
+        use rkp_mini_runtime::config::Role;
+        for args in [vec!["check-auto"], vec!["check-auto", "--require-verified"]] {
+            let (_, cmd) = p(&args).unwrap();
+            assert_eq!(cmd.role(), None, "{args:?} must not be receiver-only");
+        }
+        // The other role-bound commands keep their requirement.
+        assert_eq!(
+            p(&["fetch"]).unwrap().1.role(),
+            Some(Role::Receiver),
+            "fetch is receiver-only"
+        );
+        assert_eq!(
+            p(&["push"]).unwrap().1.role(),
+            Some(Role::Sender),
+            "push is sender-only"
+        );
     }
 
     #[test]

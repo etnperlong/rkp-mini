@@ -82,7 +82,7 @@ fn nothing_staged() -> anyhow::Error {
     err(
         Stage::State,
         "nothing_staged",
-        "no staged keybox; run `rkp-sync fetch` first",
+        "no staged keybox; run `rkp-mini-sync fetch` first",
     )
 }
 

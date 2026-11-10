@@ -37,7 +37,7 @@ fn check_state_stream(state: Option<&SyncState>, stream_id: &str) -> Result<()> 
                 "state_stream_mismatch",
                 format!(
                     "local state belongs to stream {} but config uses {stream_id}; \
-                     run `rkp-sync forget` or re-import to switch streams",
+                     run `rkp-mini-sync forget` or re-import to switch streams",
                     s.stream_id
                 ),
             ));

@@ -1,0 +1,12 @@
+{
+  "provider": "gist",
+  "location": "https://gist.githubusercontent.com/evans/abc123/raw/rkp-sync.age",
+  "stream_id": "st_demo_receiver",
+  "seq": 7,
+  "device_id": "rkp-mini-000000004c1a",
+  "leaf_not_before_days_ago": 3,
+  "leaf_not_after_days": 120,
+  "keybox_sha256": "f0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2",
+  "plaintext_sha256": "6c8e0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8e",
+  "targets": ["/data/misc/keystore/omk/keybox.xml"]
+}

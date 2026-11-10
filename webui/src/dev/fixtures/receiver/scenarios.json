@@ -1,0 +1,271 @@
+{
+  "imported": {
+    "enabled": false,
+    "risk_ack": false,
+    "provider": "gist",
+    "location": "https://gist.githubusercontent.com/evans/abc123/raw/rkp-sync.age",
+    "stream_id": "st_demo_receiver",
+    "label": "phone-a",
+    "password_mode": "secret-file",
+    "webdav_user": "",
+    "gist_id": "abc123",
+    "gist_filename": "rkp-sync.age",
+    "webdav_endpoint": "",
+    "webdav_path": "",
+    "age_present": false,
+    "webdav_password_present": false,
+    "sync_state": null,
+    "staged": null,
+    "deployed": null,
+    "pending": null,
+    "loop_running": false,
+    "last_error": null,
+    "identity_change_policy": "scheduled",
+    "rotation_lead_days": 30,
+    "auto_deploy": true,
+    "min_validity_days": 7,
+    "targets": [
+      {
+        "id": "omk",
+        "path": "/data/misc/keystore/omk/keybox.xml",
+        "owner": "1017:1017",
+        "mode": "0600",
+        "reload": "auto"
+      }
+    ]
+  },
+  "ready": {
+    "enabled": true,
+    "risk_ack": true,
+    "provider": "gist",
+    "location": "https://gist.githubusercontent.com/evans/abc123/raw/rkp-sync.age",
+    "stream_id": "st_demo_receiver",
+    "label": "phone-a",
+    "password_mode": "secret-file",
+    "webdav_user": "",
+    "gist_id": "abc123",
+    "gist_filename": "rkp-sync.age",
+    "webdav_endpoint": "",
+    "webdav_path": "",
+    "age_present": true,
+    "webdav_password_present": false,
+    "sync_state": {
+      "seq": 42,
+      "device_id": "rkp-mini-000000007f3a",
+      "keybox_sha256": "9f2c4a7d1e8b3c6f0a5d2e7b4c1f8a3d6e9b2c5f8a1d4e7b0c3f6a9d2e5b8c1f",
+      "plaintext_sha256": "3d7f1a9c5e2b8d4f6a0c3e7b1d5f9a2c4e8b0d6f3a1c7e5b9d2f4a8c6e0b1d3f",
+      "keybox_not_after_days": 118,
+      "verified_days_ago": 2
+    },
+    "staged": {
+      "seq": 42,
+      "device_id": "rkp-mini-000000007f3a",
+      "keybox_sha256": "9f2c4a7d1e8b3c6f0a5d2e7b4c1f8a3d6e9b2c5f8a1d4e7b0c3f6a9d2e5b8c1f",
+      "plaintext_sha256": "3d7f1a9c5e2b8d4f6a0c3e7b1d5f9a2c4e8b0d6f3a1c7e5b9d2f4a8c6e0b1d3f",
+      "leaf_not_after_days": 118,
+      "leaf_not_before_days_ago": 2
+    },
+    "deployed": {
+      "seq": 42,
+      "keybox_sha256": "9f2c4a7d1e8b3c6f0a5d2e7b4c1f8a3d6e9b2c5f8a1d4e7b0c3f6a9d2e5b8c1f",
+      "leaf_not_after_days": 118,
+      "at_days_ago": 2
+    },
+    "pending": null,
+    "loop_running": true,
+    "last_error": null,
+    "identity_change_policy": "scheduled",
+    "rotation_lead_days": 30,
+    "auto_deploy": true,
+    "min_validity_days": 7,
+    "targets": [
+      {
+        "id": "omk",
+        "path": "/data/misc/keystore/omk/keybox.xml",
+        "owner": "1017:1017",
+        "mode": "0600",
+        "reload": "auto",
+        "reload_status": "ok"
+      }
+    ]
+  },
+  "pending_first": {
+    "enabled": true,
+    "risk_ack": true,
+    "provider": "gist",
+    "location": "https://gist.githubusercontent.com/evans/abc123/raw/rkp-sync.age",
+    "stream_id": "st_demo_receiver",
+    "label": "phone-a",
+    "password_mode": "secret-file",
+    "webdav_user": "",
+    "gist_id": "abc123",
+    "gist_filename": "rkp-sync.age",
+    "webdav_endpoint": "",
+    "webdav_path": "",
+    "age_present": true,
+    "webdav_password_present": false,
+    "sync_state": {
+      "seq": 43,
+      "device_id": "rkp-mini-000000009d21",
+      "keybox_sha256": "c4e8a2d6f0b3c7e1a5d9f2b6c0e4a8d1f5b9c3e7a0d4f8b2c6e1a5d9f3b7c0e4",
+      "plaintext_sha256": "7a1c3e5f9b0d2f4a6c8e1b3d5f7a9c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a",
+      "keybox_not_after_days": 120,
+      "verified_days_ago": 0
+    },
+    "staged": {
+      "seq": 43,
+      "device_id": "rkp-mini-000000009d21",
+      "keybox_sha256": "c4e8a2d6f0b3c7e1a5d9f2b6c0e4a8d1f5b9c3e7a0d4f8b2c6e1a5d9f3b7c0e4",
+      "plaintext_sha256": "7a1c3e5f9b0d2f4a6c8e1b3d5f7a9c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a",
+      "leaf_not_after_days": 120,
+      "leaf_not_before_days_ago": 0
+    },
+    "deployed": null,
+    "pending": {
+      "seq": 43,
+      "keybox_sha256": "c4e8a2d6f0b3c7e1a5d9f2b6c0e4a8d1f5b9c3e7a0d4f8b2c6e1a5d9f3b7c0e4",
+      "leaf_not_after_days": 120,
+      "reason": "first_deploy"
+    },
+    "loop_running": true,
+    "last_error": null,
+    "identity_change_policy": "scheduled",
+    "rotation_lead_days": 30,
+    "auto_deploy": true,
+    "min_validity_days": 7,
+    "targets": [
+      {
+        "id": "omk",
+        "path": "/data/misc/keystore/omk/keybox.xml",
+        "owner": "1017:1017",
+        "mode": "0600",
+        "reload": "auto"
+      },
+      {
+        "id": "teesim",
+        "path": "/data/adb/teesim/keybox.xml",
+        "owner": "0:0",
+        "mode": "0600",
+        "reload": "auto"
+      }
+    ]
+  },
+  "pending_identity": {
+    "enabled": true,
+    "risk_ack": true,
+    "provider": "gist",
+    "location": "https://gist.githubusercontent.com/evans/abc123/raw/rkp-sync.age",
+    "stream_id": "st_demo_receiver",
+    "label": "phone-a",
+    "password_mode": "secret-file",
+    "webdav_user": "",
+    "gist_id": "abc123",
+    "gist_filename": "rkp-sync.age",
+    "webdav_endpoint": "",
+    "webdav_path": "",
+    "age_present": true,
+    "webdav_password_present": false,
+    "sync_state": {
+      "seq": 44,
+      "device_id": "rkp-mini-00000000b0e4",
+      "keybox_sha256": "2e6a0c4e8b2d6f0a4c8e1b5d9f3a7c0e4b8d2f6a0c4e8b2d6f0a4c8e1b5d9f3a",
+      "plaintext_sha256": "8b0d2f4a6c8e1b3d5f7a9c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a5c7e9b0d",
+      "keybox_not_after_days": 120,
+      "verified_days_ago": 1
+    },
+    "staged": {
+      "seq": 44,
+      "device_id": "rkp-mini-00000000b0e4",
+      "keybox_sha256": "2e6a0c4e8b2d6f0a4c8e1b5d9f3a7c0e4b8d2f6a0c4e8b2d6f0a4c8e1b5d9f3a",
+      "plaintext_sha256": "8b0d2f4a6c8e1b3d5f7a9c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a5c7e9b0d",
+      "leaf_not_after_days": 120,
+      "leaf_not_before_days_ago": 1
+    },
+    "deployed": {
+      "seq": 41,
+      "keybox_sha256": "5b9d1f3a7c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a5c7e9b0d2f4a6c8e1b3d",
+      "leaf_not_after_days": 150,
+      "at_days_ago": 10
+    },
+    "pending": {
+      "seq": 44,
+      "keybox_sha256": "2e6a0c4e8b2d6f0a4c8e1b5d9f3a7c0e4b8d2f6a0c4e8b2d6f0a4c8e1b5d9f3a",
+      "leaf_not_after_days": 120,
+      "reason": "identity_change"
+    },
+    "loop_running": true,
+    "last_error": null,
+    "identity_change_policy": "scheduled",
+    "rotation_lead_days": 30,
+    "auto_deploy": true,
+    "min_validity_days": 7,
+    "targets": [
+      {
+        "id": "omk",
+        "path": "/data/misc/keystore/omk/keybox.xml",
+        "owner": "1017:1017",
+        "mode": "0600",
+        "reload": "auto",
+        "reload_status": "ok"
+      }
+    ]
+  },
+  "error": {
+    "enabled": true,
+    "risk_ack": true,
+    "provider": "webdav",
+    "location": "https://dav.jianguoyun.com/dav/rkp/phone-a-keybox.age",
+    "stream_id": "st_demo_receiver",
+    "label": "phone-a",
+    "password_mode": "secret-file",
+    "webdav_user": "me@example.com",
+    "gist_id": "",
+    "gist_filename": "rkp-sync.age",
+    "webdav_endpoint": "https://dav.jianguoyun.com/dav/",
+    "webdav_path": "/rkp/phone-a-keybox.age",
+    "age_present": true,
+    "webdav_password_present": false,
+    "sync_state": {
+      "seq": 45,
+      "device_id": "rkp-mini-0000000051cd",
+      "keybox_sha256": "e9b0d2f4a6c8e1b3d5f7a9c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a5c7e9b0",
+      "plaintext_sha256": "4a6c8e1b3d5f7a9c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a5c7e9b0d2f4a6c",
+      "keybox_not_after_days": 90,
+      "verified_days_ago": 5
+    },
+    "staged": {
+      "seq": 45,
+      "device_id": "rkp-mini-0000000051cd",
+      "keybox_sha256": "e9b0d2f4a6c8e1b3d5f7a9c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a5c7e9b0",
+      "plaintext_sha256": "4a6c8e1b3d5f7a9c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3a5c7e9b0d2f4a6c",
+      "leaf_not_after_days": 90,
+      "leaf_not_before_days_ago": 5
+    },
+    "deployed": {
+      "seq": 44,
+      "keybox_sha256": "d1f3a5c7e9b0d2f4a6c8e1b3d5f7a9c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d1f3",
+      "leaf_not_after_days": 60,
+      "at_days_ago": 3
+    },
+    "pending": null,
+    "loop_running": false,
+    "last_error": {
+      "code": "remote_unavailable",
+      "message": "WebDAV endpoint returned 503"
+    },
+    "identity_change_policy": "always",
+    "rotation_lead_days": 30,
+    "auto_deploy": true,
+    "min_validity_days": 7,
+    "targets": [
+      {
+        "id": "omk",
+        "path": "/data/misc/keystore/omk/keybox.xml",
+        "owner": "1017:1017",
+        "mode": "0600",
+        "reload": "auto",
+        "reload_status": "ok"
+      }
+    ]
+  }
+}

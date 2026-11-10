@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/rkp-mini"]
+members = ["crates/rkp-mini", "crates/rkp-sync-core"]
 
 [profile.release]
 opt-level = "z"
@@ -8,3 +8,22 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# scrypt (age passphrase KDF) is unusably slow unoptimized; keep debug builds
+# and host tests practical without changing release behaviour.
+[profile.dev.package.scrypt]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.chacha20]
+opt-level = 3
+[profile.dev.package.chacha20poly1305]
+opt-level = 3
+[profile.dev.package.poly1305]
+opt-level = 3

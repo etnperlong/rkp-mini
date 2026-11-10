@@ -12,8 +12,10 @@ ui_print "- Output: /data/misc/keystore/rkp-mini/output"
 
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm "$MODPATH/bin/rkp-mini" 0 0 0755
+set_perm "$MODPATH/bin/rkp-sync" 0 0 0755
 set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/service.sh" 0 0 0755
+set_perm "$MODPATH/sync-loop.sh" 0 0 0755
 
 mkdir -p /data/misc/keystore/rkp-mini/output
 mkdir -p /data/misc/keystore/rkp-mini/logs
@@ -27,3 +29,6 @@ mkdir -p /data/misc/keystore/rkp-mini/logs
 if ! "$MODPATH/bin/rkp-mini" status --update-description --quiet; then
   ui_print "! rkp-mini: status refresh failed (check binary ABI / prereqs)"
 fi
+
+ui_print "- Remote keybox sync (rkp-sync) is OFF by default."
+ui_print "  Opt in: rkp-sync --role sender init, then rkp-sync enable"

@@ -7,7 +7,9 @@ cd "$(dirname "$0")"
 TARGET=aarch64-linux-android
 API=26
 VERSION="v$(grep -m1 '^version' crates/rkp-mini/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+SYNC_VERSION="v$(grep -m1 '^version' crates/rkp-sync/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
 ZIP="dist/rkp_mini-${VERSION}.zip"
+SYNC_ZIP="dist/rkp_sync-${SYNC_VERSION}.zip"
 
 # --- Locate the NDK -----------------------------------------------------------
 NDK="${NDK:-}"
@@ -62,10 +64,12 @@ else
 fi
 
 echo "- Building release for $TARGET"
-cargo build --release --target "$TARGET"
+cargo build --release --target "$TARGET" -p rkp-mini -p rkp-sync
 
 BIN="target/$TARGET/release/rkp-mini"
-[ -f "$BIN" ] || { echo "! build produced no binary" >&2; exit 1; }
+SYNC_BIN="target/$TARGET/release/rkp-sync"
+[ -f "$BIN" ] || { echo "! build produced no rkp-mini binary" >&2; exit 1; }
+[ -f "$SYNC_BIN" ] || { echo "! build produced no rkp-sync binary" >&2; exit 1; }
 
 # --- WebUI --------------------------------------------------------------------
 command -v bun >/dev/null 2>&1 || { echo "! bun is required to build the WebUI" >&2; exit 1; }
@@ -73,25 +77,50 @@ echo "- Building WebUI"
 ( cd webui && bun install --frozen-lockfile && bun run build )
 [ -f webui/dist/index.html ] || { echo "! webui build produced no index.html" >&2; exit 1; }
 
-# --- Package ------------------------------------------------------------------
+# --- Package: sender (rkp_mini) -----------------------------------------------
 echo "- Packaging $ZIP"
 rm -rf dist/module "$ZIP"
 mkdir -p dist/module/bin dist/module/webroot
 cp "$BIN" dist/module/bin/rkp-mini
+cp "$SYNC_BIN" dist/module/bin/rkp-sync
 cp module/module.prop module/customize.sh module/action.sh \
-   module/service.sh module/uninstall.sh dist/module/
+   module/service.sh module/uninstall.sh module/sync-loop.sh dist/module/
 cp -R webui/dist/. dist/module/webroot/
-chmod 755 dist/module/bin/rkp-mini dist/module/*.sh
+chmod 755 dist/module/bin/rkp-mini dist/module/bin/rkp-sync dist/module/*.sh
 ( cd dist/module && zip -rq "../rkp_mini-${VERSION}.zip" . )
+
+# --- Package: receiver (rkp_sync) ---------------------------------------------
+# Receiver module carries only rkp-sync; never the issuer or its WebUI.
+echo "- Packaging $SYNC_ZIP"
+rm -rf dist/module-sync "$SYNC_ZIP"
+mkdir -p dist/module-sync/bin
+cp "$SYNC_BIN" dist/module-sync/bin/rkp-sync
+cp module-sync/module.prop module-sync/customize.sh module-sync/action.sh \
+   module-sync/service.sh module-sync/uninstall.sh module-sync/sync-loop.sh dist/module-sync/
+chmod 755 dist/module-sync/bin/rkp-sync dist/module-sync/*.sh
+( cd dist/module-sync && zip -rq "../rkp_sync-${SYNC_VERSION}.zip" . )
 
 # --- Verify -------------------------------------------------------------------
 echo "- Verify:"
-file "$BIN" | sed 's/^/    /'
-readelf -h "$BIN" | grep -E 'Machine|Class' | sed 's/^/    /'
-echo "    zip contents:"
-LISTING=$(unzip -l "$ZIP")
-sed 's/^/      /' <<<"$LISTING"
-for f in module.prop bin/rkp-mini webroot/index.html webroot/runner/issue.sh; do
-  grep -q " $f\$" <<<"$LISTING" || { echo "! $f missing from zip" >&2; exit 1; }
+for b in "$BIN" "$SYNC_BIN"; do
+  file "$b" | sed 's/^/    /'
+  readelf -h "$b" | grep -E 'Machine|Class' | sed 's/^/    /'
 done
-echo "- Done: $ZIP"
+check_zip() {
+  local zip=$1; shift
+  echo "    $zip contents:"
+  local listing
+  listing=$(unzip -l "$zip")
+  sed 's/^/      /' <<<"$listing"
+  for f in "$@"; do
+    grep -q " $f\$" <<<"$listing" || { echo "! $f missing from $zip" >&2; exit 1; }
+  done
+}
+check_zip "$ZIP" module.prop customize.sh service.sh sync-loop.sh \
+  bin/rkp-mini bin/rkp-sync webroot/index.html webroot/runner/issue.sh
+check_zip "$SYNC_ZIP" module.prop customize.sh service.sh sync-loop.sh \
+  action.sh uninstall.sh bin/rkp-sync
+if unzip -l "$SYNC_ZIP" | grep -q ' bin/rkp-mini$'; then
+  echo "! receiver zip must not contain rkp-mini" >&2; exit 1
+fi
+echo "- Done: $ZIP $SYNC_ZIP"

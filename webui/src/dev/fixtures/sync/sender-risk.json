@@ -1,0 +1,42 @@
+{
+  "version": 3,
+  "items": [
+    {
+      "id": "cross_device_clone",
+      "zh": "该 keybox 是签发设备的 RKP 身份；在新设备上使用属于 keybox 克隆/冒充，不是合法的跨设备 RKP provisioning。",
+      "en": "This keybox is the issuing device's RKP identity; using it on another device is cloning/spoofing, not a legitimate cross-device RKP provisioning path."
+    },
+    {
+      "id": "integrity_failures",
+      "zh": "Play Integrity、Key Attestation、银行/支付应用可能拒绝，Google 也可能撤销该身份。",
+      "en": "Play Integrity, Key Attestation and banking/payment apps may reject it; Google may revoke the identity."
+    },
+    {
+      "id": "key_copy_risk",
+      "zh": "私钥会被复制到新设备；任一台设备泄露，另一台一起失守。",
+      "en": "The private key is copied to another device; a leak on either device compromises both."
+    },
+    {
+      "id": "passphrase_at_rest",
+      "zh": "age 密码会保存到 0600 文件以支持自动运行；设备丢失或 root 被攻破会泄露。",
+      "en": "The age passphrase is stored in a 0600 file to support unattended runs; losing the device or a root compromise leaks it."
+    },
+    {
+      "id": "omk_key_retirement",
+      "zh": "OhMyKeymint 的 retire_stale_keybox_bound_keys=true 可能在轮换时删除绑定旧 keybox 的客户端密钥。",
+      "en": "OhMyKeymint's retire_stale_keybox_bound_keys=true may delete client keys bound to the old keybox on rotation."
+    },
+    {
+      "id": "remote_trust",
+      "zh": "Gist/WebDAV 只保证可用性：远端可被读取、篡改、回放或删除，只靠 age 密码保护机密性与完整性。",
+      "en": "Gist/WebDAV guarantee availability only: the remote may be read, modified, replayed or deleted; the age passphrase is the sole confidentiality and integrity anchor."
+    },
+    {
+      "id": "debug_manager_logcat",
+      "zh": "debug 版 KernelSU 管理器会把 root shell 命令写入 logcat（release 版不会），WebUI 写入的口令 hex 可能被本地日志捕获。",
+      "en": "A debug build of the KernelSU manager logs root shell commands to logcat (release builds do not); the passphrase hex written by the WebUI may be captured in local logs."
+    }
+  ],
+  "passphrase_path": "/data/misc/keystore/rkp-mini/sync/secrets/age.pass",
+  "accepted_version": null
+}

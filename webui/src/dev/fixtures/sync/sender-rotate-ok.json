@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "data": {
+    "provider": "gist",
+    "stream_id": "st_01JB8Z7Q4K6M2R9X5T3P1W8C0A",
+    "seq": 42,
+    "plaintext_sha256": "b41d9f0c7a5e28163f4c0d9a8e7b6c5d4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d",
+    "keybox_sha256": "7c3e1a90d2f4b6c8e0a2d4f6b8c0e2a4d6f8b0c2e4a6d8f0b2c4e6a8d0f2b4c6",
+    "path": "/data/misc/keystore/rkp-mini/sync/secrets/age.pass",
+    "mode": "0600"
+  }
+}

@@ -5,9 +5,13 @@
 //   ?runner=  idle | running | overdue | success | failure | crashed | stale
 //                                                         (state at page load)
 //   ?outcome= success | failure                (result of an issue started here)
+//   ?sync=    uninit | disabled | ready | error | nosecret        (sync state)
+//   ?syncpush= ok | noop | fail                 (result of one push task)
+// rkp-sync commands are answered by ./mockSyncSender.ts.
 import type { ExecResult } from '../lib/ksu'
 import type { StatusData } from '../lib/rkp'
 import { nowUnix } from '../lib/format'
+import { mockSync } from './mockSyncSender'
 import ready from './fixtures/status-ready.json'
 import expiring from './fixtures/status-expiring.json'
 import expired from './fixtures/status-expired.json'
@@ -155,9 +159,20 @@ function fail(errno: number, stderr: string): ExecResult {
   return { errno, stdout: '', stderr }
 }
 
+/** Redact the secret hex the inbox writes put on the command line. */
+function sanitized(command: string): string {
+  return command.replace(/(echo )[0-9a-f]+( >)/g, '$1<redacted>$2').replace(/[0-9a-f]{32,}/g, '<redacted>')
+}
+
+/** Commands owned by the remote-sync mock: its binary, runner, loop, inbox, log. */
+const SYNC_COMMAND = /\/bin\/rkp-sync|runner\/sync\.sh|sync-task\.|sync-loop\.sh|sync\/inbox|logs\/sync\.log/
+
 export async function mockExec(command: string): Promise<ExecResult> {
   await new Promise((resolve) => setTimeout(resolve, 200))
-  console.debug('[mock exec]', command)
+  console.debug('[mock exec]', sanitized(command))
+
+  // Sync commands first: their paths share the module's `bin/` and `logs/`.
+  if (SYNC_COMMAND.test(command)) return mockSync(command)
 
   if (command.includes(' status --json')) {
     if (scenario === 'status-exit') return fail(2, 'Error: TOML parse error: expected `=`')

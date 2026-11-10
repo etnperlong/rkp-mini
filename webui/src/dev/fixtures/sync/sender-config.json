@@ -1,0 +1,29 @@
+{
+  "role": "sender",
+  "config": "/data/misc/keystore/rkp-mini/config.toml",
+  "enabled": true,
+  "risk_ack_version": 3,
+  "risk_version": 3,
+  "provider": "gist",
+  "stream_id": "st_01JB8Z7Q4K6M2R9X5T3P1W8C0A",
+  "label": "phone-a",
+  "min_validity_days": 14,
+  "request_timeout_seconds": 30,
+  "proxy": "",
+  "gist_id": "8c1f2e3d91b7a4c6",
+  "gist_filename": "rkp-sync.age",
+  "gist_url": "https://gist.githubusercontent.com/evans/8c1f2e3d91b7a4c6/raw/rkp-sync.age",
+  "webdav_endpoint": "",
+  "webdav_path": "/rkp/rkp-sync.age",
+  "webdav_user": "",
+  "url": "",
+  "password_mode": "secret-file",
+  "secret_files": {
+    "age": "/data/misc/keystore/rkp-mini/sync/secrets/age.pass",
+    "gist_token": "/data/misc/keystore/rkp-mini/sync/secrets/gist.token",
+    "webdav_password": "/data/misc/keystore/rkp-mini/sync/secrets/webdav.pass"
+  },
+  "inbox": "/data/misc/keystore/rkp-mini/sync/inbox",
+  "output_dir": "/data/misc/keystore/rkp-mini/output",
+  "auto_issue_days": 30
+}

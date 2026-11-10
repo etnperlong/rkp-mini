@@ -20,9 +20,15 @@ import IssueSheet from './components/IssueSheet.vue'
 import ResultSheet from './components/ResultSheet.vue'
 import DetailSheet from './components/DetailSheet.vue'
 import SettingsSheet from './components/SettingsSheet.vue'
+import SenderSyncCard from './components/sync/SenderSyncCard.vue'
+import SenderSyncSheet from './components/sync/SenderSyncSheet.vue'
+import SenderShareSheet from './components/sync/SenderShareSheet.vue'
+import SenderRotateSheet from './components/sync/SenderRotateSheet.vue'
+import SecretSheet from './components/sync/SecretSheet.vue'
 import { bridgeAvailable } from './lib/ksu'
 import { CommandError, blockerLabel, readCachedStatus, readStatus, type StatusData } from './lib/rkp'
 import { useIssueRunner } from './lib/runner'
+import { readSyncStatus, syncErrorText, useSyncRunner, type SecretKind, type SyncStatus } from './lib/sync'
 import { nowUnix } from './lib/format'
 import { initTheme } from './lib/theme'
 
@@ -40,6 +46,38 @@ const resultOpen = ref(false)
 const detailOpen = ref(false)
 const settingsOpen = ref(false)
 const settingsFocusLogs = ref(false)
+
+// Remote sync (rkp-sync). The status read is local-only; the card starts a
+// detached `push` task and no other sync command runs while it is busy.
+const syncStatus = ref<SyncStatus | null>(null)
+const syncNotInitialized = ref(false)
+const syncError = ref<string | null>(null)
+const syncLoading = ref(false)
+const syncSheetOpen = ref(false)
+const shareOpen = ref(false)
+const rotateOpen = ref(false)
+const secretOpen = ref(false)
+const secretKind = ref<SecretKind>('age')
+
+const SECRET_SHEET: Record<SecretKind, { title: string; hint: string }> = {
+  age: {
+    title: '设置 age 口令',
+    hint: '每个同步流使用独立的强口令（建议 6 个以上随机单词或 20+ 随机字符）；接收端需要用它解密。',
+  },
+  'gist-token': {
+    title: '设置 Gist token',
+    hint: 'GitHub PAT，只勾选 gist 权限即可；用于创建和更新 Gist。',
+  },
+  'webdav-password': {
+    title: '设置 WebDAV 密码',
+    hint: '建议使用可单独撤销的应用密码（例如坚果云的“应用密码”）。',
+  },
+}
+
+function openSecret(kind: SecretKind): void {
+  secretKind.value = kind
+  secretOpen.value = true
+}
 
 function openSettings(focusLogs: boolean): void {
   settingsFocusLogs.value = focusLogs
@@ -92,6 +130,48 @@ const runner = useIssueRunner(async (result) => {
   void showSnackbar({ message: result.code === 0 ? '签发成功，状态已刷新' : '签发失败，原有 keybox 未被替换' })
 })
 
+/**
+ * `rkp-sync status`. A fresh setup has no `[sync]` table yet: the command fails
+ * with `not_initialized`, which the card turns into the initialization choices
+ * rather than an error.
+ */
+async function loadSyncStatus(): Promise<void> {
+  if (!available) return
+  syncLoading.value = true
+  try {
+    const { envelope } = await readSyncStatus()
+    if (envelope.ok) {
+      syncStatus.value = envelope.data
+      syncNotInitialized.value = false
+      syncError.value = null
+    } else if (envelope.error.code === 'not_initialized') {
+      syncStatus.value = null
+      syncNotInitialized.value = true
+      syncError.value = null
+    } else {
+      syncError.value = syncErrorText(envelope.error)
+    }
+  } catch (e) {
+    syncError.value = asCommandError(e).message
+  } finally {
+    syncLoading.value = false
+  }
+}
+
+// One sync task at a time: the runner's state files are the only source of
+// truth, so a task started before the page opened still reports here.
+const syncRunner = useSyncRunner(async (result) => {
+  await loadSyncStatus()
+  const ok = result.code === 0 && result.envelope?.ok === true
+  void showSnackbar({
+    message: ok
+      ? result.op === 'rotate'
+        ? '口令轮换完成'
+        : '推送完成'
+      : '同步任务失败，详情见同步卡片',
+  })
+})
+
 async function onRefresh(): Promise<void> {
   if (await loadStatus(true)) void showSnackbar({ message: '状态已刷新，模块描述已同步' })
 }
@@ -118,7 +198,7 @@ const canIssue = computed(
 onMounted(async () => {
   clock = window.setInterval(() => (now.value = nowUnix()), 60_000)
   if (!available) return
-  await runner.check()
+  await Promise.all([runner.check(), syncRunner.check(), loadSyncStatus()])
   if (runner.busy.value) await loadCachedStatus()
   else if (!status.value && !statusLoading.value) await loadStatus(false)
 })
@@ -160,6 +240,18 @@ onBeforeUnmount(() => clearInterval(clock))
 
           <IssueCard :runner="runner" :now="now" @open="resultOpen = true" />
 
+          <SenderSyncCard
+            :status="syncStatus"
+            :not-initialized="syncNotInitialized"
+            :loading="syncLoading"
+            :error="syncError"
+            :runner="syncRunner"
+            :now="now"
+            @settings="syncSheetOpen = true"
+            @share="shareOpen = true"
+            @changed="loadSyncStatus()"
+          />
+
           <template v-if="status">
             <MiuixSmallTitle :text="blockers.length ? `环境检查 · ${blockers.length} 项未通过` : '环境检查'" />
             <CheckCard :status="status" />
@@ -193,6 +285,23 @@ onBeforeUnmount(() => clearInterval(clock))
       />
       <ResultSheet v-model="resultOpen" :runner="runner" @logs="openSettings(true)" />
       <DetailSheet v-if="status" v-model="detailOpen" :status="status" :now="now" />
+      <SenderSyncSheet
+        v-model="syncSheetOpen"
+        :status="syncStatus"
+        :busy="syncRunner.busy.value"
+        @secret="openSecret"
+        @rotate="rotateOpen = true"
+        @changed="loadSyncStatus()"
+      />
+      <SenderShareSheet v-model="shareOpen" />
+      <SenderRotateSheet v-model="rotateOpen" :runner="syncRunner" />
+      <SecretSheet
+        v-model="secretOpen"
+        :kind="secretKind"
+        :title="SECRET_SHEET[secretKind].title"
+        :hint="SECRET_SHEET[secretKind].hint"
+        @saved="loadSyncStatus()"
+      />
     </template>
     <SettingsSheet v-model="settingsOpen" :focus-logs="settingsFocusLogs" />
   </div>

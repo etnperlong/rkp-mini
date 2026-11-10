@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "error": {
+    "stage": "remote",
+    "code": "auth_failed",
+    "message": "HTTP 401 Unauthorized: Bad credentials"
+  }
+}

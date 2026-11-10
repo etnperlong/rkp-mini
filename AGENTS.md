@@ -101,8 +101,7 @@ cargo build --locked
 cargo test --locked                                         # all crates, offline
 cargo test --locked -p rkp-mini-sync-core protocol::tests   # focused example
 cargo fmt --all --check
-cargo clippy --locked -p rkp-mini-core -p rkp-mini-runtime -p rkp-mini-sync-core \
-  -p rkp-mini-sync -p rkp-mini-deployer --all-targets -- -D warnings
+cargo clippy --workspace --locked --all-targets -- -D warnings
 cargo run -p rkp-mini-issuer -- --help      # likewise -p rkp-mini-sync, -p rkp-mini-deployer
 cargo tree --locked -p rkp-mini-deployer -e normal          # dependency-direction check
 cd webui && bun install --frozen-lockfile && bun run build  # vue-tsc + both vite builds
@@ -110,7 +109,6 @@ cd webui && bun run dev:issuer                              # or dev:deployer
 NDK=/path/to/android-ndk ./build.sh                         # arm64 release + both ZIPs
 ```
 
-- The clippy gate leaves out `rkp-mini-issuer`: it has pre-existing findings under `-D warnings`.
 - `build.sh` builds the three binaries for `aarch64-linux-android` (API 26), runs `bun run build`, stages `modules/<role>` + `webui/dist/<role>` into `dist/module-<role>`, and zips `dist/rkp_mini_issuer-v<issuer version>.zip` and `dist/rkp_mini_deployer-v<deployer version>.zip`. It verifies AArch64 ELFs, a fixed required-entry and forbidden-entry list per ZIP, no wrapper directory, byte-identical `bin/rkp-mini-sync` in both ZIPs, and `module.prop` `id`/`version` against the owning crate. The version compare is literal: `module.prop` needs `version=v<crate version>`. `versionCode` is unchecked. Without `NDK` it picks the highest directory under `~/Android/Sdk/ndk/`.
 - Dev previews run against fixtures when no KernelSU bridge exists. Scenario query parameters:
 

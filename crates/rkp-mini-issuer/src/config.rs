@@ -160,9 +160,10 @@ pub fn validate(cfg: &mut Config) -> Result<()> {
             "log_retention must be 0..=1000",
         ));
     }
-    if !cfg.proxy.is_empty()
-        && !(cfg.proxy.starts_with("http://") || cfg.proxy.starts_with("https://"))
-    {
+    let proxy_ok = cfg.proxy.is_empty()
+        || cfg.proxy.starts_with("http://")
+        || cfg.proxy.starts_with("https://");
+    if !proxy_ok {
         return Err(err(
             Stage::Config,
             "config_invalid",

@@ -51,7 +51,7 @@ fn as_int(v: &Value) -> Option<i128> {
     }
 }
 
-fn map_get<'a>(map: &'a [(Value, Value)], key: i64) -> Option<&'a Value> {
+fn map_get(map: &[(Value, Value)], key: i64) -> Option<&Value> {
     map.iter()
         .find(|(k, _)| as_int(k) == Some(key as i128))
         .map(|(_, v)| v)

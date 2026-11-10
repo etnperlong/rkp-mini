@@ -147,7 +147,7 @@ pub fn inspect(path: &Path) -> KeyboxInfo {
     let certs = match chain::parse_der_chain(&concat) {
         Ok(c) => c,
         Err(e) => {
-            info.error = Some(format!("{}", crate::error::to_app_error(&e).message));
+            info.error = Some(crate::error::to_app_error(&e).message);
             return info;
         }
     };

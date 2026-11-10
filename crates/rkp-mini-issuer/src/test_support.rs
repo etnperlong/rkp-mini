@@ -12,8 +12,6 @@ use time::{Duration, OffsetDateTime};
 pub struct TestChain {
     /// Concatenated DER: leaf ++ ca (leaf→root).
     pub der: Vec<u8>,
-    pub leaf_der: Vec<u8>,
-    pub ca_der: Vec<u8>,
     pub secret: SecretKey,
     pub public: PublicKey,
 }
@@ -47,15 +45,11 @@ pub fn test_chain() -> TestChain {
     leaf_params.not_after = now + Duration::days(30);
     let leaf = leaf_params.signed_by(&leaf_key, &ca, &ca_key).unwrap();
 
-    let leaf_der = leaf.der().as_ref().to_vec();
-    let ca_der = ca.der().as_ref().to_vec();
-    let mut der = leaf_der.clone();
-    der.extend_from_slice(&ca_der);
+    let mut der = leaf.der().as_ref().to_vec();
+    der.extend_from_slice(ca.der().as_ref());
 
     TestChain {
         der,
-        leaf_der,
-        ca_der,
         secret,
         public,
     }

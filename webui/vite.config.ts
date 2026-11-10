@@ -23,23 +23,56 @@ function csp(): Plugin {
   }
 }
 
-// Two apps from one source tree (design §19.5):
-//   default mode   → sender page for the rkp_mini_issuer module   (dist/)
-//   --mode receiver → receiver page for the rkp_mini_deployer module (dist-receiver/)
-// `@app` resolves to the mode's entry so neither bundle contains the other.
-// Runner scripts live in the module trees; Vite ships no shell.
-export default defineConfig(({ mode }) => {
-  const receiver = mode === 'receiver'
-  const entry = receiver ? './src/receiver/main.ts' : './src/main.ts'
+const APPS = ['issuer', 'deployer'] as const
+type App = (typeof APPS)[number]
+
+/** No default app: an empty or unknown mode is a configuration error. */
+function resolveApp(mode: string): App {
+  if ((APPS as readonly string[]).includes(mode)) return mode as App
+  throw new Error(`未知的 WebUI 模式 "${mode}"：请使用 --mode issuer 或 --mode deployer`)
+}
+
+/**
+ * `virtual:app-mode` exposes the validated mode to src/entry.ts in both dev
+ * and build (Vite does not apply `define` to client sources in dev).
+ */
+function appMode(app: App): Plugin {
+  const id = 'virtual:app-mode'
+  const resolved = `\0${id}`
   return {
-    plugins: [vue(), csp()],
+    name: 'rkp-app-mode',
+    resolveId(source) {
+      return source === id ? resolved : null
+    },
+    load(loadId) {
+      return loadId === resolved ? `export const APP_MODE = ${JSON.stringify(app)}` : null
+    },
+  }
+}
+
+// Two apps from one source tree (design §19.5). Each explicit mode builds only
+// its own app:
+//   --mode issuer   → rkp_mini_issuer page  → dist/issuer/
+//   --mode deployer → rkp_mini_deployer page → dist/deployer/
+// The aliases pin the app entry, its config and its dev-only mock so neither
+// bundle can contain the other app. Runner scripts live in the module trees;
+// Vite ships no shell.
+export default defineConfig(({ mode }) => {
+  const app = resolveApp(mode)
+  const appDir = fileURLToPath(new URL(`./src/apps/${app}`, import.meta.url))
+  return {
+    plugins: [vue(), csp(), appMode(app)],
     base: './', // KernelSU loads webroot via relative paths
     publicDir: false,
     resolve: {
-      alias: { '@app': fileURLToPath(new URL(entry, import.meta.url)) },
+      alias: {
+        '@app': `${appDir}/main.ts`,
+        '@app-config': `${appDir}/config.ts`,
+        '@app-mock': `${appDir}/dev/mock.ts`,
+      },
     },
     build: {
-      outDir: receiver ? 'dist-receiver' : 'dist',
+      outDir: `dist/${app}`,
       target: 'es2020',
       cssCodeSplit: false,
     },

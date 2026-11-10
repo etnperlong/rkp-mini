@@ -3,9 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:receiver": "vite --mode receiver",
-    "build": "vue-tsc --noEmit && vite build && vite build --mode receiver",
+    "dev": "bun run dev:issuer",
+    "dev:issuer": "vite --mode issuer",
+    "dev:deployer": "vite --mode deployer",
+    "build": "vue-tsc --noEmit && vite build --mode issuer && vite build --mode deployer",
+    "build:issuer": "vue-tsc --noEmit && vite build --mode issuer",
+    "build:deployer": "vue-tsc --noEmit && vite build --mode deployer",
     "preview": "vite preview"
   },
   "dependencies": {

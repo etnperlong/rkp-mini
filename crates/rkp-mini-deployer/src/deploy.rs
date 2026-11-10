@@ -1212,7 +1212,7 @@ mod tests {
         )
     }
 
-    /// Minimal copy of `rkp-sync-core`'s test fixture generator.
+    /// Minimal copy of `rkp-mini-core`'s test fixture generator.
     fn make_keybox(leaf_days: i64) -> String {
         let now = OffsetDateTime::now_utc();
         let ca_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();

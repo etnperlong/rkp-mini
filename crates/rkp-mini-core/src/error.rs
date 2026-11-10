@@ -1,4 +1,4 @@
-//! Structured error model shared by `rkp-sync-core` and the `rkp-sync` binary.
+//! Structured error model shared by `rkp-mini-sync` and `rkp-mini-deployer`.
 //!
 //! Stages map to the JSON `error.stage` field (appendix B) and to process exit
 //! codes. Messages MUST NOT contain secrets (passwords, tokens, key material);

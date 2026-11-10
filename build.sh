@@ -80,7 +80,7 @@ done
 command -v bun >/dev/null 2>&1 || { echo "! bun is required to build the WebUI" >&2; exit 1; }
 echo "- Building WebUI"
 ( cd webui && bun install --frozen-lockfile && bun run build )
-for page in dist dist-receiver; do
+for page in dist/issuer dist/deployer; do
   [ -f "webui/$page/index.html" ] || {
     echo "! webui build produced no $page/index.html" >&2; exit 1; }
 done
@@ -97,7 +97,7 @@ cp modules/issuer/module.prop modules/issuer/customize.sh modules/issuer/action.
    modules/issuer/service.sh modules/issuer/uninstall.sh modules/issuer/sync-loop.sh \
    dist/module-issuer/
 cp -R modules/issuer/webroot/runner dist/module-issuer/webroot/runner
-cp -R webui/dist/. dist/module-issuer/webroot/
+cp -R webui/dist/issuer/. dist/module-issuer/webroot/
 chmod 755 dist/module-issuer/bin/rkp-mini-issuer dist/module-issuer/bin/rkp-mini-sync \
   dist/module-issuer/*.sh dist/module-issuer/webroot/runner/*.sh
 ( cd dist/module-issuer && zip -rq "../$(basename "$ISSUER_ZIP")" . )
@@ -115,7 +115,7 @@ cp modules/deployer/module.prop modules/deployer/customize.sh modules/deployer/a
    modules/deployer/run.sh dist/module-deployer/
 cp modules/deployer/lib/run.sh dist/module-deployer/lib/run.sh
 cp -R modules/deployer/webroot/runner dist/module-deployer/webroot/runner
-cp -R webui/dist-receiver/. dist/module-deployer/webroot/
+cp -R webui/dist/deployer/. dist/module-deployer/webroot/
 chmod 755 dist/module-deployer/bin/rkp-mini-sync dist/module-deployer/bin/rkp-mini-deployer \
   dist/module-deployer/*.sh dist/module-deployer/webroot/runner/*.sh
 chmod 644 dist/module-deployer/lib/run.sh   # sourced, never executed

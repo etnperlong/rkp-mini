@@ -1,4 +1,4 @@
-# RKP Mini 远程同步（rkp-sync）设计方案
+# RKP Mini 远程同步（rkp-mini-sync）设计方案
 
 > 状态：CLI/协议已实现（2026-11-10）；**§19 WebUI 修订**为同日新增决策，按 §19 实现。
 > 读者：接手实现的新 Agent 会话。
@@ -10,14 +10,14 @@
 
 ## 0. 一句话
 
-把 `rkp-mini` 签发出的 `keybox.xml` 用 **age v1 口令加密**成单文件密文，上传到用户自己的 **GitHub Gist / WebDAV / 公开 HTTPS**；接收端通过 **不含密码的 URL Scheme** 导入位置，手动输入密码解密、校验、写入本地 `sync-state`，再由**独立部署层**决定写入 OhMyKeymint、TEESimulator 或其它目标。
+把 `rkp-mini-issuer` 签发出的 `keybox.xml` 用 **age v1 口令加密**成单文件密文，上传到用户自己的 **GitHub Gist / WebDAV / 公开 HTTPS**；接收端通过 **不含密码的 URL Scheme** 导入位置，手动输入密码解密、校验、写入本地 `sync-state`，再由**独立部署层**决定写入 OhMyKeymint、TEESimulator 或其它目标。
 
 - 没有服务端。
 - 没有账号注册、设备注册、远端撤销列表。
 - 云端只看到密文。
 - URL/二维码永远不包含 age 密码、Gist token、WebDAV 密码。
 - 同步层与部署层解耦；`sync-state` 不出现 target/path。
-- 独立二进制 `rkp-sync`，不把网络/密码/同步依赖塞进 `rkp-mini`。
+- 独立二进制 `rkp-mini-sync`，不把网络/密码/同步依赖塞进 `rkp-mini-issuer`。
 
 ---
 
@@ -36,14 +36,14 @@
 | URL Scheme | 只含位置和 stream 元数据 | 密码/token 永不进 URL/二维码 |
 | 状态 | 拆成 `sync-state` 与 `deploy-state` | 同步层不知道部署目标，便于解耦 |
 | `sync-state` | 不含 `target` / `target_path` / owner / reload | 部署方式在接收后由部署层决定 |
-| 二进制 | 独立 `rkp-sync` | 接收端不需要 KeyMint/TA；降低攻击面和依赖 |
+| 二进制 | 独立 `rkp-mini-sync` | 接收端不需要 KeyMint/TA；降低攻击面和依赖 |
 | 自动运行 | 默认 `secret-file` | 发送端/接收端都能长期无人值守 |
 | 接收端设备 | **新设备**，跨设备使用 | 必须在 UI 首次启用时接受风险 |
 | 默认开关 | `sync.enabled = false` | 远程私钥下发是高危能力 |
 | 身份轮换 | 默认 `scheduled` | 避免每次 push 都换 keybox；临近到期才自动轮换 |
-| 管理界面 | **WebUI 为主入口**（发送端并入 `rkp_mini` WebUI；接收端模块自带 WebUI），CLI 保留同等能力 | 见 §19 |
-| 密钥写入 | WebUI 经 `ksu.exec` 用 shell 内建把 **hex 编码**的密钥写入 0600 inbox 文件，`rkp-sync` 读取、校验、落盘并删除 inbox | `ksu.exec` 走 root shell 的 stdin，不进 argv；见 §19.2 |
-| 非交互确认 | `enable --accept-risk <版本>`；`fetch --accept-first <sha>`；`deploy apply --confirm-first/--allow-identity-change <sha>` | 确认绑定到用户看到的那个版本，防并发替换 |
+| 管理界面 | **WebUI 为主入口**（发送端并入 `rkp_mini_issuer` WebUI；接收端模块自带 WebUI），CLI 保留同等能力 | 见 §19 |
+| 密钥写入 | WebUI 经 `ksu.exec` 用 shell 内建把 **hex 编码**的密钥写入 0600 inbox 文件，`rkp-mini-sync` 读取、校验、落盘并删除 inbox | `ksu.exec` 走 root shell 的 stdin，不进 argv；见 §19.2 |
+| 非交互确认 | `enable --accept-risk <版本>`；`fetch --accept-first <sha>`；`rkp-mini-deployer apply --confirm-first/--allow-identity-change <sha>` | 确认绑定到用户看到的那个版本，防并发替换 |
 | 自动签发 | 以 `auto_issue_days` 为“剩余天数阈值” | 不做无条件周期签发 |
 | 工具配置 | **不同步** | OMK `[crypto]`、TEESim `config.json` 是设备/身份相关 |
 | 额外签名 | 默认不做 Ed25519 | 密码是唯一信任锚；减少公钥分发 |
@@ -81,7 +81,7 @@
 
 | 术语 | 含义 |
 |---|---|
-| sender | 运行 `rkp-mini` 的签发设备 |
+| sender | 运行 `rkp-mini-issuer` 的签发设备 |
 | receiver | 新设备上的接收端模块/程序 |
 | stream | 一条同步链路；一个 `stream_id` + 一个 age 密码 |
 | provider | `gist` / `webdav` / `url` |
@@ -101,7 +101,7 @@
 
 ### 4.1 RKP-Mini
 
-- 模块 id：`rkp_mini`；二进制：`/data/adb/modules/rkp_mini/bin/rkp-mini`。
+- 模块 id：`rkp_mini_issuer`；二进制：`/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-issuer`。
 - 数据根：`/data/misc/keystore/rkp-mini`；默认输出：`output/`。
 - 输出文件：`keybox.xml`、`cert-chain.pem`、`cert-chain.der`、`private-key.pem`、`meta.json`；凭证/数据文件 `0600`，输出目录 `0700`。
 - `keybox.xml` 是 **EC-only**：一个 `algorithm="ecdsa"` 的 `<Key>`，SEC1 `EC PRIVATE KEY`，证书链 leaf→root。
@@ -148,9 +148,9 @@
 
 ```mermaid
 flowchart LR
-  A[rkp-mini<br/>签发 keybox] --> B[rkp-sync push<br/>CBOR + age + 上传]
+  A[rkp-mini<br/>签发 keybox] --> B[rkp-mini-sync push<br/>CBOR + age + 上传]
   B --> C[(Gist / WebDAV / 公开 HTTPS)]
-  C --> D[rkp-sync fetch<br/>下载 + 解密 + 校验]
+  C --> D[rkp-mini-sync fetch<br/>下载 + 解密 + 校验]
   D --> E[verified artifact<br/>staging 0600]
   E --> F[deploy 层<br/>接收端本地决策]
   F --> G[OhMyKeymint]
@@ -339,11 +339,11 @@ rkp-sync.age
 
 ### 7.3 verified artifact
 
-- `rkp-sync fetch` 解密并校验后写：
+- `rkp-mini-sync fetch` 解密并校验后写：
   - 接收端数据目录 `staging/<keybox_sha256>.xml`，`0600`。
   - `staging/latest.json`，`0600`，记录 `{seq, keybox_sha256, plaintext_sha256, device_id, leaf_not_after}`。
 - `fetch --json` 输出 staging 路径与元数据。
-- `deploy apply` 读取 staging，按本地 target 配置部署；成功后清理 staging（或保留最近 1 个用于诊断）。
+- `rkp-mini-deployer apply` 读取 staging，按本地 target 配置部署；成功后清理 staging（或保留最近 1 个用于诊断）。
 - staging 是明文私钥文件；目录 `0700`，文件 `0600`，不得进入备份/日志/WebUI。
 
 ### 7.4 防回放规则
@@ -577,7 +577,7 @@ WebDAV：
 
 ### 9.5 分享与二维码
 
-- `rkp-sync share` 输出 URI + 二维码 + 可复制的 JSON。
+- `rkp-mini-sync share` 输出 URI + 二维码 + 可复制的 JSON。
 - 分享界面把“存储位置”和“解密密码”分开显示；明确提示二维码不含密码。
 - 二维码只编码 URI；不要编码密码/token。
 - 自定义 scheme 可能被恶意 app 注册；优先接收端内扫码/粘贴，不要从浏览器直接点。
@@ -625,16 +625,16 @@ password_file = "/data/misc/keystore/rkp-mini/sync/age.pass"      # 0600
 ### 10.2 CLI
 
 ```text
-rkp-sync init                  # 初始化 stream/非敏感配置
-rkp-sync push                  # 读取 keybox，加密上传
-rkp-sync share                 # 输出 URL/二维码（不含密码）
-rkp-sync status [--json]       # 远端/seq/hash/有效期
-rkp-sync rotate-password       # 新密码重新加密最新 keybox
-rkp-sync sync-now              # push 的别名/自动任务入口
-rkp-sync forget                # 清除本地 token/密码/state（不删除远端）
+rkp-mini-sync init                  # 初始化 stream/非敏感配置
+rkp-mini-sync push                  # 读取 keybox，加密上传
+rkp-mini-sync share                 # 输出 URL/二维码（不含密码）
+rkp-mini-sync status [--json]       # 远端/seq/hash/有效期
+rkp-mini-sync rotate-password       # 新密码重新加密最新 keybox
+rkp-mini-sync sync-now              # push 的别名/自动任务入口
+rkp-mini-sync forget                # 清除本地 token/密码/state（不删除远端）
 ```
 
-`rkp-sync` 不负责 `issue`；自动任务由 `rkp-mini` + `rkp-sync` 编排。
+`rkp-mini-sync` 不负责 `issue`；自动任务由 `rkp-mini-issuer` + `rkp-mini-sync` 编排。
 
 ### 10.3 push 流程
 
@@ -680,8 +680,8 @@ rkp-sync forget                # 清除本地 token/密码/state（不删除远�
 
 ```text
 每天/每 12h：
-  rkp-mini issue --if-expiring-days <auto_issue_days>
-  rkp-sync push
+  rkp-mini-issuer issue --if-expiring-days <auto_issue_days>
+  rkp-mini-sync push
 ```
 
 - `days_left > auto_issue_days`：不签发。
@@ -689,7 +689,7 @@ rkp-sync forget                # 清除本地 token/密码/state（不删除远�
 - 签发失败：保留旧 keybox，下轮重试。
 - push 失败：本地 keybox 已更新，远端仍旧；下轮重试；接收端保留旧版本。
 - 不做“无条件每天 issue”；那会频繁换身份，触发接收端 identity gate。
-- `issue` 和 `push` 是独立步骤；`rkp-mini` 不链接 `rkp-sync`。
+- `issue` 和 `push` 是独立步骤；`rkp-mini-issuer` 不链接 `rkp-mini-sync`。
 
 ### 10.6 发送端 guard
 
@@ -704,7 +704,7 @@ rkp-sync forget                # 清除本地 token/密码/state（不删除远�
 
 ### 11.1 配置
 
-接收端独立模块（例如 `rkp_sync`）配置：
+接收端独立模块（例如 `rkp_mini_deployer`）配置：
 
 ```toml
 [sync]
@@ -758,12 +758,16 @@ reload = "auto"
 ### 11.2 import / fetch
 
 ```text
-rkp-sync import 'rkpsync://...'      # 解析位置，展示确认
-rkp-sync fetch [--json]              # 下载/解密/校验，写 staging
-rkp-sync deploy apply [--json]       # 按本地 targets 部署
-rkp-sync run                         # fetch + deploy
-rkp-sync status [--json]             # sync + deploy 状态
+rkp-mini-sync import 'rkpsync://...' # 解析位置，展示确认
+rkp-mini-sync fetch [--json]         # 下载/解密/校验，写 staging
+rkp-mini-deployer plan [--json]      # 只读预览（身份门控）
+rkp-mini-deployer apply [--json]     # 按本地 targets 部署（--confirm-first/--allow-identity-change）
+rkp-mini-sync status [--json]        # sync + deploy 状态（只读）
 ```
+
+接收端的 fetch + deploy 组合由模块脚本负责（`modules/deployer/run.sh` 的
+`action|run|auto`），没有顶层 `run` 子命令：`fetch` 失败仍会执行
+`rkp-mini-deployer apply --if-staged`，后者自己重新校验 enabled/risk/stream。
 
 `import`：
 
@@ -783,7 +787,7 @@ rkp-sync status [--json]             # sync + deploy 状态
 5. 写 staging + `sync-state`；只输出同步层元数据，不读取/不比较 `deploy-state`。
 6. 不修改目标文件。
 
-`deploy apply`：
+`rkp-mini-deployer apply`：
 
 1. 读取 staging/latest。
 2. 读取 `deploy-state`；比较 `keybox_sha256`：
@@ -840,7 +844,7 @@ OMK 特别说明：
 - 不同 → identity change：
   - `scheduled`（默认）：仅当旧 keybox `keybox_not_after - now <= rotation_lead_days` 或已过期，且新叶子 `not_after > 旧 not_after` 时自动部署；否则记录 `pending`，通知用户。
   - `always`：自动部署任何新身份；明确风险。
-  - `never`：必须人工 `deploy apply --allow-identity-change`。
+  - `never`：必须人工 `rkp-mini-deployer apply --allow-identity-change`。
 - 首次部署（无 deploy-state）：必须人工确认，展示 old/new 影响；即使 `always` 也不静默。
 
 OMK 警告必须在实际写入前展示/记录；TEESim 提示会触发已有 key 的 re-attest。
@@ -869,8 +873,9 @@ restorecon（如需要）
 你已选择默认 `secret-file`，因此发送端和接收端都可长期无人值守：
 
 - 发送端 `age.pass` 0600；接收端 `age.pass` 0600。
-- 发送端每天/每 12h：`rkp-mini issue --if-expiring-days N` + `rkp-sync push`。
-- 接收端每 6–12h：`rkp-sync run`（fetch + deploy）。
+- 发送端每天/每 12h：`rkp-mini-issuer issue --if-expiring-days N` + `rkp-mini-sync push`。
+- 接收端每 6–12h：`sh modules/deployer/run.sh auto`（`check-auto --require-verified`，
+  然后 `fetch --auto` + `apply --auto --if-staged`）。
 - 定时器：`service.sh` 等 `sys.boot_completed` + 网络；后台循环 `setsid/nohup` + 锁 + 抖动。
 - Android Doze/厂商省电可能冻结 root shell 循环；纯 shell 不保证严格定时。若要严格定时，接收端应做成 App + WorkManager。
 - `secret-file` 缺失/权限不对：自动任务停止并报错；不要静默回退到空密码或提示输入。
@@ -882,9 +887,9 @@ restorecon（如需要）
 
 ### 12.1 建议
 
-**拆成独立 `rkp-sync`，建议 Cargo workspace + 共享 core。**
+**拆成独立 `rkp-mini-sync`，建议 Cargo workspace + 共享 core。**
 
-| 维度 | `rkp-mini` | `rkp-sync` |
+| 维度 | `rkp-mini-issuer` | `rkp-mini-sync` |
 |---|---|---|
 | 依赖 | KeyMint/vendor ABI、TA worker、RKP 协议 | age、CBOR、HTTP、URL、keybox 校验 |
 | 运行位置 | 签发设备 | 发送端 + 接收端（无需 RKP 硬件） |
@@ -893,22 +898,22 @@ restorecon（如需要）
 | 测试 | 需 Android/TA | 可 host 完整测试 |
 | 包体 | 保持精简 | 独立增量 |
 
-不建议把 sync 直接塞进 `rkp-mini` 单二进制：age/网络/密码会把签发程序依赖和攻击面一起放大；接收端根本不需要 KeyMint 代码。
+不建议把 sync 直接塞进 `rkp-mini-issuer` 单二进制：age/网络/密码会把签发程序依赖和攻击面一起放大；接收端根本不需要 KeyMint 代码。
 
 ### 12.2 推荐布局
 
 ```text
 crates/
   rkp-mini/          # 现有签发 CLI；不链接 sync 代码
-  rkp-sync/          # 同步/部署 CLI
-  rkp-sync-core/     # age、CBOR、URL、state、严格 keybox 校验
+  rkp-mini-sync/          # 同步/部署 CLI
+  rkp-mini-sync-core/     # age、CBOR、URL、state、严格 keybox 校验
 ```
 
-或者独立仓库 `rkp-sync` + 发布 `rkp-sync-core`。
+或者独立仓库 `rkp-mini-sync` + 发布 `rkp-mini-sync-core`。
 
-- 发送端模块包含 `bin/rkp-mini` + `bin/rkp-sync`。
-- 接收端模块只包含 `bin/rkp-sync` + 接收端部署适配器/WebUI。
-- `rkp-mini` 不依赖 `rkp-sync-core`；两者通过文件/子进程编排。
+- 发送端模块包含 `bin/rkp-mini-issuer` + `bin/rkp-mini-sync`。
+- 接收端模块只包含 `bin/rkp-mini-sync` + 接收端部署适配器/WebUI。
+- `rkp-mini-issuer` 不依赖 `rkp-mini-sync-core`；两者通过文件/子进程编排。
 - 若不想改 workspace，可先独立仓库；不要用第二个 `src/bin` 共享全部依赖作为长期方案。
 
 ### 12.3 依赖与约束
@@ -928,9 +933,9 @@ crates/
 ### 12.4 打包
 
 - `build.sh` 需交叉编译两个二进制（若同仓库），并检查 ZIP。
-- 发送端 ZIP 根目录必须含 `bin/rkp-mini`、`bin/rkp-sync`、`module.prop`、hook、`webroot/`（若 WebUI）。
-- 接收端有独立 ZIP/模块；不要把接收端代码塞进 `rkp_mini`。
-- `rkp-sync` 有自己的 `--version` 和协议版本（`sync protocol v1`），不要与模块版本强绑定。
+- 发送端 ZIP 根目录必须含 `bin/rkp-mini-issuer`、`bin/rkp-mini-sync`、`module.prop`、hook、`webroot/`（若 WebUI）。
+- 接收端有独立 ZIP/模块；不要把接收端代码塞进 `rkp_mini_issuer`。
+- `rkp-mini-sync` 有自己的 `--version` 和协议版本（`sync protocol v1`），不要与模块版本强绑定。
 
 ---
 
@@ -1045,13 +1050,13 @@ UI 必须展示并让用户勾选确认：
 
 | 阶段 | 内容 | 完成标准 |
 |---|---|---|
-| **P0** | `rkp-sync-core`：CBOR envelope、age armor、URL parser、严格 keybox 校验、sync/deploy state；local directory transport | host 单测全过；无网络/无 Android 依赖 |
-| **P1** | 独立 `rkp-sync` 二进制；发送端 Gist（token）+ `push/share`；接收端 Gist 直链（无 token）+ `import/fetch`；OMK 手动部署 | 真实 Gist 创建/更新/拉取/解密；OMK reload；权限正确 |
+| **P0** | `rkp-mini-sync-core`：CBOR envelope、age armor、URL parser、严格 keybox 校验、sync/deploy state；local directory transport | host 单测全过；无网络/无 Android 依赖 |
+| **P1** | 独立 `rkp-mini-sync` 二进制；发送端 Gist（token）+ `push/share`；接收端 Gist 直链（无 token）+ `import/fetch`；OMK 手动部署 | 真实 Gist 创建/更新/拉取/解密；OMK reload；权限正确 |
 | **P2** | WebDAV（自定义文件名、tmp+MOVE、If-Match）+ 公开 URL；TEESim/TrickyStore 适配器；deploy-state/identity gate | 坚果云实测；TEESim `config.json` 引用检查；身份变化拦截 |
 | **P3** | `secret-file` 自动运行；发送端 `auto_issue_days` 阈值 + push；接收端定时 `run`；rotation policy `scheduled` | 重启后自动运行；OMK 警告；Doze 行为记录 |
 | **P4** | 密码轮换、风险 UI/scope 文档、跨设备 QA、打包/版本、故障注入 | 验收清单全过；文档/AGENTS/README 更新 |
 
-每个阶段都必须保持 `rkp-mini` 现有签发/status 契约不变；P0 先做 core，避免网络/密码代码污染签发路径。
+每个阶段都必须保持 `rkp-mini-issuer` 现有签发/status 契约不变；P0 先做 core，避免网络/密码代码污染签发路径。
 
 ---
 
@@ -1093,7 +1098,7 @@ UI 必须展示并让用户勾选确认：
 
 已定决策不要改；以下是实现细节自由度：
 
-- workspace vs 独立仓库：推荐 workspace；若工期紧可先独立 crate，但不要塞进 `rkp-mini` 单二进制。
+- workspace vs 独立仓库：推荐 workspace；若工期紧可先独立 crate，但不要塞进 `rkp-mini-issuer` 单二进制。
 - Gist 直链 vs API 解析：默认直链；API 作为无 token 回退。
 - WebDAV MOVE vs If-Match：按目标服务器能力选择；保留失败回退。
 - UI 技术栈：KernelSU WebUI（§19），复用 `webui/` 的 Vue + miuix-vue；CLI 保持同等能力。风险确认/禁用必须在两者都存在。
@@ -1121,7 +1126,7 @@ exec:  umask 077; mkdir -p <inbox> 2>/dev/null; echo <hex> > <inbox>/<kind>.hex 
        <bin> --json secret set <kind> --from-file <inbox>/<kind>.hex --hex
 ```
 
-- 只用 shell **内建**（`umask`、`echo`、重定向）承载密钥；`mkdir`、`rkp-sync` 等外部命令的 argv 只有路径。hex 让 mksh/ash/bash 的 `echo` 行为一致；不用 here-doc（mksh 会落临时文件）。
+- 只用 shell **内建**（`umask`、`echo`、重定向）承载密钥；`mkdir`、`rkp-mini-sync` 等外部命令的 argv 只有路径。hex 让 mksh/ash/bash 的 `echo` 行为一致；不用 here-doc（mksh 会落临时文件）。
 - inbox：发送端 `<数据根>/sync/inbox/`，接收端 `/data/adb/rkp_sync/sync/inbox/`，`0700`。
 - `secret set --from-file`：`O_NOFOLLOW` 打开；必须是当前 euid 拥有的普通文件、无 group/other 位；≤ 8 KiB；`--hex` 解码（容忍一个行尾换行）；非空 UTF-8；原子写入配置的 secret 路径（0600）。**无论成败都删除 inbox 文件**，并清空内存。
 - 同一机制用于 `rotate-password --from-file <f> --hex`（新口令）。
@@ -1131,23 +1136,23 @@ exec:  umask 077; mkdir -p <inbox> 2>/dev/null; echo <hex> > <inbox>/<kind>.hex 
 
 | 操作 | CLI | 绑定 |
 |---|---|---|
-| 风险接受 | `rkp-sync --json risk` 输出 `{version, items[], passphrase_path}`；`enable --accept-risk <version>` | `<version>` 必须等于当前 `RISK_VERSION`；旧 UI 不能替新版本说明“同意” |
+| 风险接受 | `rkp-mini-sync --json risk` 输出 `{version, items[], passphrase_path}`；`enable --accept-risk <version>` | `<version>` 必须等于当前 `RISK_VERSION`；旧 UI 不能替新版本说明“同意” |
 | 首次导入 TOFU | `fetch` 失败 `first_import_needs_confirmation`，错误信封带 `data`（seq/issued_at/device_id/leaf_not_after/keybox_sha256/plaintext_sha256）；`fetch --accept-first <plaintext_sha256>` | 只接受与展示一致的那一版；否则 `confirmation_mismatch` |
-| 首次部署 / 身份变化 | `deploy plan --json`（只读：gate、warnings、targets、old/new）；`deploy apply --confirm-first <keybox_sha256>` / `--allow-identity-change <keybox_sha256>` | 在 `sync.lock` 内比对 staged sha；后台循环若已换了 staging，拒绝 `confirmation_mismatch` |
+| 首次部署 / 身份变化 | `rkp-mini-deployer plan --json`（只读：gate、warnings、targets、old/new）；`rkp-mini-deployer apply --confirm-first <keybox_sha256>` / `--allow-identity-change <keybox_sha256>` | 在 `sync.lock` 内比对 staged sha；后台循环若已换了 staging，拒绝 `confirmation_mismatch` |
 
 sha 参数接受完整 hex 或 ≥16 位前缀。TTY 交互路径不变（仍可 y/N）。
 
 ### 19.4 配置编辑
 
-- `rkp-sync --json config show`：生效配置（不含任何密钥值，只含 secret 路径与状态）。
-- `rkp-sync config set <key> <value>`：**白名单**，写后重新加载校验，失败回滚。发送端：`provider`、`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`gist_id`、`gist_filename`、`webdav_endpoint`、`webdav_path`、`webdav_user`、`password_mode`、顶层 `auto_issue_days`。接收端：`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`password_mode`、`identity_change_policy`、`rotation_lead_days`、`auto_deploy`。位置字段（接收端）只经 `import` 写入；`enabled`/`risk_ack_*` 只经 `enable/disable`；部署目标只经 `deploy add-target/remove-target`。
-- `rkp-mini` WebUI 原“配置只读”决策仅对 `rkp-mini` 自身字段保持；`[sync]` 与 `auto_issue_days` 经上面的命令修改。
+- `rkp-mini-sync --json config show`：生效配置（不含任何密钥值，只含 secret 路径与状态）。
+- `rkp-mini-sync config set <key> <value>`：**白名单**，写后重新加载校验，失败回滚。发送端：`provider`、`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`gist_id`、`gist_filename`、`webdav_endpoint`、`webdav_path`、`webdav_user`、`password_mode`、顶层 `auto_issue_days`。接收端：`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`password_mode`、`identity_change_policy`、`rotation_lead_days`、`auto_deploy`。位置字段（接收端）只经 `import` 写入；`enabled`/`risk_ack_*` 只经 `enable/disable`；部署目标只经 `rkp-mini-deployer add-target/remove-target`。
+- `rkp-mini-issuer` WebUI 原“配置只读”决策仅对 `rkp-mini-issuer` 自身字段保持；`[sync]` 与 `auto_issue_days` 经上面的命令修改。
 
 ### 19.5 页面
 
-- **发送端**（`rkp_mini` WebUI 新增“远程同步”卡片 + 底部弹层）：状态（启用、provider、位置、seq、上次推送/错误、本地 keybox 到期、自动循环是否运行）；初始化；provider 配置；设置 age 口令 / Gist token / WebDAV 密码；风险确认弹层（§13.2 每条独立复选框，默认全不勾，全勾才可提交，含 §19.1 debug manager 残余风险）；启用/禁用；立即推送；分享（URI + 由 `share --json` 的 `qr` 矩阵本地渲染的二维码 + “不含密码”提示）；轮换口令；清除本地数据；同步日志。
-- **接收端**（`rkp_sync` 模块 `webroot/`，同一 Vue 工程的第二个入口）：粘贴导入链接 → `import --check` 预览位置 → 确认后 `import --yes`；风险确认；口令/WebDAV 密码；目标增删（omk/teesim/tricky_store）；策略设置；拉取（TOFU 弹层展示事实后 `--accept-first <sha>`）；部署（先 `deploy plan`，首次/身份变化弹层展示 old→new、OMK key 删除警告、TEESim re-attest、“未做根信任检查”，再带 sha 执行）；pending 提示；立即运行；禁用；清除；移除已部署 keybox（两步确认）；日志。
-- 长任务（push、fetch、run、rotate-password）走 `webroot/runner/sync.sh <op> [非密钥参数]`，与 `issue.sh` 相同的 `setsid` + 状态文件 + 轮询模型；短命令（status/plan/config/secret/enable）直接 `exec`。
+- **发送端**（`rkp_mini_issuer` WebUI 新增“远程同步”卡片 + 底部弹层）：状态（启用、provider、位置、seq、上次推送/错误、本地 keybox 到期、自动循环是否运行）；初始化；provider 配置；设置 age 口令 / Gist token / WebDAV 密码；风险确认弹层（§13.2 每条独立复选框，默认全不勾，全勾才可提交，含 §19.1 debug manager 残余风险）；启用/禁用；立即推送；分享（URI + 由 `share --json` 的 `qr` 矩阵本地渲染的二维码 + “不含密码”提示）；轮换口令；清除本地数据；同步日志。
+- **接收端**（`rkp_mini_deployer` 模块 `webroot/`，同一 Vue 工程的第二个入口）：粘贴导入链接 → `import --check` 预览位置 → 确认后 `import --yes`；风险确认；口令/WebDAV 密码；目标增删（omk/teesim/tricky_store）；策略设置；拉取（TOFU 弹层展示事实后 `--accept-first <sha>`）；部署（先 `rkp-mini-deployer plan`，首次/身份变化弹层展示 old→new、OMK key 删除警告、TEESim re-attest、“未做根信任检查”，再带 sha 执行）；pending 提示；立即运行；禁用；清除；移除已部署 keybox（两步确认）；日志。
+- 长任务（push、fetch、rotate-password）走 `webroot/runner/sync.sh <op> [非密钥参数]`，与 `issue.sh` 相同的 `setsid` + 状态文件 + 轮询模型；短命令（status/plan/config/secret/enable）直接 `exec`。
 - 启用后页面立即以 `setsid` 启动模块的 `sync-loop.sh`（脚本自带 pid 锁，重复启动无害）；禁用后循环在下一次唤醒时退出。
 - 页面从不读取或展示 keybox、私钥、口令、token；`staging/`、`secrets/`、`inbox/` 不出现在任何 `cat`/`ls` 命令里。
 
@@ -1264,7 +1269,7 @@ reload = "auto"
 }
 ```
 
-`deploy apply --json` data：
+`rkp-mini-deployer apply --json` data：
 
 ```json
 {
@@ -1305,7 +1310,7 @@ reload = "auto"
 - [ ] `sync-state` 不出现 target/path/owner/reload。
 - [ ] URL/二维码/日志中没有密码/token。
 - [ ] Gist 接收端默认走直链，不要求 token。
-- [ ] `rkp-sync` 独立构建；`rkp-mini` 不链接 sync 依赖。
+- [ ] `rkp-mini-sync` 独立构建；`rkp-mini-issuer` 不链接 sync 依赖。
 - [ ] 首次启用风险确认、默认关闭、可禁用。
 - [ ] OMK `retire_stale_keybox_bound_keys` 警告已实现。
 - [ ] TEESim `config.json` keybox 引用检查已实现。

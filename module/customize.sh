@@ -31,4 +31,4 @@ if ! "$MODPATH/bin/rkp-mini" status --update-description --quiet; then
 fi
 
 ui_print "- Remote keybox sync (rkp-sync) is OFF by default."
-ui_print "  Opt in: rkp-sync --role sender init, then rkp-sync enable"
+ui_print "  Opt in from the WebUI (远程同步) or: rkp-sync --role sender init"

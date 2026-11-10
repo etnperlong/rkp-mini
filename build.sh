@@ -76,6 +76,7 @@ command -v bun >/dev/null 2>&1 || { echo "! bun is required to build the WebUI" 
 echo "- Building WebUI"
 ( cd webui && bun install --frozen-lockfile && bun run build )
 [ -f webui/dist/index.html ] || { echo "! webui build produced no index.html" >&2; exit 1; }
+[ -f webui/dist-receiver/index.html ] || { echo "! receiver webui build produced no index.html" >&2; exit 1; }
 
 # --- Package: sender (rkp_mini) -----------------------------------------------
 echo "- Packaging $ZIP"
@@ -90,13 +91,14 @@ chmod 755 dist/module/bin/rkp-mini dist/module/bin/rkp-sync dist/module/*.sh
 ( cd dist/module && zip -rq "../rkp_mini-${VERSION}.zip" . )
 
 # --- Package: receiver (rkp_sync) ---------------------------------------------
-# Receiver module carries only rkp-sync; never the issuer or its WebUI.
+# Receiver module carries only rkp-sync and the receiver page; never the issuer.
 echo "- Packaging $SYNC_ZIP"
 rm -rf dist/module-sync "$SYNC_ZIP"
-mkdir -p dist/module-sync/bin
+mkdir -p dist/module-sync/bin dist/module-sync/webroot
 cp "$SYNC_BIN" dist/module-sync/bin/rkp-sync
 cp module-sync/module.prop module-sync/customize.sh module-sync/action.sh \
    module-sync/service.sh module-sync/uninstall.sh module-sync/sync-loop.sh dist/module-sync/
+cp -R webui/dist-receiver/. dist/module-sync/webroot/
 chmod 755 dist/module-sync/bin/rkp-sync dist/module-sync/*.sh
 ( cd dist/module-sync && zip -rq "../rkp_sync-${SYNC_VERSION}.zip" . )
 
@@ -117,10 +119,10 @@ check_zip() {
   done
 }
 check_zip "$ZIP" module.prop customize.sh service.sh sync-loop.sh \
-  bin/rkp-mini bin/rkp-sync webroot/index.html webroot/runner/issue.sh
+  bin/rkp-mini bin/rkp-sync webroot/index.html webroot/runner/issue.sh webroot/runner/sync.sh
 check_zip "$SYNC_ZIP" module.prop customize.sh service.sh sync-loop.sh \
-  action.sh uninstall.sh bin/rkp-sync
-if unzip -l "$SYNC_ZIP" | grep -q ' bin/rkp-mini$'; then
-  echo "! receiver zip must not contain rkp-mini" >&2; exit 1
+  action.sh uninstall.sh bin/rkp-sync webroot/index.html webroot/runner/sync.sh
+if unzip -l "$SYNC_ZIP" | grep -qE ' (bin/rkp-mini|webroot/runner/issue\.sh)$'; then
+  echo "! receiver zip must not contain the issuer (rkp-mini / issue.sh)" >&2; exit 1
 fi
 echo "- Done: $ZIP $SYNC_ZIP"

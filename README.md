@@ -72,7 +72,7 @@ sees ciphertext; links and QR codes carry the location only, never the passphras
 
 - **Sender** (`rkp_mini` module, ships `bin/rkp-sync`): uploads to a secret GitHub Gist
   (PAT with `gist` scope) or WebDAV (app password; PUT temp + MOVE, `If-Match` fallback).
-- **Receiver** (separate `rkp_sync` module, `dist/rkp_sync-v*.zip`, contains only `rkp-sync`):
+- **Receiver** (separate `rkp_sync` module, `dist/rkp_sync-v*.zip`, contains only `rkp-sync` and its WebUI):
   reads a Gist raw link without a token, WebDAV, or a public HTTPS file; decrypts, enforces
   `stream_id`/`seq`/`prev`/expiry and strict keybox checks (no DTD, EC-only, chain 2..8 leaf→root,
   key/leaf match, DeviceID derivation), stages the keybox (`0600`), then a separate deploy
@@ -82,24 +82,36 @@ sees ciphertext; links and QR codes carry the location only, never the passphras
   `injector.toml`, TEESim `config.json`) are never synced.
 - Certificate signatures, root trust and revocation are **not** verified.
 
-Sender setup (root shell, `rkp-sync` = `/data/adb/modules/rkp_mini/bin/rkp-sync`):
+**WebUI (recommended).** Sender: rkp_mini module → Open → “远程同步” card: initialize, choose
+Gist/WebDAV, set the age passphrase and token/app password, tick every risk item to enable,
+push, then share the link/QR. Receiver: rkp_sync module → Open: paste the link, review the
+location, accept the risks, enter the passphrase received over a separate channel, add a
+deployment target, fetch (confirm the first version's seq/device/expiry), deploy (confirm the
+first deployment). Secrets typed into the pages are written by shell builtins into a 0600 inbox
+file that `rkp-sync` consumes and deletes; they never appear in process arguments, URLs or logs.
+A *debug* build of the KernelSU manager logs shell commands to logcat — use a release build.
+
+**CLI** (root shell; the same operations). Sender, `rkp-sync` = `/data/adb/modules/rkp_mini/bin/rkp-sync`:
 
 ```sh
 rkp-sync --role sender init --provider gist   # adds a disabled [sync] table to config.toml
 rkp-sync secret set age                       # passphrase from TTY (no echo) → sync/age.pass 0600
 rkp-sync secret set gist-token                # or: secret set webdav-password
 rkp-sync enable                               # shows the risk statement; type I ACCEPT
+                                              # (non-interactive: review `rkp-sync risk`, then
+                                              #  `rkp-sync enable --accept-risk <version>`)
 rkp-sync push                                 # first push creates the secret gist
 rkp-sync share                                # import link + QR (no password inside)
 ```
 
-Receiver setup (`rkp-sync` = `/data/adb/modules/rkp_sync/bin/rkp-sync`):
+Receiver, `rkp-sync` = `/data/adb/modules/rkp_sync/bin/rkp-sync`:
 
 ```sh
 rkp-sync import 'rkpsync://v1/import?p=…'     # review location, accept risk, enter passphrase
 rkp-sync deploy add-target omk                # or teesim / tricky_store
 rkp-sync fetch                                # first version: trust-on-first-use confirmation
-rkp-sync deploy apply                         # first deployment needs confirmation
+                                              # (non-interactive: --accept-first <plaintext_sha256>)
+rkp-sync deploy plan                          # preview; then deploy apply [--confirm-first <keybox_sha256>]
 ```
 
 Unattended runs (`password_mode = "secret-file"`, the default) start at boot when

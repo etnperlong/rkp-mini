@@ -26,8 +26,8 @@ chmod 0700 "$DATA"
   "$MODPATH/bin/rkp-sync" --role receiver init >/dev/null 2>&1 || \
   ui_print "! rkp-sync: could not write default config (non-fatal)"
 
-ui_print "- Setup (root shell):"
+ui_print "- Setup: tap Open on this module (WebUI), or in a root shell:"
 ui_print "    rkp-sync import '<rkpsync://...>'"
 ui_print "    rkp-sync deploy add-target omk|teesim|tricky_store"
-ui_print "    rkp-sync fetch && rkp-sync deploy apply"
+ui_print "    rkp-sync fetch && rkp-sync deploy plan"
 ui_print "  binary: $MODPATH/bin/rkp-sync"

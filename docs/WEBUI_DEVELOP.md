@@ -18,6 +18,10 @@
 > - 后台脚本已移入模块源码树（`modules/*/webroot/runner/`），Vite 只构建页面（`publicDir: false`）。
 > - 构建产物为 `webui/dist/issuer/` 与 `webui/dist/deployer/`；ZIP 为
 >   `dist/rkp_mini_issuer-v*.zip` 与 `dist/rkp_mini_deployer-v*.zip`。
+> - 签发端页面分为“状态 / 签发 / 同步 / 更多”四个 Tab，用 `MiuixNavigationBar` 固定在底部；当前 Tab 只是组件状态，
+>   不写 URL/历史，返回键仍直接关闭 WebUI。原设置弹层成为“更多”页（`MoreTab.vue`）。状态卡按 KernelSU Miuix 首页
+>   `StatusCard`（`HomeMiuix.kt`）着色：按状态染色的卡片底 + 右下角裁切的 110px Material Rounded 图标。
+>   部署端仍是单页，后续按同一方式改造。
 > - 下文的 `rkp-mini` / `rkp-sync` 命令名、`dist/`、`dist-receiver/` 与 `rkp_mini`/`rkp_sync`
 >   模块 id 均为设计阶段的历史写法，按上面这段替换。
 
@@ -38,7 +42,7 @@
 | 构建 | Vite 8 + `@vitejs/plugin-vue`，Bun 负责装包/脚本 | 实测可用，产物小 |
 | 样式 | 直接用库的 `miuix-vue/style.css` + 少量应用层 CSS | 不引 Tailwind、不引其它 UI 库 |
 | 类型 | tsconfig `paths` 兜底（见附录 B） | 上游 0.1.1 的类型入口路径是坏的 |
-| 路由 | 无路由。单页 + `MiuixBottomSheet` / `MiuixDialog` | KernelSU 的返回键没有 SPA 历史，扁平结构最稳 |
+| 路由 | 无路由。单页（签发端带底部 Tab，仅切换组件状态）+ `MiuixBottomSheet` / `MiuixDialog` | KernelSU 的返回键没有 SPA 历史，扁平结构最稳 |
 | 签发执行 | 后台脚本 + 状态文件 + 轮询 | `ksu.exec` 无超时，页面销毁会丢回调 |
 | 配置 | v1 只读（展示 TOML 原文），不提供编辑 | 避免写坏 `config.toml` |
 | Action | 保留 `action.sh` | KernelSU 的 Action 与 Open 按钮共存，见 `ModuleMiuix.kt` |
@@ -398,23 +402,21 @@ unzip -l "$ZIP" | grep -q 'webroot/index.html' || { echo "! webroot missing" >&2
 
 ### 7.1 结构
 
-单页纵向滚动 + 三个弹层，无路由、无底部导航：
+签发端：顶栏 + 四个 Tab（每个 Tab 一个 `MiuixScrollArea`，`v-show` 切换以保留各自滚动位置）+ 底部导航，无路由：
 
 ```
-MiuixTopAppBar(title="RKP Mini", end=设置 IconButton)
-MiuixScrollArea
-  StatusCard        状态、剩余天数、证书数、密钥匹配
-  CheckCard         环境检查 6 行
-  LastIssueCard     最近一次签发（时间、结果、device_id）
-  主按钮             MiuixButton type="primary"：“签发新证书”
-  次按钮             MiuixButton（默认样式）：“刷新状态”
-  脚注               签发不保证 Play Integrity 通过
-MiuixSnackbarHost   （挂载一次）
-IssueSheet          确认签发（MiuixBottomSheet 或 MiuixDialog）
-ResultSheet         结果与失败诊断
-DetailSheet         证书详情
-SettingsSheet       主题、只读配置、日志、版本
+MiuixTopAppBar(title="RKP-Mini · 签发端")
+状态  StatusCard（按状态着色 + 角标图标）、CheckCard、“刷新状态”
+签发  KeyboxSummaryCard（只读一行摘要）、IssueCard、不可签发原因、“签发新证书”、免责脚注
+同步  SenderSyncCard
+更多  MoreTab：外观、签发日志、只读配置、关于（每次切入重新读取）
+MiuixNavigationBar  状态 / 签发 / 同步 / 更多
+MiuixSnackbarHost   （挂载一次；上移到导航栏之上）
+IssueSheet / ResultSheet / DetailSheet / 同步相关弹层（全局，覆盖在 Tab 之上）
 ```
+
+数据与后台任务（`useIssueRunner`、`useSyncRunner`、状态读取）都留在 `App.vue`，切换 Tab 不重新读取。
+结果弹层的“查看签发日志”切到“更多”并展开最新日志。
 
 ### 7.2 组件映射（`miuix-vue` 已核对的导出名）
 

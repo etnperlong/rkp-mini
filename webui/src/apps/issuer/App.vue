@@ -4,7 +4,7 @@ import {
   MiuixButton,
   MiuixCard,
   MiuixIcon,
-  MiuixIconButton,
+  MiuixNavigationBar,
   MiuixScrollArea,
   MiuixSmallTitle,
   MiuixSnackbarHost,
@@ -12,14 +12,15 @@ import {
   MiuixTopAppBar,
   showSnackbar,
 } from 'miuix-vue'
-import { Settings } from 'miuix-vue/icons'
+import { Info, Lock, More, UploadCloud } from 'miuix-vue/icons'
 import StatusCard from './components/StatusCard.vue'
 import CheckCard from './components/CheckCard.vue'
 import IssueCard from './components/IssueCard.vue'
+import KeyboxSummaryCard from './components/KeyboxSummaryCard.vue'
 import IssueSheet from './components/IssueSheet.vue'
 import ResultSheet from './components/ResultSheet.vue'
 import DetailSheet from './components/DetailSheet.vue'
-import SettingsSheet from './components/SettingsSheet.vue'
+import MoreTab from './components/MoreTab.vue'
 import SenderSyncCard from './components/SenderSyncCard.vue'
 import SenderSyncSheet from './components/SenderSyncSheet.vue'
 import SenderShareSheet from './components/SenderShareSheet.vue'
@@ -45,8 +46,19 @@ const statusCached = ref(false)
 const issueOpen = ref(false)
 const resultOpen = ref(false)
 const detailOpen = ref(false)
-const settingsOpen = ref(false)
-const settingsFocusLogs = ref(false)
+
+// Bottom navigation. The active tab is plain state, never history: the WebView's
+// back key must keep closing the page (design §2.3).
+const TABS = [{ label: '状态' }, { label: '签发' }, { label: '同步' }, { label: '更多' }]
+const TAB_ICONS = [Info, Lock, UploadCloud, More]
+const MORE_TAB = 3
+const tab = ref(0)
+const logsFocus = ref(false)
+
+function selectTab(index: number): void {
+  logsFocus.value = false
+  tab.value = index
+}
 
 // Remote sync (rkp-mini-sync). The status read is local-only; the card starts a
 // detached `push` task and no other sync command runs while it is busy.
@@ -80,10 +92,11 @@ function openSecret(kind: SecretKind): void {
   secretOpen.value = true
 }
 
-function openSettings(focusLogs: boolean): void {
-  settingsFocusLogs.value = focusLogs
+/** From the result sheet: the "more" tab with the newest log expanded. */
+function openLogs(): void {
   resultOpen.value = false
-  settingsOpen.value = true
+  logsFocus.value = true
+  tab.value = MORE_TAB
 }
 
 // Ticks once a minute so relative times and day counts stay current.
@@ -209,17 +222,11 @@ onBeforeUnmount(() => clearInterval(clock))
 
 <template>
   <div class="app">
-    <MiuixTopAppBar title="RKP-Mini · 签发端">
-      <template #actions>
-        <MiuixIconButton aria-label="设置" @click="openSettings(false)">
-          <MiuixIcon :icon="Settings" />
-        </MiuixIconButton>
-      </template>
-    </MiuixTopAppBar>
+    <MiuixTopAppBar title="RKP-Mini · 签发端" />
 
-    <MiuixScrollArea class="app__scroll">
+    <MiuixScrollArea v-if="!available" v-show="tab !== MORE_TAB" class="app__scroll">
       <main class="page">
-        <MiuixCard v-if="!available">
+        <MiuixCard>
           <div class="notice">
             <MiuixText type="title4" weight="medium" color="var(--m-color-error)">未检测到 KernelSU 接口</MiuixText>
             <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
@@ -227,8 +234,13 @@ onBeforeUnmount(() => clearInterval(clock))
             </MiuixText>
           </div>
         </MiuixCard>
+      </main>
+    </MiuixScrollArea>
 
-        <template v-else>
+    <!-- One scroll area per tab (v-show) so each keeps its own scroll position. -->
+    <template v-else>
+      <MiuixScrollArea v-show="tab === 0" class="app__scroll">
+        <main class="page">
           <StatusCard
             :status="status"
             :loading="statusLoading"
@@ -238,9 +250,36 @@ onBeforeUnmount(() => clearInterval(clock))
             @retry="loadStatus(false)"
             @detail="detailOpen = true"
           />
+          <template v-if="status">
+            <MiuixSmallTitle :text="blockers.length ? `环境检查 · ${blockers.length} 项未通过` : '环境检查'" />
+            <CheckCard :status="status" />
+          </template>
+          <div class="actions">
+            <MiuixButton :disabled="statusLoading || runner.busy.value" @click="onRefresh">刷新状态</MiuixButton>
+          </div>
+        </main>
+      </MiuixScrollArea>
 
+      <MiuixScrollArea v-show="tab === 1" class="app__scroll">
+        <main class="page">
+          <KeyboxSummaryCard :status="status" :loading="statusLoading" :now="now" @detail="detailOpen = true" />
           <IssueCard :runner="runner" :now="now" @open="resultOpen = true" />
+          <div class="actions">
+            <MiuixText v-if="issueBlockedReason" type="footnote1" color="var(--m-color-error)" align="center">
+              {{ issueBlockedReason }}
+            </MiuixText>
+            <MiuixButton type="primary" :disabled="!canIssue" @click="issueOpen = true">
+              {{ runner.busy.value ? '签发进行中…' : '签发新证书' }}
+            </MiuixButton>
+          </div>
+          <MiuixText class="footnote" type="footnote1" color="var(--m-color-on-surface-variant-actions)" align="center">
+            签发结果取决于设备固件与 Google RKP 服务，不保证 Play Integrity 通过。
+          </MiuixText>
+        </main>
+      </MiuixScrollArea>
 
+      <MiuixScrollArea v-show="tab === 2" class="app__scroll">
+        <main class="page">
           <SenderSyncCard
             :status="syncStatus"
             :not-initialized="syncNotInitialized"
@@ -252,28 +291,21 @@ onBeforeUnmount(() => clearInterval(clock))
             @share="shareOpen = true"
             @changed="loadSyncStatus()"
           />
+        </main>
+      </MiuixScrollArea>
+    </template>
 
-          <template v-if="status">
-            <MiuixSmallTitle :text="blockers.length ? `环境检查 · ${blockers.length} 项未通过` : '环境检查'" />
-            <CheckCard :status="status" />
-          </template>
-
-          <div class="actions">
-            <MiuixText v-if="issueBlockedReason" type="footnote1" color="var(--m-color-error)" align="center">
-              {{ issueBlockedReason }}
-            </MiuixText>
-            <MiuixButton type="primary" :disabled="!canIssue" @click="issueOpen = true">
-              {{ runner.busy.value ? '签发进行中…' : '签发新证书' }}
-            </MiuixButton>
-            <MiuixButton :disabled="statusLoading || runner.busy.value" @click="onRefresh">刷新状态</MiuixButton>
-          </div>
-        </template>
-
-        <MiuixText class="footnote" type="footnote1" color="var(--m-color-on-surface-variant-actions)" align="center">
-          签发结果取决于设备固件与 Google RKP 服务，不保证 Play Integrity 通过。
-        </MiuixText>
+    <MiuixScrollArea v-show="tab === MORE_TAB" class="app__scroll">
+      <main class="page">
+        <MoreTab :active="tab === MORE_TAB" :focus-logs="logsFocus" />
       </main>
     </MiuixScrollArea>
+
+    <MiuixNavigationBar :model-value="tab" :items="TABS" @update:model-value="selectTab">
+      <template #icon="{ index }">
+        <MiuixIcon :icon="TAB_ICONS[index]" />
+      </template>
+    </MiuixNavigationBar>
 
     <MiuixSnackbarHost />
 
@@ -284,7 +316,7 @@ onBeforeUnmount(() => clearInterval(clock))
         :has-keybox="!!status?.keybox.exists"
         @confirm="onConfirmIssue"
       />
-      <ResultSheet v-model="resultOpen" :runner="runner" @logs="openSettings(true)" />
+      <ResultSheet v-model="resultOpen" :runner="runner" @logs="openLogs" />
       <DetailSheet v-if="status" v-model="detailOpen" :status="status" :now="now" />
       <SenderSyncSheet
         v-model="syncSheetOpen"
@@ -304,7 +336,6 @@ onBeforeUnmount(() => clearInterval(clock))
         @saved="loadSyncStatus()"
       />
     </template>
-    <SettingsSheet v-model="settingsOpen" :focus-logs="settingsFocusLogs" />
   </div>
 </template>
 
@@ -343,5 +374,9 @@ onBeforeUnmount(() => clearInterval(clock))
 }
 .footnote {
   padding: 4px 16px 0;
+}
+/* The snackbar host is teleported to <body> with bottom: 0; keep it above the navigation bar (64px items + 1px divider). */
+:global(.m-snackbar-host) {
+  bottom: 65px;
 }
 </style>

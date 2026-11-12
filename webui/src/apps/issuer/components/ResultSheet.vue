@@ -90,7 +90,7 @@ const title = computed(() => {
       <!-- Launch failed -->
       <template v-else-if="phase === 'launch_failed'">
         <MiuixText type="body2">
-          后台任务没有启动（未创建任务锁）。可能是 shell 缺少 setsid/nohup，或模块 webroot 不完整。可在设置的调试日志中查看详情。
+          后台任务没有启动（未创建任务锁）。可能是 shell 缺少 setsid/nohup，或模块 webroot 不完整。可在“更多”页的调试日志中查看详情。
         </MiuixText>
         <MiuixButton @click="r.check()">重新检查</MiuixButton>
       </template>

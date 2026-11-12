@@ -71,7 +71,7 @@ su -c '/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-issuer issue --acknowledge
 
 When issuance fails, the WebUI result sheet shows the stage, error code, `ta_status` and
 stderr; full logs live in `/data/misc/keystore/rkp-mini/logs/issue-<unix>.log` (also
-viewable under WebUI → 设置 → 签发日志). A failed run leaves the existing `keybox.xml` in place.
+viewable under WebUI → 更多 → 签发日志). A failed run leaves the existing `keybox.xml` in place.
 
 ## go/no-go (reference device)
 

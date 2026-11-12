@@ -14,6 +14,7 @@ import {
 } from 'miuix-vue'
 import { Info, Lock, More, UploadCloud } from 'miuix-vue/icons'
 import StatusCard from './components/StatusCard.vue'
+import AutoStatusRow from './components/AutoStatusRow.vue'
 import CheckCard from './components/CheckCard.vue'
 import IssueCard from './components/IssueCard.vue'
 import KeyboxSummaryCard from './components/KeyboxSummaryCard.vue'
@@ -187,7 +188,9 @@ const syncRunner = useSyncRunner(async (result) => {
 })
 
 async function onRefresh(): Promise<void> {
-  if (await loadStatus(true)) void showSnackbar({ message: '状态已刷新，模块描述已同步' })
+  // The auto-issue/push boxes come from the sync status, so refresh it too.
+  const [ok] = await Promise.all([loadStatus(true), loadSyncStatus()])
+  if (ok) void showSnackbar({ message: '状态已刷新，模块描述已同步' })
 }
 
 async function onConfirmIssue(): Promise<void> {
@@ -249,6 +252,12 @@ onBeforeUnmount(() => clearInterval(clock))
             :now="now"
             @retry="loadStatus(false)"
             @detail="detailOpen = true"
+          />
+          <AutoStatusRow
+            :status="syncStatus"
+            :not-initialized="syncNotInitialized"
+            :loading="syncLoading"
+            :error="syncError"
           />
           <template v-if="status">
             <MiuixSmallTitle :text="blockers.length ? `环境检查 · ${blockers.length} 项未通过` : '环境检查'" />

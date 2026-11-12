@@ -406,7 +406,8 @@ unzip -l "$ZIP" | grep -q 'webroot/index.html' || { echo "! webroot missing" >&2
 
 ```
 MiuixTopAppBar(title="RKP-Mini · 签发端")
-状态  StatusCard（按状态着色 + 角标图标）、CheckCard、“刷新状态”
+状态  StatusCard（按状态着色 + 角标图标）、AutoStatusRow（自动签发 / 自动推送，取自 sync status：
+      两者都只在 sync-loop 运行时生效，自动签发还需 auto_issue_days > 0）、CheckCard、“刷新状态”
 签发  KeyboxSummaryCard（只读一行摘要）、IssueCard、不可签发原因、“签发新证书”、免责脚注
 同步  SenderSyncCard
 更多  MoreTab：外观、签发日志、只读配置、关于（每次切入重新读取）

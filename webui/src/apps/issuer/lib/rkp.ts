@@ -1,6 +1,6 @@
 import { appConfig } from '@app-config'
 import { exec } from '../../../shared/lib/ksu'
-import { CommandError, parseLastJsonLine, resolveModuleDir } from '../../../shared/lib/command'
+import { CommandError, SAFE_PATH, parseLastJsonLine, resolveModuleDir } from '../../../shared/lib/command'
 import { daysLeft, nowUnix } from '../../../shared/lib/format'
 import { ICON_CHECK_CIRCLE, ICON_ERROR, ICON_HELP, ICON_WARNING } from '../../../shared/lib/icons'
 
@@ -15,6 +15,12 @@ export const TMP = `${DATA}/tmp`
 export const CONFIG = `${DATA}/config.toml`
 export const STATUS_JSON = `${DATA}/status.json`
 export const LOGS = `${DATA}/logs`
+const AUTO_LOOP = `${MODULE_DIR}/${appConfig.loopScript}`
+const AUTO_LAST = `${TMP}/auto-issue.last`
+
+for (const p of [AUTO_LOOP, AUTO_LAST]) {
+  if (!SAFE_PATH.test(p)) throw new Error(`unsafe path: ${p}`)
+}
 
 // ---- JSON contract (rkp-mini-issuer --json) ----------------------------------
 
@@ -46,6 +52,8 @@ export interface StatusData {
   blockers: string[]
   keybox: KeyboxInfo
   description: string
+  /** Issuer-owned auto-issue setting plus whether auto-loop.sh is alive. */
+  auto_issue: { days: number; loop_running: boolean }
 }
 
 export interface IssueSuccess {
@@ -66,6 +74,15 @@ export interface IssueFailure {
   message: string
   ta_status?: number
   head_hex?: string
+}
+
+/** `issue --if-expiring-days` data when the leaf is not due (exit 0). */
+export interface IssueSkip {
+  skipped: true
+  reason: string
+  days_left: number
+  threshold_days: number
+  keybox: string
 }
 
 export type Envelope<T> = { ok: true; data: T } | { ok: false; error: IssueFailure }
@@ -136,6 +153,62 @@ export async function readLog(name: string): Promise<string> {
   const r = await run(`tail -n 200 '${LOGS}/${name}'`)
   if (r.errno !== 0) throw new CommandError('exit', `读取失败（${r.errno}）`, r.stderr.trim())
   return r.stdout
+}
+
+const AUTO_MAX_DAYS = 365
+const SEP = '<<<RKP-SEP>>>'
+
+/** C1: only key the issuer lets the page set; 0 = off, 365 = max. */
+export async function setAutoIssueDays(days: number): Promise<number> {
+  if (!Number.isInteger(days) || days < 0 || days > AUTO_MAX_DAYS) {
+    throw new CommandError('exec', `天数必须是 0–${AUTO_MAX_DAYS} 的整数`)
+  }
+  const r = await run(`'${BIN}' config set auto_issue_days ${days} --json`)
+  if (r.errno !== 0 && !r.stdout.trim()) throw new CommandError('exit', `退出码 ${r.errno}`, r.stderr.trim())
+  const env = parseLastJsonLine<Envelope<{ auto_issue_days: number }>>(r.stdout)
+  if (!env.ok) {
+    throw new CommandError('exit', `${stageLabel(env.error.stage)}：${env.error.message}`, JSON.stringify(env.error))
+  }
+  return env.data.auto_issue_days
+}
+
+/** Start `auto-loop.sh` detached; its pid file makes repeat starts harmless. */
+export async function startAutoLoop(): Promise<void> {
+  await exec(
+    `if command -v setsid >/dev/null 2>&1; then setsid sh '${AUTO_LOOP}' </dev/null >/dev/null 2>&1 & ` +
+      `else nohup sh '${AUTO_LOOP}' </dev/null >/dev/null 2>&1 & fi; true`,
+  )
+}
+
+/** Last finished auto-issue run (C6); null when no `.code` file exists. */
+export interface AutoIssueLast {
+  /** Unix seconds, null when `.at` is missing or not a positive integer. */
+  at: number | null
+  code: number
+  envelope: Envelope<IssueSuccess | IssueSkip> | null
+  stderr: string
+}
+
+/** C6: read `$TMP/auto-issue.last.{at,code,json,err}` in one exec. */
+export async function readAutoIssueLast(): Promise<AutoIssueLast | null> {
+  const r = await run(
+    `echo '${SEP}'; cat '${AUTO_LAST}.at' 2>/dev/null; echo '${SEP}'; cat '${AUTO_LAST}.code' 2>/dev/null; ` +
+      `echo '${SEP}'; cat '${AUTO_LAST}.json' 2>/dev/null; echo '${SEP}'; ` +
+      `tail -c 16384 '${AUTO_LAST}.err' 2>/dev/null`,
+  )
+  const parts = r.stdout.split(SEP)
+  if (parts.length !== 5) return null
+  const [atRaw, codeRaw, jsonRaw, errRaw] = parts.slice(1).map((p) => p.replace(/^\n/, ''))
+  const code = Number(codeRaw.trim())
+  if (!codeRaw.trim() || !Number.isInteger(code)) return null
+  const at = Number(atRaw.trim())
+  let envelope: Envelope<IssueSuccess | IssueSkip> | null = null
+  try {
+    envelope = parseLastJsonLine<Envelope<IssueSuccess | IssueSkip>>(jsonRaw)
+  } catch {
+    // Killed before printing an envelope: the caller shows code + stderr.
+  }
+  return { at: Number.isInteger(at) && at > 0 ? at : null, code, envelope, stderr: errRaw.replace(/^\n/, '') }
 }
 
 export interface ModuleProp {

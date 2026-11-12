@@ -21,5 +21,6 @@
     "key_match": true,
     "error": "leaf certificate expired"
   },
-  "description": "❌ RKP 已过期"
+  "description": "❌ RKP 已过期",
+  "auto_issue": { "days": 30, "loop_running": true }
 }

@@ -24,5 +24,6 @@
     "key_match": false,
     "error": null
   },
-  "description": "❌ 未签发（非高通）"
+  "description": "❌ 未签发（非高通）",
+  "auto_issue": { "days": 30, "loop_running": true }
 }

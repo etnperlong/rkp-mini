@@ -37,6 +37,9 @@ const STATUS: Record<string, SyncStatus> = {
   nosecret: noSecretStatus as unknown as SyncStatus,
 }
 
+/** Shared with mock.ts: the issuer page merges this into its own status. */
+export const mockLoop = { running: false }
+
 /** Fixture with all timestamps re-anchored to the current time. */
 function liveStatus(base: SyncStatus): SyncStatus {
   const s = structuredClone(base)
@@ -153,7 +156,7 @@ function probeOutput(): string {
 
 // ---- rkp-mini-sync commands --------------------------------------------------------
 
-const NUMERIC: SenderConfigKey[] = ['min_validity_days', 'request_timeout_seconds', 'auto_issue_days']
+const NUMERIC: SenderConfigKey[] = ['min_validity_days', 'request_timeout_seconds']
 
 function dispatch(sub: string, command: string): ExecResult {
   if (sub === 'status') {
@@ -205,7 +208,6 @@ function dispatch(sub: string, command: string): ExecResult {
   if (sub === 'config show') {
     config.enabled = status.enabled
     config.provider = status.provider
-    config.auto_issue_days = status.auto_issue_days
     return okJson(config)
   }
 
@@ -225,7 +227,6 @@ function dispatch(sub: string, command: string): ExecResult {
       status.provider = raw
       status.location = null
     }
-    if (key === 'auto_issue_days') status.auto_issue_days = Number(value)
     return okJson({ key, value })
   }
 
@@ -275,6 +276,8 @@ export async function mockSync(command: string): Promise<ExecResult> {
     return { errno: 0, stdout: logText, stderr: '' }
   }
   if (command.includes('auto-loop.sh')) {
+    mockLoop.running = true
+    status.loop_running = true
     return okJson({ loop: 'started' })
   }
   // prepareRotation / discardRotation write the inbox file only; `secret set`

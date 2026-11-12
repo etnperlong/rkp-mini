@@ -157,7 +157,6 @@ export interface SyncStatus {
   sync_state: SyncState | null
   // sender
   local_keybox?: LocalKeybox
-  auto_issue_days?: number
   // receiver
   deploy_state?: DeployState | null
   staged?: Staged | null
@@ -213,7 +212,6 @@ export interface SyncConfig {
   inbox: string
   // sender
   output_dir?: string
-  auto_issue_days?: number
   // receiver
   identity_change_policy?: IdentityPolicy
   rotation_lead_days?: number
@@ -234,7 +232,6 @@ export type SenderConfigKey =
   | 'webdav_path'
   | 'webdav_user'
   | 'password_mode'
-  | 'auto_issue_days'
 export type ReceiverConfigKey =
   | 'label'
   | 'min_validity_days'

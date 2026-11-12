@@ -438,7 +438,6 @@ fn settable(role: Role, key: &str) -> Option<(&'static str, Kind)> {
             "provider" | "gist_id" | "gist_filename" | "webdav_endpoint" | "webdav_path"
             | "webdav_user",
         ) => Some(("sync", Kind::Str)),
-        (Role::Sender, "auto_issue_days") => Some(("", Kind::Uint)),
         (Role::Receiver, "identity_change_policy") => Some(("deploy", Kind::Str)),
         (Role::Receiver, "rotation_lead_days") => Some(("deploy", Kind::Uint)),
         (Role::Receiver, "auto_deploy") => Some(("deploy", Kind::Bool)),
@@ -553,7 +552,6 @@ pub fn config_show(ctx: &Ctx) -> Result<Output> {
     match cfg.role {
         Role::Sender => {
             data["output_dir"] = json!(cfg.output_dir.display().to_string());
-            data["auto_issue_days"] = json!(cfg.auto_issue_days);
         }
         Role::Receiver => {
             data["identity_change_policy"] = json!(cfg.deploy.identity_change_policy.as_str());
@@ -702,12 +700,10 @@ pub fn status(ctx: &Ctx) -> Result<Output> {
         Role::Sender => {
             let kb = sender_keybox_status(&cfg, now);
             text.push_str(&format!(
-                "local keybox: {}\nauto_issue_days: {}\n",
-                kb["summary"].as_str().unwrap_or("-"),
-                cfg.auto_issue_days
+                "local keybox: {}\n",
+                kb["summary"].as_str().unwrap_or("-")
             ));
             data["local_keybox"] = kb;
-            data["auto_issue_days"] = json!(cfg.auto_issue_days);
         }
         Role::Receiver => {
             let deploy_state: Option<DeployState> = state::load(&cfg.deploy_state_path())?;
@@ -915,5 +911,32 @@ mod tests {
         };
         assert_eq!(code_of(check_auto(&ctx, true)), "wrong_role");
         assert!(check_auto(&ctx, false).is_ok());
+    }
+
+    #[test]
+    fn auto_issue_days_belongs_to_the_issuer() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        let body = format!(
+            "output_dir = \"{}\"\nauto_issue_days = 30\n{}",
+            dir.path().join("output").display(),
+            config::sender_sync_template("st_01JTESTSTREAM", "gist", dir.path())
+        );
+        std::fs::write(&config, &body).unwrap();
+        let ctx = Ctx {
+            global: Global {
+                config: Some(config.clone()),
+                ..Global::default()
+            },
+        };
+        // A hand-written value is ignored, not rejected.
+        let cfg = config::load(&config, Some(Role::Sender), ctx.url_policy()).unwrap();
+        assert_eq!(cfg.output_dir, dir.path().join("output"));
+        // `rkp-mini-issuer config set auto_issue_days` owns it now.
+        assert_eq!(
+            code_of(config_set(&ctx, "auto_issue_days", "30")),
+            "key_not_settable"
+        );
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), body);
     }
 }

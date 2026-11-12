@@ -2,7 +2,7 @@
 //!
 //! One TOML file per role:
 //! - sender: the shared `rkp-mini` config (`/data/misc/keystore/rkp-mini/config.toml`);
-//!   `rkp-mini-sync` reads top-level `output_dir` / `auto_issue_days` and owns `[sync]`.
+//!   `rkp-mini-sync` reads top-level `output_dir` and owns `[sync]`.
 //! - receiver: `/data/adb/rkp_sync/config.toml` with `[sync]` and `[deploy]`.
 //!
 //! The data root is the config file's directory. Secrets are referenced by
@@ -161,11 +161,10 @@ impl Default for DeploySection {
 }
 
 /// Raw file shape. Sender files also contain `rkp-mini` keys, which are
-/// accepted and ignored here except for `output_dir` / `auto_issue_days`.
+/// accepted and ignored here except for `output_dir`.
 #[derive(Debug, Default, Deserialize)]
 struct RawFile {
     output_dir: Option<String>,
-    auto_issue_days: Option<u32>,
     #[serde(default)]
     sync: Option<SyncSection>,
     #[serde(default)]
@@ -182,8 +181,6 @@ pub struct Config {
     pub deploy: DeploySection,
     /// Sender: directory holding `keybox.xml` / `meta.json`.
     pub output_dir: PathBuf,
-    /// Sender: `rkp-mini` issuance threshold (0 = off).
-    pub auto_issue_days: u32,
     /// From CLI only: debugging relaxations for URL policy.
     pub url_policy: UrlPolicy,
 }
@@ -295,7 +292,6 @@ pub fn load(path: &Path, expect: Option<Role>, url_policy: UrlPolicy) -> Result<
         sync,
         deploy: raw.deploy.unwrap_or_default(),
         output_dir,
-        auto_issue_days: raw.auto_issue_days.unwrap_or(0),
         url_policy,
     };
     cfg.validate()?;
@@ -789,7 +785,8 @@ mod tests {
     #[test]
     fn templates_parse_disabled_by_default() {
         let dir = tempfile::tempdir().unwrap();
-        let mini = "output_dir = \"/data/misc/keystore/rkp-mini/output\"\nauto_issue_days = 0\n";
+        // `auto_issue_days` belongs to rkp-mini-issuer: present but ignored here.
+        let mini = "output_dir = \"/data/misc/keystore/rkp-mini/output\"\nauto_issue_days = 45\n";
         let body = format!(
             "{mini}{}",
             sender_sync_template(&new_stream_id(), "gist", dir.path())
@@ -798,8 +795,8 @@ mod tests {
         let c = load(&p, Some(Role::Sender), UrlPolicy::default()).unwrap();
         assert!(!c.sync.enabled);
         assert_eq!(c.min_validity_days(), 14);
-        assert_eq!(c.loop_pid_path(), dir.path().join("tmp/auto-loop.pid"));
         assert!(c.require_enabled().is_err());
+        assert_eq!(c.loop_pid_path(), dir.path().join("tmp/auto-loop.pid"));
 
         let r = write(dir.path(), "recv.toml", &receiver_template(dir.path()));
         let c = load(&r, Some(Role::Receiver), UrlPolicy::default()).unwrap();

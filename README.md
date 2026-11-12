@@ -150,12 +150,15 @@ The module Action (and the WebUI task) runs `fetch` and then `apply --if-staged`
 fetch still repairs a damaged target from staging that was already verified; a first
 deployment or an identity change outside the policy stays `pending` until it is approved.
 
-Unattended runs (`password_mode = "secret-file"`, the default) start at boot when
-`rkp-mini-sync check-auto` passes: the sender every ~12 h runs `rkp-mini-issuer issue
---if-expiring-days <auto_issue_days>` (when `auto_issue_days > 0`) then `sync push --auto`; the
-receiver every ~8 h runs `sync check-auto --require-verified`, then `sync fetch --auto` and
+Auto-issue does not need sync: `rkp-mini-issuer config set auto_issue_days 30` (or WebUI → 签发 →
+自动签发设置; `0` turns it off) makes the issuer module's `auto-loop.sh` run `rkp-mini-issuer issue
+--if-expiring-days 30` about every 12 h, so a new keybox is issued only when the current leaf has
+≤ 30 days left. The same loop runs `sync push --auto` right after while `rkp-mini-sync check-auto`
+passes (sync enabled, `password_mode = "secret-file"`, the default). The receiver loop runs every
+~8 h only while sync is enabled: `sync check-auto --require-verified`, then `sync fetch --auto` and
 `deployer apply --auto --if-staged`. Doze/vendor power saving may delay these loops. Logs:
-`logs/sync.log` under each data root (seq/hash/provider/error codes only).
+`logs/auto.log` (sender) and `logs/sync.log` (receiver) under each data root (seq/hash/provider/error
+codes only); the last auto-issue check is kept in `tmp/auto-issue.last.*`.
 
 Identity changes on the receiver follow `[deploy].identity_change_policy`: `scheduled`
 (default) deploys a new keybox automatically only within `rotation_lead_days` of the old

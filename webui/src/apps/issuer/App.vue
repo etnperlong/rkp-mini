@@ -19,6 +19,7 @@ import CheckCard from './components/CheckCard.vue'
 import IssueCard from './components/IssueCard.vue'
 import KeyboxSummaryCard from './components/KeyboxSummaryCard.vue'
 import IssueSheet from './components/IssueSheet.vue'
+import AutoIssueSheet from './components/AutoIssueSheet.vue'
 import ResultSheet from './components/ResultSheet.vue'
 import DetailSheet from './components/DetailSheet.vue'
 import MoreTab from './components/MoreTab.vue'
@@ -45,6 +46,7 @@ const statusLoading = ref(false)
 const statusCached = ref(false)
 
 const issueOpen = ref(false)
+const autoIssueOpen = ref(false)
 const resultOpen = ref(false)
 const detailOpen = ref(false)
 
@@ -188,7 +190,7 @@ const syncRunner = useSyncRunner(async (result) => {
 })
 
 async function onRefresh(): Promise<void> {
-  // The auto-issue/push boxes come from the sync status, so refresh it too.
+  // Auto-issue comes from the issuer status; the push box still needs sync status.
   const [ok] = await Promise.all([loadStatus(true), loadSyncStatus()])
   if (ok) void showSnackbar({ message: '状态已刷新，模块描述已同步' })
 }
@@ -254,10 +256,13 @@ onBeforeUnmount(() => clearInterval(clock))
             @detail="detailOpen = true"
           />
           <AutoStatusRow
-            :status="syncStatus"
-            :not-initialized="syncNotInitialized"
-            :loading="syncLoading"
-            :error="syncError"
+            :status="status"
+            :status-loading="statusLoading"
+            :status-error="statusError?.message ?? null"
+            :sync="syncStatus"
+            :sync-not-initialized="syncNotInitialized"
+            :sync-loading="syncLoading"
+            :sync-error="syncError"
           />
           <template v-if="status">
             <MiuixSmallTitle :text="blockers.length ? `环境检查 · ${blockers.length} 项未通过` : '环境检查'" />
@@ -278,8 +283,9 @@ onBeforeUnmount(() => clearInterval(clock))
               {{ issueBlockedReason }}
             </MiuixText>
             <MiuixButton type="primary" :disabled="!canIssue" @click="issueOpen = true">
-              {{ runner.busy.value ? '签发进行中…' : '签发新证书' }}
+              {{ runner.busy.value ? '签发进行中…' : '手动签发' }}
             </MiuixButton>
+            <MiuixButton @click="autoIssueOpen = true">自动签发设置</MiuixButton>
           </div>
           <MiuixText class="footnote" type="footnote1" color="var(--m-color-on-surface-variant-actions)" align="center">
             签发结果取决于设备固件与 Google RKP 服务，不保证 Play Integrity 通过。
@@ -326,6 +332,7 @@ onBeforeUnmount(() => clearInterval(clock))
         @confirm="onConfirmIssue"
       />
       <ResultSheet v-model="resultOpen" :runner="runner" @logs="openLogs" />
+      <AutoIssueSheet v-model="autoIssueOpen" :status="status" @changed="loadStatus(false)" />
       <DetailSheet v-if="status" v-model="detailOpen" :status="status" :now="now" />
       <SenderSyncSheet
         v-model="syncSheetOpen"

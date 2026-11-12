@@ -704,6 +704,11 @@ rkp-mini-sync forget                # 清除本地 token/密码/state（不删�
 
 ### 10.5 自动签发 + 自动推送
 
+> **2026-11 更新**：自动签发已与同步解耦。`auto_issue_days` 由 `rkp-mini-issuer config set auto_issue_days N`
+> 修改（`rkp-mini-sync` 不再读写它）；发送端循环改为签发模块的 `auto-loop.sh`：每 30 分钟醒来按墙钟判断是否到期，
+> 到期轮次先在 `auto_issue_days > 0` 时签发（与 WebUI 共用 `tmp/issue.lock`），再在 `check-auto` 通过时 `push --auto`；
+> 两者都关闭时循环退出。下面的阈值语义不变。
+
 现有 `auto_issue_days` 从“保留字段”改为“剩余天数阈值”：
 
 ```text
@@ -1180,8 +1185,8 @@ sha 参数接受完整 hex 或 ≥16 位前缀。TTY 交互路径不变（仍可
 ### 19.4 配置编辑
 
 - `rkp-mini-sync --json config show`：生效配置（不含任何密钥值，只含 secret 路径与状态）。
-- `rkp-mini-sync config set <key> <value>`：**白名单**，写后重新加载校验，失败回滚。发送端：`provider`、`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`gist_id`、`gist_filename`、`webdav_endpoint`、`webdav_path`、`webdav_user`、`password_mode`、顶层 `auto_issue_days`。接收端：`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`password_mode`、`identity_change_policy`、`rotation_lead_days`、`auto_deploy`。位置字段（接收端）只经 `import` 写入；`enabled`/`risk_ack_*` 只经 `enable/disable`；部署目标只经 `rkp-mini-deployer add-target/remove-target`。
-- `rkp-mini-issuer` WebUI 原“配置只读”决策仅对 `rkp-mini-issuer` 自身字段保持；`[sync]` 与 `auto_issue_days` 经上面的命令修改。
+- `rkp-mini-sync config set <key> <value>`：**白名单**，写后重新加载校验，失败回滚。发送端：`provider`、`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`gist_id`、`gist_filename`、`webdav_endpoint`、`webdav_path`、`webdav_user`、`password_mode`。接收端：`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`password_mode`、`identity_change_policy`、`rotation_lead_days`、`auto_deploy`。位置字段（接收端）只经 `import` 写入；`enabled`/`risk_ack_*` 只经 `enable/disable`；部署目标只经 `rkp-mini-deployer add-target/remove-target`。
+- `rkp-mini-issuer` WebUI 原“配置只读”决策仅对 `rkp-mini-issuer` 自身字段保持；`[sync]` 经上面的命令修改，顶层 `auto_issue_days` 经 `rkp-mini-issuer config set auto_issue_days N`（签发页“自动签发设置”）修改。
 
 ### 19.5 页面
 

@@ -1,50 +1,62 @@
 <script setup lang="ts">
-// Two small cards: is unattended issuance / push actually active? Both run only
-// inside sync-loop.sh (≈12 h: `issue --if-expiring-days N`, then `push --auto`),
-// which runs only while sync is enabled with current risk acceptance. The issuer
-// itself never schedules, so auto-issue without the loop is off.
+// Two small cards: is unattended issuance / push actually active? The issuer
+// now owns auto-issue (`auto_issue` in its status: the days setting plus whether
+// its auto-loop.sh is alive). Push still needs sync enabled with current risk
+// acceptance, and `loop_running` there now means the same auto-loop.sh.
 import { computed } from 'vue'
 import { MiuixCard, MiuixProgressIndicator, MiuixText } from 'miuix-vue'
 import type { SyncStatus } from '../../../shared/lib/sync'
+import type { StatusData } from '../lib/rkp'
 import SvgIcon from '../../../shared/components/SvgIcon.vue'
 import { ICON_CHECK_CIRCLE, ICON_WARNING } from '../../../shared/lib/icons'
 
 const props = defineProps<{
-  status: SyncStatus | null
-  notInitialized: boolean
-  loading: boolean
-  error: string | null
+  status: StatusData | null
+  statusLoading: boolean
+  /** Read failure message, or null when the last read succeeded. */
+  statusError: string | null
+  sync: SyncStatus | null
+  syncNotInitialized: boolean
+  syncLoading: boolean
+  syncError: string | null
 }>()
 
 interface Box {
   title: string
   on: boolean
   hint: string
+  pending: boolean
 }
 
-/** Why the loop is not running, or null when it is. */
+/** Why the sync loop is not running, or null when it is. */
 const loopOff = computed(() => {
-  const s = props.status
-  if (!s) return props.notInitialized ? '同步未初始化' : props.error ? '读取同步状态失败' : '读取中…'
+  const s = props.sync
+  if (!s) return props.syncNotInitialized ? '同步未初始化' : props.syncError ? '读取同步状态失败' : '读取中…'
   if (!s.enabled) return '同步未启用'
   if (!s.risk_ack_current) return '需重新确认风险'
-  if (!s.loop_running) return '后台循环未运行'
+  if (!s.loop_running) return '后台进程未运行'
   return null
 })
 
 const boxes = computed<Box[]>(() => {
-  const days = props.status?.auto_issue_days ?? 0
+  const a = props.status?.auto_issue
+  let hint = props.statusError ? '未读取到状态' : '读取中…'
+  if (a) hint = a.days <= 0 ? '未开启' : a.loop_running ? `剩余 ≤ ${a.days} 天时` : '后台进程未运行'
   return [
     {
       title: '自动签发',
-      on: loopOff.value === null && days > 0,
-      hint: loopOff.value ?? (days > 0 ? `剩余 ≤ ${days} 天时` : '未设置提前天数'),
+      on: !!a && a.days > 0 && a.loop_running,
+      hint,
+      pending: props.statusLoading && !props.status,
     },
-    { title: '自动推送', on: loopOff.value === null, hint: loopOff.value ?? '约每 12 小时' },
+    {
+      title: '自动推送',
+      on: loopOff.value === null,
+      hint: loopOff.value ?? '约每 12 小时',
+      pending: props.syncLoading && !props.sync,
+    },
   ]
 })
-
-const pending = computed(() => props.loading && !props.status)
 </script>
 
 <template>
@@ -53,7 +65,7 @@ const pending = computed(() => props.loading && !props.status)
       <div class="box__body">
         <div class="box__head">
           <MiuixText type="body1" weight="medium">{{ b.title }}</MiuixText>
-          <MiuixProgressIndicator v-if="pending" type="infinite" :size="20" />
+          <MiuixProgressIndicator v-if="b.pending" type="infinite" :size="20" />
           <SvgIcon
             v-else
             class="box__icon"
@@ -61,7 +73,7 @@ const pending = computed(() => props.loading && !props.status)
             :color="b.on ? 'var(--app-ok)' : 'var(--app-warning)'"
           />
         </div>
-        <MiuixText type="body2" weight="medium">{{ pending ? '读取中' : b.on ? '已启用' : '未启用' }}</MiuixText>
+        <MiuixText type="body2" weight="medium">{{ b.pending ? '读取中' : b.on ? '已启用' : '未启用' }}</MiuixText>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ b.hint }}</MiuixText>
       </div>
     </MiuixCard>

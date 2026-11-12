@@ -56,7 +56,6 @@ const draft = reactive({
   provider: 'gist' as 'gist' | 'webdav',
   label: '',
   min_validity_days: '14',
-  auto_issue_days: '0',
   proxy: '',
   gist_id: '',
   gist_filename: 'rkp-sync.age',
@@ -97,7 +96,6 @@ async function load(): Promise<void> {
     draft.provider = c.provider === 'webdav' ? 'webdav' : 'gist'
     draft.label = c.label
     draft.min_validity_days = String(c.min_validity_days)
-    draft.auto_issue_days = String(c.auto_issue_days ?? 0)
     draft.proxy = c.proxy
     draft.gist_id = c.gist_id
     draft.gist_filename = c.gist_filename || 'rkp-sync.age'
@@ -129,13 +127,8 @@ async function save(): Promise<void> {
   actionError.value = null
 
   const minDays = parseDays(draft.min_validity_days)
-  const autoDays = parseDays(draft.auto_issue_days)
   if (minDays === null) {
     actionError.value = '最小剩余有效期必须是非负整数'
-    return
-  }
-  if (autoDays === null) {
-    actionError.value = '自动签发阈值必须是非负整数（0 = 关闭）'
     return
   }
 
@@ -143,7 +136,6 @@ async function save(): Promise<void> {
   if (draft.provider !== c.provider) updates.push(['provider', draft.provider])
   if (draft.label !== c.label) updates.push(['label', draft.label])
   if (minDays !== c.min_validity_days) updates.push(['min_validity_days', minDays])
-  if (autoDays !== (c.auto_issue_days ?? 0)) updates.push(['auto_issue_days', autoDays])
   if (draft.proxy !== c.proxy) updates.push(['proxy', draft.proxy])
   if (draft.provider === 'gist') {
     if (draft.gist_id !== c.gist_id) updates.push(['gist_id', draft.gist_id])
@@ -306,11 +298,10 @@ async function toggleLog(): Promise<void> {
         <div class="sheet-group">
           <MiuixInput v-model="draft.label" label="标签（仅用于分享展示）" single-line :disabled="locked" />
           <MiuixInput v-model="draft.min_validity_days" label="最小剩余有效期（天）" single-line :disabled="locked" />
-          <MiuixInput v-model="draft.auto_issue_days" label="自动签发阈值（天，0 = 关闭）" single-line :disabled="locked" />
           <MiuixInput v-model="draft.proxy" label="代理（可留空）" single-line :disabled="locked" />
         </div>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          自动签发：推送前若叶子剩余天数 ≤ 阈值，先重新签发再推送；仅在同步启用时由循环执行，0 = 关闭。
+          自动签发在“签发”页单独设置，不依赖远程同步。
         </MiuixText>
 
         <MiuixButton type="primary" :disabled="locked" @click="save">

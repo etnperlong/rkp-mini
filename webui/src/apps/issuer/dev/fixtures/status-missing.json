@@ -21,5 +21,6 @@
     "key_match": false,
     "error": null
   },
-  "description": "❌ 未签发"
+  "description": "❌ 未签发",
+  "auto_issue": { "days": 30, "loop_running": true }
 }

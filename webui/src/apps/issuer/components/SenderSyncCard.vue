@@ -95,8 +95,7 @@ const rows = computed(() => {
     })
   }
 
-  out.push({ k: '自动签发', v: s.auto_issue_days ? `剩余 ≤ ${s.auto_issue_days} 天时重新签发` : '关闭' })
-  out.push({ k: '自动循环', v: s.loop_running ? '运行中' : '未运行' })
+  out.push({ k: '后台进程', v: s.loop_running ? '运行中' : '未运行' })
   out.push({ k: 'age 口令', v: secretText(s.secrets.age), bad: secretBad(s.secrets.age) })
 
   if (s.provider === 'gist' || s.provider === 'webdav') {

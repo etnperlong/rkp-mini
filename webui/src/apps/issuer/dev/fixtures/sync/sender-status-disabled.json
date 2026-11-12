@@ -32,6 +32,5 @@
     "leaf_not_after": 1794000000,
     "days_left": 87,
     "summary": "3 张证书，密钥匹配"
-  },
-  "auto_issue_days": 30
+  }
 }

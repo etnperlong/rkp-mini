@@ -115,7 +115,7 @@ NDK=/path/to/android-ndk ./build.sh                         # arm64 release + bo
 
 |App|Parameters|
 |---|---|
-|issuer (`dev/mock.ts`, `dev/mockSyncSender.ts`)|`mock=ready\|expiring\|expired\|invalid\|missing\|blocked\|status-exit\|status-parse\|status-timeout`, `runner=idle\|running\|overdue\|success\|failure\|crashed\|stale`, `outcome=success\|failure`, `sync=uninit\|disabled\|ready\|error\|nosecret`, `syncpush=ok\|noop\|fail`|
+|issuer (`dev/mock.ts`, `dev/mockSyncSender.ts`)|`mock=ready\|expiring\|expired\|invalid\|missing\|blocked\|status-exit\|status-parse\|status-timeout`, `runner=idle\|running\|overdue\|success\|failure\|crashed\|stale`, `outcome=success\|failure`, `sync=uninit\|disabled\|ready\|error\|nosecret`, `syncpush=ok\|noop\|fail`, `auto=off\|on\|stopped`, `autolast=none\|skipped\|ok\|fail`|
 |deployer (`dev/mock.ts`)|`sync=new\|imported\|ready\|pending_first\|pending_identity\|error`, `fetch=tofu\|ok\|fail\|mismatch`, `deploy=fail\|omk_incompatible`, `run=ok\|fetch_fail\|missing_envelope\|skipped\|stale`, `modules=<comma list of omk\|teesim\|tricky_store, each optionally :disabled>\|none\|fail` (default `omk,tricky_store`)|
 
 The deployer mock persists its runner files in `localStorage` (`rkp.mock.receiver.runner`) so a reload reproduces a finished task; clear storage for a clean scenario.
@@ -149,7 +149,7 @@ The last one performs real network/TA issuance and creates new credentials: inte
 
 ## Important Files
 
-- `crates/rkp-mini-issuer/src/config.rs`: issuer defaults and template. Config `/data/misc/keystore/rkp-mini/config.toml`, output `output/` beside it; logs (`logs/issue-<unix>.log`), worker temp files and `status.{json,txt}` stay under the fixed data root even with a custom output directory.
+- `crates/rkp-mini-issuer/src/config.rs`: issuer defaults, template and `config set auto_issue_days` (comment-preserving, top-level key only; the issuer owns this key, `rkp-mini-sync` ignores it). Config `/data/misc/keystore/rkp-mini/config.toml`, output `output/` beside it; logs (`logs/issue-<unix>.log`), worker temp files and `status.{json,txt}` stay under the fixed data root even with a custom output directory.
 - `crates/rkp-mini-runtime/src/config.rs`: sync/deploy TOML, both role templates, `RISK_VERSION`, receiver layout under `/data/adb/rkp_sync/` (`sync/`, `deploy/`, `staging/`, `secrets/`, `tmp/`, `logs/`). Bump `RISK_VERSION` whenever a risk item changes, together with the WebUI fixtures.
 - `crates/rkp-mini-runtime/src/targets.rs`: `BUILTINS` — builtin targets with fixed paths/owners and the module that reads each keybox: `omk` → module `oh_my_keymint`, `teesim` → `teesim` (JingMatrix TEESimulator; any `*.xml` directly inside `/data/adb/teesim`), `tricky_store` → `tricky_store` (TrickyStore and TEESimulator-RS share the module id and `/data/adb/tricky_store/keybox.xml`); plus `Custom`. Hot reload is each module's own inotify watcher reacting to the atomic rename; the temp name must never end in `.xml`. `targets --json` exposes the table with module detection; the deployer page offers a builtin target only when `module.installed` is true (the CLI `add-target` stays unrestricted).
 - `crates/rkp-mini-deployer/src/{commands,deploy}.rs`: skip rules, approvals, identity gate, per-target report.

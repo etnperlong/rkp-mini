@@ -21,5 +21,6 @@
     "key_match": true,
     "error": null
   },
-  "description": "✅ RKP（87天）"
+  "description": "✅ RKP（87天）",
+  "auto_issue": { "days": 30, "loop_running": true }
 }

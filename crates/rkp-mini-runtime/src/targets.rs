@@ -424,7 +424,6 @@ mod tests {
             sync: SyncSection::default(),
             deploy: DeploySection::default(),
             output_dir: root.join("out"),
-            auto_issue_days: 0,
             url_policy: UrlPolicy::default(),
         }
     }

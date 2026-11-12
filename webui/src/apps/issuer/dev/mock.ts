@@ -5,13 +5,15 @@
 //   ?runner=  idle | running | overdue | success | failure | crashed | stale
 //                                                         (state at page load)
 //   ?outcome= success | failure                (result of an issue started here)
+//   ?auto=    off | on | stopped  (auto-issue: off = 0 days; stopped = on, loop down)
+//   ?autolast= none | skipped | ok | fail   (last auto-issue run in tmp/auto-issue.last.*)
 //   ?sync=    uninit | disabled | ready | error | nosecret        (sync state)
 //   ?syncpush= ok | noop | fail                 (result of one push task)
 // rkp-mini-sync commands are answered by ./mockSyncSender.ts.
 import type { ExecResult } from '../../../shared/lib/ksu'
 import type { StatusData } from '../lib/rkp'
 import { nowUnix } from '../../../shared/lib/format'
-import { mockSync } from './mockSyncSender'
+import { mockSync, mockLoop } from './mockSyncSender'
 import ready from './fixtures/status-ready.json'
 import expiring from './fixtures/status-expiring.json'
 import expired from './fixtures/status-expired.json'
@@ -44,11 +46,16 @@ ta_timeout_seconds = 30
 proxy = ""                        # e.g. "http://127.0.0.1:7890"; empty = direct
 log_retention = 10                # keep the most recent N issue logs
 
-# Re-issue when the current leaf has <= N days left. Used only by the sync
-# loop (\`rkp-mini-issuer issue --if-expiring-days N\` before \`rkp-mini-sync push\`)
-# while remote sync is enabled. 0 = off.
+# Re-issue when the current leaf has <= N days left. Used only by the module's
+# auto-loop.sh (\`issue --if-expiring-days N\`). 0 = off.
 auto_issue_days = 0
 `
+
+// Auto-issue is issuer-owned now (C1/C2): setting + whether auto-loop.sh is
+// alive. Both survive for this session; the loop flag also comes from the sync
+// mock, which is what actually handles the `auto-loop.sh` launch.
+const autoParam = params.get('auto') ?? 'off'
+const autoIssue = { days: autoParam === 'off' ? 0 : 30, loop_running: autoParam === 'on' }
 
 const logs: string[] = [`issue-${nowUnix() - 86_400 * 3}.log`, `issue-${nowUnix() - 86_400 * 40}.log`]
 
@@ -75,6 +82,7 @@ function liveStatus(): StatusData {
     k.not_after = now + k.days_left * 86_400 + 3600
     k.not_after_utc = new Date(k.not_after * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
   }
+  base.auto_issue = { days: autoIssue.days, loop_running: autoIssue.loop_running || mockLoop.running }
   return base
 }
 
@@ -119,6 +127,45 @@ function initialFiles(): RunnerFiles {
 }
 
 const files = initialFiles()
+
+// ---- Auto-issue loop files (tmp/auto-issue.last.*) ------------------------------
+
+interface AutoLastFiles {
+  at: number | null
+  code: number | null
+  json: string
+  err: string
+}
+
+function initialAutoLast(): AutoLastFiles {
+  const now = nowUnix()
+  switch (params.get('autolast')) {
+    case 'skipped':
+      return {
+        at: now - 3600,
+        code: 0,
+        json: `${JSON.stringify({
+          ok: true,
+          data: {
+            skipped: true,
+            reason: 'not_expiring',
+            days_left: 21,
+            threshold_days: 30,
+            keybox: '/data/misc/keystore/rkp-mini/output/keybox.xml',
+          },
+        })}\n`,
+        err: '',
+      }
+    case 'ok':
+      return { at: now - 7200, code: 0, json: successJson(), err: '' }
+    case 'fail':
+      return { at: now - 86_400, code: 5, json: `${JSON.stringify(issueFailure)}\n`, err: FAILURE_ERR }
+    default:
+      return { at: null, code: null, json: '', err: '' }
+  }
+}
+
+const autoLast = initialAutoLast()
 
 function launch(): void {
   if (files.lock !== null) return // runner exits 9: already running
@@ -166,6 +213,7 @@ function sanitized(command: string): string {
 
 /** Commands owned by the remote-sync mock: sync binary, runner, loop, inbox, log. */
 const SYNC_COMMAND = /\/bin\/rkp-mini-sync|runner\/sync\.sh|sync-task\.|auto-loop\.sh|sync\/inbox|logs\/auto\.log/
+const SEP = '<<<RKP-SEP>>>'
 
 export async function mockExec(command: string): Promise<ExecResult> {
   await new Promise((resolve) => setTimeout(resolve, 200))
@@ -173,6 +221,22 @@ export async function mockExec(command: string): Promise<ExecResult> {
 
   // Sync commands first: their paths share the module's `bin/` and `logs/`.
   if (SYNC_COMMAND.test(command)) return mockSync(command)
+
+  // Auto-issue is the issuer's own setting (C1) and state (C6), mocked here.
+  if (command.includes(' config set auto_issue_days ')) {
+    const n = Number(/config set auto_issue_days (\d+) --json/.exec(command)?.[1] ?? NaN)
+    if (!Number.isInteger(n) || n < 0 || n > 365) {
+      const error = { stage: 'config', code: 'invalid_value', message: 'auto_issue_days must be 0..=365' }
+      return { errno: 2, stdout: `${JSON.stringify({ ok: false, error })}\n`, stderr: '' }
+    }
+    autoIssue.days = n
+    return ok(`${JSON.stringify({ ok: true, data: { auto_issue_days: n } })}\n`)
+  }
+  if (command.includes('/auto-issue.last.code')) {
+    return ok(
+      [SEP, autoLast.at ?? '', SEP, autoLast.code ?? '', SEP, autoLast.json.trimEnd(), SEP, autoLast.err].join('\n'),
+    )
+  }
 
   if (command.includes(' status --json')) {
     if (scenario === 'status-exit') return fail(2, 'Error: TOML parse error: expected `=`')
@@ -196,7 +260,7 @@ export async function mockExec(command: string): Promise<ExecResult> {
     return logs.includes(name) ? ok(logBody(name)) : fail(1, `tail: ${name}: No such file`)
   }
   if (command.includes('now=$(date +%s)') && command.includes("'issue.lock'")) return ok(probeOutput())
-  if (command.includes('issue.last.json')) return ok(`<<<RKP-SEP>>>\n${files.json}<<<RKP-SEP>>>\n${files.err}`)
+  if (command.includes('/issue.last.json')) return ok(`${SEP}\n${files.json}${SEP}\n${files.err}`)
   if (command.includes('command -v setsid') && command.includes('/issue.sh')) {
     launch()
     return ok('setsid\n')

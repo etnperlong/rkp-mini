@@ -5,7 +5,8 @@
 // task lives inside the card; tapping the card opens the certificate details.
 import { computed } from 'vue'
 import { MiuixCard, MiuixIcon, MiuixIconButton, MiuixProgressIndicator, MiuixText } from 'miuix-vue'
-import { Close, Refresh } from 'miuix-vue/icons'
+import { Close } from 'miuix-vue/icons'
+import CardStateButton from '../../../shared/components/CardStateButton.vue'
 import SvgIcon from '../../../shared/components/SvgIcon.vue'
 import type { IssueRunner } from '../lib/issueRunner'
 import { KEYBOX_STATE_LABEL, KEYBOX_STATE_VISUAL, keyboxState, stageLabel, type StatusData } from '../lib/rkp'
@@ -74,7 +75,7 @@ const task = computed<{ text: string; bad: boolean; dismissible: boolean } | nul
 
 const cornerText = computed(() => {
   if (r.busy.value) return `签发中 ${formatElapsed(r.elapsedMs.value)}${r.overdue.value ? ' · 结果未知' : ''}`
-  return state.value ? KEYBOX_STATE_LABEL[state.value] : ''
+  return state.value ? KEYBOX_STATE_LABEL[state.value] : '读取失败'
 })
 </script>
 
@@ -92,19 +93,13 @@ const cornerText = computed(() => {
         <MiuixText type="title4" weight="medium">当前证书</MiuixText>
         <MiuixProgressIndicator v-if="loading && !status" type="infinite" :size="18" />
         <!-- Corner status doubles as the refresh control (re-reads the local status). -->
-        <button
-          v-else-if="status"
-          type="button"
-          class="issue__state"
-          :disabled="r.busy.value || loading"
-          :aria-label="r.busy.value ? cornerText : `${cornerText}，点击刷新状态`"
-          @pointerdown.stop
-          @click.stop="emit('refresh')"
-        >
-          <MiuixText type="body2" weight="medium">{{ cornerText }}</MiuixText>
-          <MiuixProgressIndicator v-if="r.busy.value || loading" type="infinite" :size="16" />
-          <MiuixIcon v-else :icon="Refresh" :size="18" />
-        </button>
+        <CardStateButton
+          v-else-if="status || error"
+          :label="cornerText"
+          :busy="r.busy.value || loading"
+          :disabled="false"
+          @refresh="emit('refresh')"
+        />
       </div>
 
       <MiuixText v-if="!status && error" type="body2" color="var(--m-color-error)">读取状态失败：{{ error }}</MiuixText>
@@ -175,26 +170,6 @@ const cornerText = computed(() => {
   justify-content: space-between;
   min-height: 28px;
   margin-bottom: 4px;
-}
-.issue__state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: -6px -8px -6px 0;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.issue__state:active:not(:disabled) {
-  background: var(--m-color-secondary-variant);
-}
-.issue__state:disabled {
-  cursor: default;
 }
 .rows {
   display: flex;

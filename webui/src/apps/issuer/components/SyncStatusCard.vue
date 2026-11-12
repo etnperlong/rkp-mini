@@ -13,7 +13,8 @@ import {
   MiuixText,
   showSnackbar,
 } from 'miuix-vue'
-import { Close, Refresh } from 'miuix-vue/icons'
+import { Close } from 'miuix-vue/icons'
+import CardStateButton from '../../../shared/components/CardStateButton.vue'
 import SvgIcon from '../../../shared/components/SvgIcon.vue'
 import { KEYBOX_STATE_VISUAL } from '../lib/rkp'
 import { formatAgo, formatElapsed } from '../../../shared/lib/format'
@@ -198,19 +199,13 @@ async function startInit(provider: 'gist' | 'webdav'): Promise<void> {
         <MiuixText type="title4" weight="medium">远程同步</MiuixText>
         <MiuixProgressIndicator v-if="loading && !status" type="infinite" :size="18" />
         <!-- Corner status doubles as the refresh control: tap runs check-remote. -->
-        <button
+        <CardStateButton
           v-else-if="status"
-          type="button"
-          class="sync__state"
+          :label="r.busy.value ? busyText : TONE_LABEL[tone]"
+          :busy="r.busy.value"
           :disabled="!canRefresh"
-          :aria-label="r.busy.value ? busyText : `${TONE_LABEL[tone]}，点击检查云端`"
-          @pointerdown.stop
-          @click.stop="emit('refresh')"
-        >
-          <MiuixText type="body2" weight="medium">{{ r.busy.value ? busyText : TONE_LABEL[tone] }}</MiuixText>
-          <MiuixProgressIndicator v-if="r.busy.value" type="infinite" :size="16" />
-          <MiuixIcon v-else :icon="Refresh" :size="18" />
-        </button>
+          @refresh="emit('refresh')"
+        />
       </div>
 
       <!-- Never initialized: create the [sync] table with a provider. -->
@@ -312,26 +307,6 @@ async function startInit(provider: 'gist' | 'webdav'): Promise<void> {
   justify-content: space-between;
   min-height: 28px;
   margin-bottom: 4px;
-}
-.sync__state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: -6px -8px -6px 0;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.sync__state:active:not(:disabled) {
-  background: var(--m-color-secondary-variant);
-}
-.sync__state:disabled {
-  cursor: default;
 }
 .rows {
   display: flex;

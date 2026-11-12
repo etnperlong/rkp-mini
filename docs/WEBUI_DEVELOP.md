@@ -406,8 +406,9 @@ unzip -l "$ZIP" | grep -q 'webroot/index.html' || { echo "! webroot missing" >&2
 
 ```
 MiuixTopAppBar(title="RKP-Mini · 签发端")
-状态  StatusCard（按状态着色 + 角标图标）、AutoStatusRow（自动签发：issuer status 的 auto_issue.days > 0 且
-      auto-loop.sh 在运行；自动推送：sync status 的 enabled + risk_ack_current + auto_push + loop_running）、CheckCard、“刷新状态”
+状态  StatusCard（按状态着色 + 角标图标；保留大号剩余天数；右上角状态即刷新入口，签发中显示“签发中 + 用时”；读取/刷新失败进警告条）、
+      AutoStatusRow（点击跳到签发 / 同步 Tab；自动签发：issuer status 的 auto_issue.days > 0 且 auto-loop.sh 在运行；
+      自动推送：sync status 的 enabled + risk_ack_current + auto_push + loop_running）、CheckCard
 签发  IssueStatusCard（同 SyncStatusCard 样式：有效期至 / 剩余天数 / 自动签发；即将过期/过期/无效时警告条；
       签发任务与上次结果在卡内；右上角状态即刷新入口，签发中显示“签发中 + 用时”；点击 → DetailSheet）、
       不可签发原因、“立即签发”、“签发设置”、免责脚注
@@ -425,6 +426,7 @@ IssueSettingsSheet（“签发设置”）：自动签发开关 + 提前天数�
 危险区“删除本地证书”经 MiuixDialog 确认后执行 `rkp-mini-issuer remove --yes --json`（签发进行中或本地无证书时禁用）。
 
 同步页进入时只显示缓存（`status --json`，含上次 `remote_check`），不联网；只有点右上角状态才联网检查。
+三张状态卡的右上角共用 `shared/components/CardStateButton.vue`（状态文字 + 刷新图标，忙时转圈）。
 `MiuixCard` 开启按压反馈时会在 pointerdown 里 `setPointerCapture`，之后的 click 全部落到卡片本身：卡片内的按钮
 必须 `@pointerdown.stop`，否则点不到且会触发卡片点击。
 SenderSyncSheet：自动推送（`auto_push` 开关 + 最小剩余有效期）、云端存储（含 Gist token / WebDAV 凭据入口）、

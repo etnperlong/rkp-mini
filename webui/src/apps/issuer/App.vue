@@ -294,8 +294,9 @@ onBeforeUnmount(() => clearInterval(clock))
             :loading="statusLoading"
             :error="statusError"
             :cached="statusCached"
+            :runner="runner"
             :now="now"
-            @retry="loadStatus(false)"
+            @refresh="onRefresh"
             @detail="detailOpen = true"
           />
           <AutoStatusRow
@@ -306,14 +307,12 @@ onBeforeUnmount(() => clearInterval(clock))
             :sync-not-initialized="syncNotInitialized"
             :sync-loading="syncLoading"
             :sync-error="syncError"
+            @open="tab = $event"
           />
           <template v-if="status">
             <MiuixSmallTitle :text="blockers.length ? `环境检查 · ${blockers.length} 项未通过` : '环境检查'" />
             <CheckCard :status="status" />
           </template>
-          <div class="actions">
-            <MiuixButton :disabled="statusLoading || runner.busy.value" @click="onRefresh">刷新状态</MiuixButton>
-          </div>
         </main>
       </MiuixScrollArea>
 

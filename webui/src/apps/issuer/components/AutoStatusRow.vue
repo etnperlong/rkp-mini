@@ -20,12 +20,15 @@ const props = defineProps<{
   syncLoading: boolean
   syncError: string | null
 }>()
+/** Tap a box to open the tab that owns its settings (issue = 1, sync = 2). */
+const emit = defineEmits<{ open: [tab: number] }>()
 
 interface Box {
   title: string
   on: boolean
   hint: string
   pending: boolean
+  tab: number
 }
 
 /** Why the sync loop is not running, or null when it is. */
@@ -49,12 +52,14 @@ const boxes = computed<Box[]>(() => {
       on: !!a && a.days > 0 && a.loop_running,
       hint,
       pending: props.statusLoading && !props.status,
+      tab: 1,
     },
     {
       title: '自动推送',
       on: loopOff.value === null,
       hint: loopOff.value ?? '约每 12 小时',
       pending: props.syncLoading && !props.sync,
+      tab: 2,
     },
   ]
 })
@@ -62,7 +67,14 @@ const boxes = computed<Box[]>(() => {
 
 <template>
   <div class="row">
-    <MiuixCard v-for="b in boxes" :key="b.title" class="box">
+    <MiuixCard
+      v-for="b in boxes"
+      :key="b.title"
+      class="box"
+      press-feedback="sink"
+      show-indication
+      @click="emit('open', b.tab)"
+    >
       <div class="box__body">
         <div class="box__head">
           <MiuixText type="body1" weight="medium">{{ b.title }}</MiuixText>

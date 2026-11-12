@@ -14,6 +14,8 @@ USAGE:
   rkp-mini-issuer issue  [--acknowledge] [--json] [--config PATH]
                   [--output DIR] [--server URL] [--fingerprint FP]
                   [--if-expiring-days N]   (skip unless the current leaf has <= N days left)
+  rkp-mini-issuer remove [--yes] [--json] [--config PATH]
+                  (delete the local keybox + artifacts; --yes required)
   rkp-mini-issuer config init|show [--config PATH]
   rkp-mini-issuer config set auto_issue_days N [--json] [--config PATH]
                   (N = 0..=365; 0 = off; used by the module's auto-loop.sh)
@@ -42,6 +44,13 @@ pub struct IssueArgs {
 }
 
 #[derive(Debug, Default)]
+pub struct RemoveArgs {
+    pub yes: bool,
+    pub json: bool,
+    pub config: Option<PathBuf>,
+}
+
+#[derive(Debug, Default)]
 pub struct ConfigSetArgs {
     pub key: String,
     pub value: String,
@@ -53,6 +62,7 @@ pub struct ConfigSetArgs {
 pub enum Command {
     Status(StatusArgs),
     Issue(IssueArgs),
+    Remove(RemoveArgs),
     ConfigInit { config: Option<PathBuf> },
     ConfigShow { config: Option<PathBuf> },
     ConfigSet(ConfigSetArgs),
@@ -111,6 +121,18 @@ pub fn parse(args: &[String]) -> Result<Command> {
             }
             Ok(Command::Issue(a))
         }
+        "remove" => {
+            let mut a = RemoveArgs::default();
+            while let Some(arg) = it.next() {
+                match arg.as_str() {
+                    "--yes" => a.yes = true,
+                    "--json" => a.json = true,
+                    "--config" => a.config = Some(PathBuf::from(take_value("--config", &mut it)?)),
+                    other => bail!("unknown remove flag: {other}"),
+                }
+            }
+            Ok(Command::Remove(a))
+        }
         "config" => {
             let sub = it.next().unwrap_or_default();
             if sub == "set" {
@@ -163,5 +185,42 @@ pub fn parse(args: &[String]) -> Result<Command> {
             })
         }
         other => bail!("unknown command: {other}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn remove(v: &[&str]) -> RemoveArgs {
+        match parse(&args(v)).unwrap() {
+            Command::Remove(a) => a,
+            other => panic!("expected remove, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remove_parses_with_and_without_yes() {
+        let a = remove(&["remove"]);
+        assert!(!a.yes && !a.json && a.config.is_none());
+
+        // Flags may appear in any order.
+        let a = remove(&["remove", "--config", "/x", "--json", "--yes"]);
+        assert!(a.yes && a.json);
+        assert_eq!(a.config, Some(PathBuf::from("/x")));
+
+        let a = remove(&["remove", "--yes", "--json"]);
+        assert!(a.yes && a.json);
+        assert!(a.config.is_none());
+    }
+
+    #[test]
+    fn remove_rejects_unknown_flags() {
+        assert!(parse(&args(&["remove", "--nope"])).is_err());
+        assert!(parse(&args(&["remove", "--yes", "--config"])).is_err());
     }
 }

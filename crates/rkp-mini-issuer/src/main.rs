@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod error;
+mod remove;
 mod rkp;
 mod status;
 #[cfg(test)]
@@ -43,6 +44,7 @@ fn command_is_json(cmd: &Command) -> bool {
     match cmd {
         Command::Status(a) => a.json,
         Command::Issue(a) => a.json,
+        Command::Remove(a) => a.json,
         Command::ConfigSet(a) => a.json,
         _ => false,
     }
@@ -97,5 +99,6 @@ fn dispatch(cmd: Command) -> anyhow::Result<i32> {
         Command::TaWorker { dir } => Ok(rkp::keymint::worker_main(&dir)),
         Command::Status(a) => status::run(&a),
         Command::Issue(a) => rkp::issue(&a),
+        Command::Remove(a) => remove::run(&a),
     }
 }

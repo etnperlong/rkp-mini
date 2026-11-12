@@ -29,6 +29,8 @@ Two modules use them: **RKP-Mini Issuer** (`rkp_mini_issuer`, ships issuer + syn
 - `rkp-mini-issuer status` — read-only prereq + keybox check, updates module description.
 - `rkp-mini-issuer issue --acknowledge` — generate P-256 key → fetch RKP challenge → sign
   CSR via KeyMint `0x3122` → `signCertificates` → validate chain → write keybox.
+- `rkp-mini-issuer remove --yes` — delete the issued keybox, its `.prev` backup, private key, chain
+  and `meta.json` from the output directory (refused while an issuance holds `tmp/issue.lock`).
 - `rkp-mini-sync` — sender: `push`, `share`, `rotate-password`, `remote-delete`; receiver: `import`,
   `fetch`; both: `check-remote` (read-only update check).
 - `rkp-mini-deployer` — `plan`, `apply`, `targets`, `add-target`, `remove-target`, `remove`.

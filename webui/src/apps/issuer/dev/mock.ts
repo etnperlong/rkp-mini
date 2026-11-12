@@ -55,7 +55,7 @@ auto_issue_days = 0
 // alive. Both survive for this session; the loop flag also comes from the sync
 // mock, which is what actually handles the `auto-loop.sh` launch.
 const autoParam = params.get('auto') ?? 'off'
-const autoIssue = { days: autoParam === 'off' ? 0 : 30, loop_running: autoParam === 'on' }
+const autoIssue = { days: autoParam === 'off' ? 0 : 3, loop_running: autoParam === 'on' }
 
 const logs: string[] = [`issue-${nowUnix() - 86_400 * 3}.log`, `issue-${nowUnix() - 86_400 * 40}.log`]
 
@@ -98,7 +98,7 @@ interface RunnerFiles {
 
 function successJson(): string {
   const env = structuredClone(issueSuccess)
-  env.data.leaf_not_after = nowUnix() + 90 * 86_400
+  env.data.leaf_not_after = nowUnix() + 13 * 86_400
   env.data.leaf_not_after_utc = new Date(env.data.leaf_not_after * 1000).toISOString().slice(0, 19) + 'Z'
   return JSON.stringify(env) + '\n'
 }
@@ -149,8 +149,8 @@ function initialAutoLast(): AutoLastFiles {
           data: {
             skipped: true,
             reason: 'not_expiring',
-            days_left: 21,
-            threshold_days: 30,
+            days_left: 9,
+            threshold_days: 3,
             keybox: '/data/misc/keystore/rkp-mini/output/keybox.xml',
           },
         })}\n`,

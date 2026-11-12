@@ -21,9 +21,9 @@
     "loop_running": false,
     "last_error": null,
     "identity_change_policy": "scheduled",
-    "rotation_lead_days": 30,
+    "rotation_lead_days": 4,
     "auto_deploy": true,
-    "min_validity_days": 7,
+    "min_validity_days": 2,
     "targets": [
       {
         "id": "omk",
@@ -75,9 +75,9 @@
     "loop_running": true,
     "last_error": null,
     "identity_change_policy": "scheduled",
-    "rotation_lead_days": 30,
+    "rotation_lead_days": 4,
     "auto_deploy": true,
-    "min_validity_days": 7,
+    "min_validity_days": 2,
     "targets": [
       {
         "id": "omk",
@@ -130,9 +130,9 @@
     "loop_running": true,
     "last_error": null,
     "identity_change_policy": "scheduled",
-    "rotation_lead_days": 30,
+    "rotation_lead_days": 4,
     "auto_deploy": true,
-    "min_validity_days": 7,
+    "min_validity_days": 2,
     "targets": [
       {
         "id": "omk",
@@ -196,9 +196,9 @@
     "loop_running": true,
     "last_error": null,
     "identity_change_policy": "scheduled",
-    "rotation_lead_days": 30,
+    "rotation_lead_days": 4,
     "auto_deploy": true,
-    "min_validity_days": 7,
+    "min_validity_days": 2,
     "targets": [
       {
         "id": "omk",
@@ -254,9 +254,9 @@
       "message": "WebDAV endpoint returned 503"
     },
     "identity_change_policy": "always",
-    "rotation_lead_days": 30,
+    "rotation_lead_days": 4,
     "auto_deploy": true,
-    "min_validity_days": 7,
+    "min_validity_days": 2,
     "targets": [
       {
         "id": "omk",

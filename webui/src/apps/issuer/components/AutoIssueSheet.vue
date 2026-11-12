@@ -21,6 +21,8 @@ import FoldBlock from '../../../shared/components/FoldBlock.vue'
 import { CommandError } from '../../../shared/lib/command'
 import { formatAgo, formatDateTime } from '../../../shared/lib/format'
 import {
+  AUTO_ISSUE_DEFAULT_DAYS,
+  AUTO_ISSUE_WARN_DAYS,
   readAutoIssueLast,
   setAutoIssueDays,
   stageLabel,
@@ -34,7 +36,7 @@ const props = defineProps<{ status: StatusData | null }>()
 const emit = defineEmits<{ changed: [] }>()
 
 const on = ref(false)
-const days = ref('30')
+const days = ref(String(AUTO_ISSUE_DEFAULT_DAYS))
 const saving = ref(false)
 const error = ref<string | null>(null)
 const last = ref<AutoIssueLast | null>(null)
@@ -70,12 +72,14 @@ function message(e: unknown): string {
   return e instanceof CommandError ? `${e.message}${e.detail ? `：${e.detail}` : ''}` : String(e)
 }
 
-/** Draft mirrors the last read status; 0 days keeps 30 ready for switching on. */
+/** Draft mirrors the last read status; 0 days keeps the default ready for switching on. */
 function syncDraft(): void {
   const d = props.status?.auto_issue?.days ?? 0
   on.value = d > 0
-  days.value = String(d > 0 ? d : 30)
+  days.value = String(d > 0 ? d : AUTO_ISSUE_DEFAULT_DAYS)
 }
+
+const tooLong = computed(() => on.value && Number(days.value.trim()) > AUTO_ISSUE_WARN_DAYS)
 
 async function loadLast(): Promise<void> {
   lastLoading.value = true
@@ -145,6 +149,9 @@ async function save(): Promise<void> {
         />
         <MiuixInput v-if="on" v-model="days" label="剩余天数 ≤ N 时重新签发" single-line />
       </div>
+      <MiuixText v-if="tooLong" type="footnote1" color="var(--app-warning)">
+        超过 {{ AUTO_ISSUE_WARN_DAYS }} 天：本机签发的证书有效期只有约 12–14 天，每次检查都会重新签发，可能导致频繁签发。建议设为 3。
+      </MiuixText>
       <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
         后台进程每约 12 小时检查一次证书；签发成功后，如远程同步已启用会随即推送。休眠可能推迟检查。
       </MiuixText>

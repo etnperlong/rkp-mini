@@ -416,7 +416,7 @@ MiuixSnackbarHost   （挂载一次；上移到导航栏之上）
 IssueSheet / ResultSheet / DetailSheet / AutoIssueSheet / 同步相关弹层（全局，覆盖在 Tab 之上）
 ```
 
-AutoIssueSheet：开关 + 提前天数（1–365，默认 30）→ `rkp-mini-issuer config set auto_issue_days N --json`；
+AutoIssueSheet：开关 + 提前天数（1–365，默认 3；大于 14 时显示频繁签发警告——本机 RKP 证书只有约 12–14 天有效期）→ `rkp-mini-issuer config set auto_issue_days N --json`；
 开启时以 `setsid` 启动 `auto-loop.sh`（pid 锁保证重复启动无害）。“上次自动检查”直接读
 `tmp/auto-issue.last.{at,code,json,err}`（`code` 最后写入，缺失视为没有已完成的检查）。
 
@@ -446,8 +446,8 @@ AutoIssueSheet：开关 + 提前天数（1–365，默认 30）→ `rkp-mini-iss
 
 | 条件 | 胶囊 | 颜色 |
 |---|---|---|
-| `keybox.exists && keybox.valid && days_left > 7` | 有效 | `tertiaryContainer` 底 / `onTertiaryContainer` 字 |
-| `valid && days_left <= 7` | 即将过期 | 应用层 `--app-warning`（Miuix 无 warning 令牌） |
+| `keybox.exists && keybox.valid && days_left > 3` | 有效 | `tertiaryContainer` 底 / `onTertiaryContainer` 字 |
+| `valid && days_left <= 3`（`EXPIRING_DAYS`；本机 RKP 证书仅约 12–14 天） | 即将过期 | 应用层 `--app-warning`（Miuix 无 warning 令牌） |
 | `days_left < 0`（或 `not_after <= now`） | 已过期 | `error` |
 | `exists && !valid` | 无效（附 `keybox.error`） | `error` |
 | `!exists` | 未签发 | `onSurfaceVariantSummary` |

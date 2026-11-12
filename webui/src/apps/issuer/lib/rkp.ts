@@ -227,12 +227,20 @@ export async function readModuleProp(): Promise<ModuleProp> {
 
 export type KeyboxState = 'missing' | 'expired' | 'invalid' | 'expiring' | 'valid'
 
+// Qualcomm native RKP leaves last ≈12–14 days, so day thresholds stay small.
+/** "Expiring" from this many days left (matches the auto-issue default). */
+export const EXPIRING_DAYS = 3
+/** Auto-issue threshold suggested when switching it on. */
+export const AUTO_ISSUE_DEFAULT_DAYS = 3
+/** Above this the threshold exceeds a leaf's lifetime and every check would re-issue. */
+export const AUTO_ISSUE_WARN_DAYS = 14
+
 /** Keybox state; expiry takes precedence over `valid`. */
 export function keyboxState(k: KeyboxInfo, now = nowUnix()): KeyboxState {
   if (!k.exists) return 'missing'
   if (k.not_after !== null && k.not_after <= now) return 'expired'
   if (!k.valid) return 'invalid'
-  if (k.not_after !== null && daysLeft(k.not_after, now) <= 7) return 'expiring'
+  if (k.not_after !== null && daysLeft(k.not_after, now) <= EXPIRING_DAYS) return 'expiring'
   return 'valid'
 }
 

@@ -20,6 +20,8 @@ Two modules: `rkp_mini_issuer` (`modules/issuer`: issuer + sync + issuer page) a
 
 Remote private-key deployment is opt-in, disabled by default, and gated on explicit risk acceptance. Using a keybox on another device is keybox cloning/spoofing, not legitimate RKP provisioning. Unattended work runs only from module loops: the issuer module's `auto-loop.sh` (auto-issue when `auto_issue_days > 0`, independent of sync; auto-push only while sync is enabled) and the deployer's `sync-loop.sh` (only while sync is enabled). `rkp-mini-issuer` itself never schedules.
 
+Qualcomm native RKP leaves are valid for only ≈12–14 days, so every day threshold is small: recommended `auto_issue_days = 3` (the WebUI warns above 14; ≥ 12 re-issues every round), sender `min_validity_days = 3`, receiver `= 2`, `rotation_lead_days = 4`, "expiring" display at ≤ 3 days. Never size a default against a 90-day certificate.
+
 Design records — read before changing the area, and treat their decisions as settled:
 
 - `docs/REMOTE_SYNC_DEVELOP.md`: sync protocol, threat model, formats, risk statement (§13), WebUI secrets/approvals (§19). Required before touching `rkp-mini-sync*` or `rkp-mini-deployer`.

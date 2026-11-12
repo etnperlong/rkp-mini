@@ -24,7 +24,8 @@ proxy = ""                        # e.g. "http://127.0.0.1:7890"; empty = direct
 log_retention = 10                # keep the most recent N issue logs
 
 # Re-issue when the current leaf has <= N days left. Read by the issuer
-# module's auto-loop.sh; independent of remote sync. 0 = off.
+# module's auto-loop.sh; independent of remote sync. 0 = off. Native RKP
+# leaves last ~12-14 days: 3 is recommended; >= 12 re-issues every round.
 auto_issue_days = 0
 "#;
 

@@ -47,12 +47,12 @@ function liveStatus(base: SyncStatus): SyncStatus {
   if (s.sync_state) {
     s.sync_state.verified_at = now - 600
     s.sync_state.last_checked_at = now - 300
-    s.sync_state.keybox_not_after = now + 87 * 86_400
+    s.sync_state.keybox_not_after = now + 10 * 86_400
     if (s.sync_state.last_error) s.sync_state.last_error.at = now - 3600
   }
   if (s.local_keybox) {
-    s.local_keybox.leaf_not_after = now + 87 * 86_400
-    s.local_keybox.days_left = 87
+    s.local_keybox.leaf_not_after = now + 10 * 86_400
+    s.local_keybox.days_left = 10
   }
   return s
 }

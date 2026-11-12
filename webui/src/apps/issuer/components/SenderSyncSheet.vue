@@ -55,7 +55,7 @@ const logText = ref('')
 const draft = reactive({
   provider: 'gist' as 'gist' | 'webdav',
   label: '',
-  min_validity_days: '14',
+  min_validity_days: '3',
   proxy: '',
   gist_id: '',
   gist_filename: 'rkp-sync.age',

@@ -146,6 +146,10 @@ pub(crate) fn blocker_hint(code: &str) -> &'static str {
     }
 }
 
+/// "Renew soon" threshold. Native RKP leaves last ≈12–14 days; matches the
+/// recommended auto-issue threshold.
+const EXPIRING_DAYS: i64 = 3;
+
 /// Compose the single-line module description (spec §7.7).
 pub fn description_for(status: &DeviceStatus, keybox: &KeyboxInfo) -> String {
     let now = util::now_unix();
@@ -154,7 +158,7 @@ pub fn description_for(status: &DeviceStatus, keybox: &KeyboxInfo) -> String {
             Some(na) if na <= now => format!("❌ RKP 已过期 {}", util::format_date(na)),
             Some(na) if keybox.valid => {
                 let days = util::days_left(na, now);
-                if days <= 7 {
+                if days <= EXPIRING_DAYS {
                     format!("✅ RKP {}（{}天，尽快续签）", util::format_date(na), days)
                 } else {
                     format!("✅ RKP {}（{}天）", util::format_date(na), days)
@@ -418,7 +422,7 @@ mod tests {
 
     #[test]
     fn description_expiring_soon() {
-        let na = util::now_unix() + 5 * 86_400;
+        let na = util::now_unix() + 2 * 86_400;
         let kb = KeyboxInfo {
             exists: true,
             valid: true,

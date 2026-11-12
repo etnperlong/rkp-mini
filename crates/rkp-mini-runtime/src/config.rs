@@ -153,7 +153,7 @@ impl Default for DeploySection {
     fn default() -> Self {
         DeploySection {
             identity_change_policy: IdentityPolicy::Scheduled,
-            rotation_lead_days: 30,
+            rotation_lead_days: 4,
             auto_deploy: true,
             targets: Vec::new(),
         }
@@ -416,10 +416,13 @@ impl Config {
         self.secret_path(&self.sync.webdav_password_file, "webdav.pass")
     }
 
+    /// Defaults sized for Qualcomm native RKP leaves (≈12–14 days): the sender
+    /// re-issues at <= 3 days left, so it publishes anything with >= 3 days and
+    /// the receiver accepts >= 2 days (fetch latency slack).
     pub fn min_validity_days(&self) -> u32 {
         self.sync.min_validity_days.unwrap_or(match self.role {
-            Role::Sender => 14,
-            Role::Receiver => 7,
+            Role::Sender => 3,
+            Role::Receiver => 2,
         })
     }
 
@@ -664,7 +667,7 @@ risk_ack_version = 0
 provider = "{provider}"              # gist | webdav
 stream_id = "{stream_id}"
 label = ""                        # shown to the receiver; no serials/IMEI/e-mail
-min_validity_days = 14
+min_validity_days = 3
 request_timeout_seconds = 30
 proxy = ""                        # e.g. "http://127.0.0.1:7890"; empty = direct
 
@@ -703,7 +706,7 @@ risk_ack_version = 0
 provider = ""                     # gist | webdav | url (set by import)
 stream_id = ""
 label = ""
-min_validity_days = 7
+min_validity_days = 2
 request_timeout_seconds = 30
 proxy = ""
 
@@ -727,7 +730,7 @@ password_file = "{age}"           # 0600
 
 [deploy]
 identity_change_policy = "scheduled"  # scheduled | always | never
-rotation_lead_days = 30
+rotation_lead_days = 4               # > auto_issue_days 3 (floored day count) so a rotation deploys at once
 auto_deploy = true
 
 # Targets are added with `rkp-mini-deployer add-target omk|teesim|tricky_store`
@@ -794,7 +797,7 @@ mod tests {
         let p = write(dir.path(), "config.toml", &body);
         let c = load(&p, Some(Role::Sender), UrlPolicy::default()).unwrap();
         assert!(!c.sync.enabled);
-        assert_eq!(c.min_validity_days(), 14);
+        assert_eq!(c.min_validity_days(), 3);
         assert!(c.require_enabled().is_err());
         assert_eq!(c.loop_pid_path(), dir.path().join("tmp/auto-loop.pid"));
 
@@ -803,7 +806,7 @@ mod tests {
         assert_eq!(c.deploy.identity_change_policy, IdentityPolicy::Scheduled);
         assert!(c.deploy.targets.is_empty());
         assert_eq!(c.password_file(), dir.path().join("secrets/age.pass"));
-        assert_eq!(c.min_validity_days(), 7);
+        assert_eq!(c.min_validity_days(), 2);
         assert_eq!(c.loop_pid_path(), dir.path().join("tmp/sync-loop.pid"));
         assert_eq!(
             load(&r, Some(Role::Sender), UrlPolicy::default())

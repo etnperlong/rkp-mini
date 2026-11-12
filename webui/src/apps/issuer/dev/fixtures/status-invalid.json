@@ -22,5 +22,5 @@
     "error": "private key does not match leaf certificate"
   },
   "description": "❌ keybox 无效：private key does not match leaf certificate",
-  "auto_issue": { "days": 30, "loop_running": true }
+  "auto_issue": { "days": 3, "loop_running": true }
 }

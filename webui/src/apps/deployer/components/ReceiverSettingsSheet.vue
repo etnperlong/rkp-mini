@@ -68,8 +68,8 @@ const busy = ref(false)
 const error = ref<string | null>(null)
 const form = ref<Form>({
   policy: 'scheduled',
-  lead: '30',
-  minValidity: '7',
+  lead: '4',
+  minValidity: '2',
   autoDeploy: true,
   label: '',
   proxy: '',
@@ -93,7 +93,7 @@ watch(open, (v) => {
 function fill(cfg: SyncConfig): void {
   form.value = {
     policy: cfg.identity_change_policy ?? 'scheduled',
-    lead: String(cfg.rotation_lead_days ?? 30),
+    lead: String(cfg.rotation_lead_days ?? 4),
     minValidity: String(cfg.min_validity_days),
     autoDeploy: cfg.auto_deploy ?? true,
     label: cfg.label,

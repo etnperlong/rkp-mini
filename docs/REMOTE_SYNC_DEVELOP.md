@@ -707,7 +707,9 @@ rkp-mini-sync forget                # 清除本地 token/密码/state（不删�
 > **2026-11 更新**：自动签发已与同步解耦。`auto_issue_days` 由 `rkp-mini-issuer config set auto_issue_days N`
 > 修改（`rkp-mini-sync` 不再读写它）；发送端循环改为签发模块的 `auto-loop.sh`：每 30 分钟醒来按墙钟判断是否到期，
 > 到期轮次先在 `auto_issue_days > 0` 时签发（与 WebUI 共用 `tmp/issue.lock`），再在 `check-auto` 通过时 `push --auto`；
-> 两者都关闭时循环退出。下面的阈值语义不变。
+> 两者都关闭时循环退出。下面的阈值语义不变。高通本机签发的 RKP 叶子只有约 12–14 天有效期，因此默认值相应缩小：
+> 推荐 `auto_issue_days = 3`（WebUI 超过 14 警告），发送端 `min_validity_days = 3`、接收端 `= 2`，
+> `rotation_lead_days = 4`（天数向下取整，需大于 3 才能让轮换到达即部署）。本文其余示例中的 14/7/30 为设计期数值。
 
 现有 `auto_issue_days` 从“保留字段”改为“剩余天数阈值”：
 

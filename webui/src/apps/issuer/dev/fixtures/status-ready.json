@@ -17,10 +17,10 @@
     "leaf_subject": "CN=d4a3f0b2c19e8a7f, O=TEE, C=US",
     "not_after": null,
     "not_after_utc": null,
-    "days_left": 87,
+    "days_left": 10,
     "key_match": true,
     "error": null
   },
-  "description": "✅ RKP（87天）",
-  "auto_issue": { "days": 30, "loop_running": true }
+  "description": "✅ RKP（10天）",
+  "auto_issue": { "days": 3, "loop_running": true }
 }

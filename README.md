@@ -150,10 +150,11 @@ The module Action (and the WebUI task) runs `fetch` and then `apply --if-staged`
 fetch still repairs a damaged target from staging that was already verified; a first
 deployment or an identity change outside the policy stays `pending` until it is approved.
 
-Auto-issue does not need sync: `rkp-mini-issuer config set auto_issue_days 30` (or WebUI → 签发 →
+Auto-issue does not need sync: `rkp-mini-issuer config set auto_issue_days 3` (or WebUI → 签发 →
 自动签发设置; `0` turns it off) makes the issuer module's `auto-loop.sh` run `rkp-mini-issuer issue
---if-expiring-days 30` about every 12 h, so a new keybox is issued only when the current leaf has
-≤ 30 days left. The same loop runs `sync push --auto` right after while `rkp-mini-sync check-auto`
+--if-expiring-days 3` about every 12 h, so a new keybox is issued only when the current leaf has
+≤ 3 days left. Native Qualcomm RKP leaves are valid for only ~12–14 days, so keep N small: N ≥ 12
+re-issues on every check (the WebUI warns above 14). The same loop runs `sync push --auto` right after while `rkp-mini-sync check-auto`
 passes (sync enabled, `password_mode = "secret-file"`, the default). The receiver loop runs every
 ~8 h only while sync is enabled: `sync check-auto --require-verified`, then `sync fetch --auto` and
 `deployer apply --auto --if-staged`. Doze/vendor power saving may delay these loops. Logs:
@@ -161,7 +162,7 @@ passes (sync enabled, `password_mode = "secret-file"`, the default). The receive
 codes only); the last auto-issue check is kept in `tmp/auto-issue.last.*`.
 
 Identity changes on the receiver follow `[deploy].identity_change_policy`: `scheduled`
-(default) deploys a new keybox automatically only within `rotation_lead_days` of the old
+(default) deploys a new keybox automatically only within `rotation_lead_days` (default 4) of the old
 leaf's expiry and when the new leaf outlives it; otherwise it is held as `pending`. OMK's
 `retire_stale_keybox_bound_keys` (default true) deletes client keys bound to a replaced keybox.
 

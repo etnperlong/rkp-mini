@@ -25,5 +25,5 @@
     "error": null
   },
   "description": "❌ 未签发（非高通）",
-  "auto_issue": { "days": 30, "loop_running": true }
+  "auto_issue": { "days": 3, "loop_running": true }
 }

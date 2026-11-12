@@ -19,12 +19,9 @@ import {
 import { Close } from 'miuix-vue/icons'
 import { CommandError } from '../../../shared/lib/command'
 import {
-  SYNC_LOG,
-  SYNC_LOG_LABEL,
   disableSync,
   forgetSync,
   readSyncConfig,
-  readSyncLog,
   setConfig,
   type SecretKind,
   type SecretStatus,
@@ -48,9 +45,6 @@ const saving = ref(false)
 const pending = ref<'disable' | 'forget' | null>(null)
 const actionError = ref<string | null>(null)
 const confirmForget = ref(false)
-const logOpen = ref(false)
-const logLoading = ref(false)
-const logText = ref('')
 
 const draft = reactive({
   provider: 'gist' as 'gist' | 'webdav',
@@ -88,8 +82,6 @@ async function load(): Promise<void> {
   loading.value = true
   loadError.value = null
   actionError.value = null
-  logOpen.value = false
-  logText.value = ''
   try {
     const c = await readSyncConfig()
     cfg.value = c
@@ -194,23 +186,6 @@ async function forget(): Promise<void> {
     actionError.value = message(e)
   } finally {
     pending.value = null
-  }
-}
-
-async function toggleLog(): Promise<void> {
-  if (logOpen.value) {
-    logOpen.value = false
-    return
-  }
-  logOpen.value = true
-  logText.value = ''
-  logLoading.value = true
-  try {
-    logText.value = await readSyncLog()
-  } catch (e) {
-    logText.value = message(e)
-  } finally {
-    logLoading.value = false
   }
 }
 </script>
@@ -330,15 +305,6 @@ async function toggleLog(): Promise<void> {
           />
         </div>
 
-        <MiuixSmallTitle text="同步日志" />
-        <div class="sheet-group">
-          <MiuixBasicComponent :title="SYNC_LOG_LABEL" :summary="SYNC_LOG" clickable @click="toggleLog" />
-          <pre v-if="logOpen" class="log">{{ logLoading ? '读取中…' : logText || '（空）' }}</pre>
-        </div>
-        <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          日志只含 provider、seq、hash 与错误码，不含口令或 token。
-        </MiuixText>
-
         <MiuixText v-if="actionError" type="footnote1" color="var(--m-color-error)">{{ actionError }}</MiuixText>
       </template>
     </div>
@@ -361,20 +327,6 @@ async function toggleLog(): Promise<void> {
 <style scoped>
 .sheet-body :deep(.m-small-title) {
   padding: 4px 0 0;
-}
-.log {
-  margin: 0 16px 16px;
-  padding: 12px;
-  max-height: 40vh;
-  overflow: auto;
-  border-radius: 12px;
-  background: var(--m-color-secondary-variant);
-  font-family: ui-monospace, 'JetBrains Mono', 'Roboto Mono', monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
-  user-select: text;
 }
 .dialog-actions {
   display: flex;

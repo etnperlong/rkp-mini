@@ -23,6 +23,7 @@ import AutoIssueSheet from './components/AutoIssueSheet.vue'
 import ResultSheet from './components/ResultSheet.vue'
 import DetailSheet from './components/DetailSheet.vue'
 import MoreTab from './components/MoreTab.vue'
+import LogsSheet from './components/LogsSheet.vue'
 import SenderSyncCard from './components/SenderSyncCard.vue'
 import SenderSyncSheet from './components/SenderSyncSheet.vue'
 import SenderShareSheet from './components/SenderShareSheet.vue'
@@ -56,11 +57,14 @@ const TABS = [{ label: '状态' }, { label: '签发' }, { label: '同步' }, { l
 const TAB_ICONS = [Info, Lock, UploadCloud, More]
 const MORE_TAB = 3
 const tab = ref(0)
-const logsFocus = ref(false)
+const logsOpen = ref(false)
+const logsFocusIssue = ref(false)
 
-function selectTab(index: number): void {
-  logsFocus.value = false
-  tab.value = index
+/** 更多 → 日志, or the result sheet (newest issue log expanded). */
+function openLogs(focusIssue: boolean): void {
+  resultOpen.value = false
+  logsFocusIssue.value = focusIssue
+  logsOpen.value = true
 }
 
 // Remote sync (rkp-mini-sync). The status read is local-only; the card starts a
@@ -93,13 +97,6 @@ const SECRET_SHEET: Record<SecretKind, { title: string; hint: string }> = {
 function openSecret(kind: SecretKind): void {
   secretKind.value = kind
   secretOpen.value = true
-}
-
-/** From the result sheet: the "more" tab with the newest log expanded. */
-function openLogs(): void {
-  resultOpen.value = false
-  logsFocus.value = true
-  tab.value = MORE_TAB
 }
 
 // Ticks once a minute so relative times and day counts stay current.
@@ -312,11 +309,11 @@ onBeforeUnmount(() => clearInterval(clock))
 
     <MiuixScrollArea v-show="tab === MORE_TAB" class="app__scroll">
       <main class="page">
-        <MoreTab :active="tab === MORE_TAB" :focus-logs="logsFocus" />
+        <MoreTab :active="tab === MORE_TAB" @logs="openLogs(false)" />
       </main>
     </MiuixScrollArea>
 
-    <MiuixNavigationBar :model-value="tab" :items="TABS" @update:model-value="selectTab">
+    <MiuixNavigationBar :model-value="tab" :items="TABS" @update:model-value="tab = $event">
       <template #icon="{ index }">
         <MiuixIcon :icon="TAB_ICONS[index]" />
       </template>
@@ -331,7 +328,7 @@ onBeforeUnmount(() => clearInterval(clock))
         :has-keybox="!!status?.keybox.exists"
         @confirm="onConfirmIssue"
       />
-      <ResultSheet v-model="resultOpen" :runner="runner" @logs="openLogs" />
+      <ResultSheet v-model="resultOpen" :runner="runner" @logs="openLogs(true)" />
       <AutoIssueSheet v-model="autoIssueOpen" :status="status" @changed="loadStatus(false)" />
       <DetailSheet v-if="status" v-model="detailOpen" :status="status" :now="now" />
       <SenderSyncSheet
@@ -352,6 +349,7 @@ onBeforeUnmount(() => clearInterval(clock))
         @saved="loadSyncStatus()"
       />
     </template>
+    <LogsSheet v-model="logsOpen" :focus-issue="logsFocusIssue" />
   </div>
 </template>
 

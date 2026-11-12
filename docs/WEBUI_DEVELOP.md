@@ -410,10 +410,10 @@ MiuixTopAppBar(title="RKP-Mini · 签发端")
       auto-loop.sh 在运行；自动推送：sync status 的 enabled + risk_ack_current + loop_running）、CheckCard、“刷新状态”
 签发  KeyboxSummaryCard（只读一行摘要）、IssueCard、不可签发原因、“手动签发”、“自动签发设置”、免责脚注
 同步  SenderSyncCard（不再含自动签发设置）
-更多  MoreTab：外观、签发日志、只读配置、关于（每次切入重新读取）
+更多  MoreTab：外观、日志入口、只读配置、关于（每次切入重新读取）
 MiuixNavigationBar  状态 / 签发 / 同步 / 更多
 MiuixSnackbarHost   （挂载一次；上移到导航栏之上）
-IssueSheet / ResultSheet / DetailSheet / AutoIssueSheet / 同步相关弹层（全局，覆盖在 Tab 之上）
+IssueSheet / ResultSheet / DetailSheet / AutoIssueSheet / LogsSheet / 同步相关弹层（全局，覆盖在 Tab 之上）
 ```
 
 AutoIssueSheet：开关 + 提前天数（1–365，默认 3；大于 14 时显示频繁签发警告——本机 RKP 证书只有约 12–14 天有效期）→ `rkp-mini-issuer config set auto_issue_days N --json`；
@@ -421,7 +421,9 @@ AutoIssueSheet：开关 + 提前天数（1–365，默认 3；大于 14 时显�
 `tmp/auto-issue.last.{at,code,json,err}`（`code` 最后写入，缺失视为没有已完成的检查）。
 
 数据与后台任务（`useIssueRunner`、`useSyncRunner`、状态读取）都留在 `App.vue`，切换 Tab 不重新读取。
-结果弹层的“查看签发日志”切到“更多”并展开最新日志。
+日志统一在 LogsSheet（“更多 → 日志”，每次打开重新读取）：签发日志 `logs/issue-*.log`、后台日志 `logs/auto.log`
+（auto-loop.sh：自动签发 + 自动推送）、页面内存调试日志；同步设置弹层不再显示日志。
+结果弹层的“查看签发日志”直接打开 LogsSheet 并展开最新签发日志。
 
 ### 7.2 组件映射（`miuix-vue` 已核对的导出名）
 

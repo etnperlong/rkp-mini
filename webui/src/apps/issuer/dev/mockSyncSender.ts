@@ -271,10 +271,10 @@ export async function mockSync(command: string): Promise<ExecResult> {
     }
     return { errno: 0, stdout: `${files.op ?? ''}\n${SEP}\n${files.json}${SEP}\n${files.err}`, stderr: '' }
   }
-  if (command.includes('logs/sync.log')) {
+  if (command.includes('logs/auto.log')) {
     return { errno: 0, stdout: logText, stderr: '' }
   }
-  if (command.includes('sync-loop.sh')) {
+  if (command.includes('auto-loop.sh')) {
     return okJson({ loop: 'started' })
   }
   // prepareRotation / discardRotation write the inbox file only; `secret set`

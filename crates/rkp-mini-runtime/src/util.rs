@@ -26,7 +26,8 @@ pub fn date(unix: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-/// Whether the module's `sync-loop.sh` (pid file) is alive.
+/// Whether the module loop that drives this role is alive
+/// (pid file at `Config::loop_pid_path`).
 pub fn loop_running(cfg: &Config) -> bool {
     let Ok(text) = std::fs::read_to_string(cfg.loop_pid_path()) else {
         return false;

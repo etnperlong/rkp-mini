@@ -7,4 +7,6 @@ export const appConfig: AppConfig = {
   moduleDir: '/data/adb/modules/rkp_mini_issuer',
   dataRoot: '/data/misc/keystore/rkp-mini',
   syncRole: 'sender',
+  loopScript: 'auto-loop.sh',
+  loopLog: 'auto.log',
 }

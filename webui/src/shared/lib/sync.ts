@@ -32,8 +32,10 @@ export const SYNC_DATA = appConfig.dataRoot
 export const SYNC_CONFIG = `${SYNC_DATA}/config.toml`
 export const SYNC_TMP = `${SYNC_DATA}/tmp`
 export const SYNC_INBOX = `${SYNC_DATA}/sync/inbox`
-export const SYNC_LOG = `${SYNC_DATA}/logs/sync.log`
-const SYNC_LOOP = `${SYNC_MODULE_DIR}/sync-loop.sh`
+export const SYNC_LOG = `${SYNC_DATA}/logs/${appConfig.loopLog}`
+/** Path shown in the UI, e.g. `logs/auto.log`. */
+export const SYNC_LOG_LABEL = `logs/${appConfig.loopLog}`
+const SYNC_LOOP = `${SYNC_MODULE_DIR}/${appConfig.loopScript}`
 const SYNC_RUNNER = `${SYNC_MODULE_DIR}/webroot/runner/sync.sh`
 
 for (const p of [SYNC_BIN, SYNC_CONFIG, SYNC_INBOX, SYNC_LOG, SYNC_LOOP, SYNC_RUNNER]) {

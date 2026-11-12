@@ -94,7 +94,7 @@ mkdir -p dist/module-issuer/bin dist/module-issuer/webroot
 cp "$ISSUER_BIN" dist/module-issuer/bin/rkp-mini-issuer
 cp "$SYNC_BIN" dist/module-issuer/bin/rkp-mini-sync
 cp modules/issuer/module.prop modules/issuer/customize.sh modules/issuer/action.sh \
-   modules/issuer/service.sh modules/issuer/uninstall.sh modules/issuer/sync-loop.sh \
+   modules/issuer/service.sh modules/issuer/uninstall.sh modules/issuer/auto-loop.sh \
    dist/module-issuer/
 cp -R modules/issuer/webroot/runner dist/module-issuer/webroot/runner
 cp -R webui/dist/issuer/. dist/module-issuer/webroot/
@@ -157,10 +157,11 @@ check_absent() {
   done
 }
 
-check_zip "$ISSUER_ZIP" module.prop customize.sh service.sh sync-loop.sh action.sh \
+check_zip "$ISSUER_ZIP" module.prop customize.sh service.sh auto-loop.sh action.sh \
   uninstall.sh bin/rkp-mini-issuer bin/rkp-mini-sync webroot/index.html \
   webroot/runner/issue.sh webroot/runner/sync.sh
-check_absent "$ISSUER_ZIP" 'bin/rkp-mini-deployer' 'run\.sh' 'lib/run\.sh' 'bin/rkp-mini' 'bin/rkp-sync'
+check_absent "$ISSUER_ZIP" 'sync-loop\.sh' 'bin/rkp-mini-deployer' 'run\.sh' 'lib/run\.sh' \
+  'bin/rkp-mini' 'bin/rkp-sync'
 check_zip "$DEPLOYER_ZIP" module.prop customize.sh service.sh sync-loop.sh action.sh \
   uninstall.sh run.sh lib/run.sh bin/rkp-mini-sync bin/rkp-mini-deployer \
   webroot/index.html webroot/runner/sync.sh

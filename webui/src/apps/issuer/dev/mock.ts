@@ -165,8 +165,7 @@ function sanitized(command: string): string {
 }
 
 /** Commands owned by the remote-sync mock: sync binary, runner, loop, inbox, log. */
-const SYNC_COMMAND =
-  /\/bin\/rkp-mini-sync|runner\/sync\.sh|sync-task\.|sync-loop\.sh|sync\/inbox|logs\/sync\.log/
+const SYNC_COMMAND = /\/bin\/rkp-mini-sync|runner\/sync\.sh|sync-task\.|auto-loop\.sh|sync\/inbox|logs\/auto\.log/
 
 export async function mockExec(command: string): Promise<ExecResult> {
   await new Promise((resolve) => setTimeout(resolve, 200))

@@ -10,4 +10,8 @@ export interface AppConfig {
   dataRoot: string
   /** Remote-sync role this app drives (data-compatibility identifier). */
   syncRole: 'sender' | 'receiver'
+  /** Unattended loop script in the module directory, started by the page. */
+  loopScript: string
+  /** That loop's log file, relative to `dataRoot/logs`. */
+  loopLog: string
 }

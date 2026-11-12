@@ -23,7 +23,7 @@ set_perm "$MODPATH/bin/rkp-mini-issuer" 0 0 0755
 set_perm "$MODPATH/bin/rkp-mini-sync" 0 0 0755
 set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/service.sh" 0 0 0755
-set_perm "$MODPATH/sync-loop.sh" 0 0 0755
+set_perm "$MODPATH/auto-loop.sh" 0 0 0755
 
 mkdir -p /data/misc/keystore/rkp-mini/output
 mkdir -p /data/misc/keystore/rkp-mini/logs

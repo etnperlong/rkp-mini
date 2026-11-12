@@ -383,9 +383,14 @@ impl Config {
         self.sync_dir().join("inbox")
     }
 
-    /// pid file written by the module's `sync-loop.sh`.
+    /// pid file of the module loop driving this role: the issuer's
+    /// `auto-loop.sh` on a sender, the deployer's `sync-loop.sh` on a receiver.
     pub fn loop_pid_path(&self) -> PathBuf {
-        self.root.join("tmp").join("sync-loop.pid")
+        let name = match self.role {
+            Role::Sender => "auto-loop.pid",
+            Role::Receiver => "sync-loop.pid",
+        };
+        self.root.join("tmp").join(name)
     }
 
     fn secrets_dir(&self) -> PathBuf {
@@ -793,6 +798,7 @@ mod tests {
         let c = load(&p, Some(Role::Sender), UrlPolicy::default()).unwrap();
         assert!(!c.sync.enabled);
         assert_eq!(c.min_validity_days(), 14);
+        assert_eq!(c.loop_pid_path(), dir.path().join("tmp/auto-loop.pid"));
         assert!(c.require_enabled().is_err());
 
         let r = write(dir.path(), "recv.toml", &receiver_template(dir.path()));
@@ -801,6 +807,7 @@ mod tests {
         assert!(c.deploy.targets.is_empty());
         assert_eq!(c.password_file(), dir.path().join("secrets/age.pass"));
         assert_eq!(c.min_validity_days(), 7);
+        assert_eq!(c.loop_pid_path(), dir.path().join("tmp/sync-loop.pid"));
         assert_eq!(
             load(&r, Some(Role::Sender), UrlPolicy::default())
                 .map_err(|e| rkp_mini_core::error::to_sync_error(&e).code)

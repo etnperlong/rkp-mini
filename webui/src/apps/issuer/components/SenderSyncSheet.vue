@@ -20,6 +20,7 @@ import { Close } from 'miuix-vue/icons'
 import { CommandError } from '../../../shared/lib/command'
 import {
   SYNC_LOG,
+  SYNC_LOG_LABEL,
   disableSync,
   forgetSync,
   readSyncConfig,
@@ -340,7 +341,7 @@ async function toggleLog(): Promise<void> {
 
         <MiuixSmallTitle text="同步日志" />
         <div class="sheet-group">
-          <MiuixBasicComponent title="logs/sync.log" :summary="SYNC_LOG" clickable @click="toggleLog" />
+          <MiuixBasicComponent :title="SYNC_LOG_LABEL" :summary="SYNC_LOG" clickable @click="toggleLog" />
           <pre v-if="logOpen" class="log">{{ logLoading ? '读取中…' : logText || '（空）' }}</pre>
         </div>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">

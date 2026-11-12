@@ -7,4 +7,6 @@ export const appConfig: AppConfig = {
   moduleDir: '/data/adb/modules/rkp_mini_deployer',
   dataRoot: '/data/adb/rkp_sync',
   syncRole: 'receiver',
+  loopScript: 'sync-loop.sh',
+  loopLog: 'sync.log',
 }

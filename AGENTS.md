@@ -18,7 +18,7 @@ Removed names are usage errors (exit 2), not aliases: binaries `rkp-mini`/`rkp-s
 
 Two modules: `rkp_mini_issuer` (`modules/issuer`: issuer + sync + issuer page) and `rkp_mini_deployer` (`modules/deployer`: sync + deployer + combo runner + deployer page). Data identifiers deliberately keep their old spelling: sender root `/data/misc/keystore/rkp-mini`, receiver root `/data/adb/rkp_sync`, remote file `rkp-sync.age`, `rkpsync://v1/import`, DeviceID prefix `rkp-mini-`, TOML/JSON roles `sender`/`receiver`. Rename commands, never these.
 
-Remote private-key deployment is opt-in, disabled by default, and gated on explicit risk acceptance. Using a keybox on another device is keybox cloning/spoofing, not legitimate RKP provisioning. Unattended loops run only while sync is enabled; `rkp-mini-issuer` itself never schedules.
+Remote private-key deployment is opt-in, disabled by default, and gated on explicit risk acceptance. Using a keybox on another device is keybox cloning/spoofing, not legitimate RKP provisioning. Unattended work runs only from module loops: the issuer module's `auto-loop.sh` (auto-issue when `auto_issue_days > 0`, independent of sync; auto-push only while sync is enabled) and the deployer's `sync-loop.sh` (only while sync is enabled). `rkp-mini-issuer` itself never schedules.
 
 Design records — read before changing the area, and treat their decisions as settled:
 
@@ -58,8 +58,9 @@ Exit contracts (`--json` prints exactly one envelope; only each `main` calls `pr
 
 Module scripts (`/system/bin/sh`):
 
-- Both modules: `customize.sh` and `service.sh` stop when the legacy same-role module (`rkp_mini` / `rkp_sync`) exists under `/data/adb/modules` or `modules_update`. `service.sh` starts `sync-loop.sh` only when `rkp-mini-sync check-auto` passes. `uninstall.sh` keeps the data root. Loops hold a pid file (`<root>/tmp/sync-loop.pid`) and log to `<root>/logs/sync.log` (256 KiB, one `.1` generation).
-- Issuer: `action.sh` = foreground `issue --acknowledge`; loop ≈12 h: optional `issue --if-expiring-days <auto_issue_days>`, then `push --auto`.
+- Both modules: `customize.sh` and `service.sh` stop when the legacy same-role module (`rkp_mini` / `rkp_sync`) exists under `/data/adb/modules` or `modules_update`. `uninstall.sh` keeps the data root. Loops hold a pid file in `<root>/tmp/` and log under `<root>/logs/` (256 KiB, one `.1` generation).
+- Issuer: `action.sh` = foreground `issue --acknowledge`. `service.sh` always starts `auto-loop.sh` (pid `tmp/auto-loop.pid`, log `logs/auto.log`); it exits by itself on a tick where `auto_issue_days <= 0` and `check-auto` fails, and the WebUI restarts it when either job is enabled. It wakes every 30 min and compares wall-clock time with `tmp/auto-loop.next` (sleep does not count suspend time); a due round (≈12 h) runs `issue --if-expiring-days N` under the WebUI's `tmp/issue.lock` (held → skipped), writing `tmp/auto-issue.last.{at,json,err}` then `.code` last, then `push --auto` when `check-auto` passes. `rkp-mini-sync status` `loop_running` on the sender means this loop is alive.
+- Deployer: `service.sh` starts `sync-loop.sh` (pid `tmp/sync-loop.pid`, log `logs/sync.log`) only when `rkp-mini-sync check-auto` passes.
 - Deployer: `action.sh` = `exec sh run.sh action`; loop ≈8 h: `sh run.sh auto`, then appends each step sidecar to the log.
 - `webroot/runner/{issue,sync}.sh` are the WebUI's background tasks: `mkdir` lock `<root>/tmp/<name>.lock` (contention → exit 9), outputs `<name>.last.{json,err,op}`, `<name>.last.code` written last. Issuer `sync.sh` accepts `push`/`rotate`; deployer `sync.sh` accepts `fetch [sha]`/`run`. Roles are fixed per script.
 

@@ -18,9 +18,11 @@ import { deployErrorText } from './display'
 
 export const DEPLOY_BIN = `${resolveModuleDir()}/bin/rkp-mini-deployer`
 /** The deployer only ever reads and writes the receiver's configuration. */
-export const DEPLOY_CONFIG = `${appConfig.dataRoot}/config.toml`
+export const DEPLOY_DATA = appConfig.dataRoot
+export const DEPLOY_CONFIG = `${DEPLOY_DATA}/config.toml`
+const DEPLOY_MODULE_DIR = resolveModuleDir()
 
-for (const p of [DEPLOY_BIN, DEPLOY_CONFIG]) {
+for (const p of [DEPLOY_BIN, DEPLOY_CONFIG, DEPLOY_MODULE_DIR]) {
   if (!SAFE_PATH.test(p)) throw new Error(`unsafe path: ${p}`)
 }
 
@@ -43,6 +45,41 @@ async function deployData<T>(args: string): Promise<T> {
     throw new CommandError('exit', deployErrorText(envelope.error), JSON.stringify(envelope.error))
   }
   return envelope.data
+}
+
+/** Plain exec for the read-only facts on the 更多 tab (no `--json`). */
+async function run(command: string): Promise<{ stdout: string; stderr: string; errno: number }> {
+  try {
+    return await exec(command)
+  } catch (e) {
+    throw new CommandError('exec', e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** `rkp-mini-deployer --version` prints `rkp-mini-deployer 0.1.0`; keep the version only. */
+export async function readDeployVersion(): Promise<string> {
+  const r = await run(`'${DEPLOY_BIN}' --version`)
+  if (r.errno !== 0) throw new CommandError('exit', `退出码 ${r.errno}`, r.stderr.trim())
+  return r.stdout.trim().split(/\s+/).pop() ?? ''
+}
+
+export interface ModuleProp {
+  version: string
+  versionCode: string
+}
+
+export async function readModuleProp(): Promise<ModuleProp> {
+  const r = await run(`cat '${DEPLOY_MODULE_DIR}/module.prop'`)
+  if (r.errno !== 0) throw new CommandError('exit', `读取失败（${r.errno}）`, r.stderr.trim())
+  const get = (key: string): string => new RegExp(`^${key}=(.*)$`, 'm').exec(r.stdout)?.[1]?.trim() ?? '?'
+  return { version: get('version'), versionCode: get('versionCode') }
+}
+
+/** Read-only config.toml text (the 更多 tab never edits it). */
+export async function readDeployConfig(): Promise<string> {
+  const r = await run(`cat '${DEPLOY_CONFIG}'`)
+  if (r.errno !== 0) throw new CommandError('exit', '配置文件不存在', r.stderr.trim())
+  return r.stdout
 }
 
 /** Read-only deployment plan (`rkp-mini-deployer --json plan`). */
@@ -75,6 +112,21 @@ export function deployApply(approval: ApplyApproval = {}): Promise<SyncCall<Depl
 
 export type BuiltinTarget = 'omk' | 'teesim' | 'tricky_store'
 
+/** TEESimulator's watcher only reloads `*.xml` files directly inside this directory. */
+const TEESIM_DIR = '/data/adb/teesim'
+/** A plain `.xml` file name: no slash, no leading dot. */
+const TEESIM_FILE = /^(?!\.)[A-Za-z0-9._-]{1,64}\.xml$/
+
+export function isTeesimFileName(name: string): boolean {
+  return TEESIM_FILE.test(name)
+}
+
+/** File name of a configured teesim target path, or `—` when it has none. */
+export function teesimFileName(path: string | null | undefined): string {
+  if (!path || !path.startsWith(`${TEESIM_DIR}/`)) return '—'
+  return path.slice(TEESIM_DIR.length + 1)
+}
+
 /** The root module that reads a builtin target's keybox. */
 export interface TargetModule {
   /** Directory name under /data/adb/modules. */
@@ -102,8 +154,27 @@ export async function readBuiltinTargets(): Promise<BuiltinTargetInfo[]> {
   return data.builtin as BuiltinTargetInfo[]
 }
 
-export function addTarget(id: BuiltinTarget): Promise<unknown> {
-  return deployData(`add-target ${id}`)
+/**
+ * `add-target`; only `teesim` takes a file name, and it must be a plain `.xml`
+ * name: the runtime accepts nothing outside `/data/adb/teesim` (its watcher
+ * only reloads `*.xml` there). Without a name the default keybox.xml is used.
+ */
+export function addTarget(id: BuiltinTarget, fileName?: string): Promise<unknown> {
+  if (id !== 'teesim' || fileName === undefined) return deployData(`add-target ${id}`)
+  if (!isTeesimFileName(fileName)) {
+    throw new CommandError('exec', '文件名必须是 /data/adb/teesim 下的 .xml 文件名')
+  }
+  return deployData(`add-target teesim --path ${shq(`${TEESIM_DIR}/${fileName}`)}`)
+}
+
+/**
+ * Did this report actually write a keybox? An idempotent `same` pass reports
+ * `deployed: true` too, but only rewrites missing/damaged files — a target
+ * whose content already matched comes back with reload_status `skipped`.
+ */
+export function reportWrote(report: DeployReport): boolean {
+  const ok = report.targets.filter((t) => t.ok)
+  return report.deployed && !report.pending && ok.length > 0 && ok.some((t) => t.reload_status !== 'skipped')
 }
 
 export function removeTarget(id: string): Promise<unknown> {

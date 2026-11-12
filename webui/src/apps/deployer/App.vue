@@ -1,36 +1,44 @@
 <script setup lang="ts">
-// Deployer page (rkp_mini_deployer module). One page + bottom sheets:
-// KernelSU's WebView has no SPA history, so every flow stays on this page.
+// Deployer page (rkp_mini_deployer module): bottom-navigation tabs
+// 状态 / 部署 / 更多. The active tab is plain state, never history: the
+// WebView's back key must keep closing the page (design §2.3).
 // All sync commands go through shared/lib/sync.ts, local deployment through
 // lib/deploy.ts and the combined run through lib/run.ts; secrets only through
-// SecretSheet.
+// SecretSheet, and no keybox body or secret is ever rendered.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   MiuixButton,
   MiuixCard,
   MiuixIcon,
-  MiuixIconButton,
+  MiuixNavigationBar,
   MiuixScrollArea,
+  MiuixSmallTitle,
   MiuixSnackbarHost,
   MiuixText,
   MiuixTopAppBar,
   showSnackbar,
 } from 'miuix-vue'
-import { Refresh, Settings } from 'miuix-vue/icons'
-import ReceiverStatusCard from './components/ReceiverStatusCard.vue'
+import { Download, Info, More } from 'miuix-vue/icons'
+import DeployedCard from './components/DeployedCard.vue'
+import DeployedDetailSheet from './components/DeployedDetailSheet.vue'
+import AutoStatusRow from './components/AutoStatusRow.vue'
+import ModulesCard from './components/ModulesCard.vue'
+import DeployStatusCard from './components/DeployStatusCard.vue'
+import DeploySettingsSheet from './components/DeploySettingsSheet.vue'
+import MoreTab from './components/MoreTab.vue'
 import ImportSheet from './components/ImportSheet.vue'
 import TofuSheet from './components/TofuSheet.vue'
 import DeploySheet from './components/DeploySheet.vue'
-import TargetsSheet from './components/TargetsSheet.vue'
-import ReceiverSettingsSheet from './components/ReceiverSettingsSheet.vue'
 import RunResultSheet from './components/RunResultSheet.vue'
+import LogsSheet from '../../shared/components/LogsSheet.vue'
 import RiskSheet from '../../shared/components/RiskSheet.vue'
 import SecretSheet from '../../shared/components/SecretSheet.vue'
 import { bridgeAvailable } from '../../shared/lib/ksu'
 import { nowUnix } from '../../shared/lib/format'
 import { initTheme } from '../../shared/lib/theme'
-import { errorMessage, isTofuFacts } from './lib/display'
-import { readRunSteps, type RunSteps } from './lib/run'
+import { RECEIVER_CHECK_LABEL, errorMessage, isTofuFacts } from './lib/display'
+import { readBuiltinTargets, type BuiltinTargetInfo } from './lib/deploy'
+import { readRunSteps, runDeployOutcome, runOutcomeLabel, runRebootHint, type RunDeployOutcome, type RunSteps } from './lib/run'
 import {
   readSyncConfig,
   readSyncStatus,
@@ -39,9 +47,11 @@ import {
   useSyncRunner,
   type FetchResult,
   type ImportResult,
+  type RemoteCheck,
   type SecretKind,
   type SyncConfig,
   type SyncEnvelope,
+  type SyncOp,
   type SyncStatus,
   type SyncTaskResult,
   type TofuFacts,
@@ -53,6 +63,9 @@ const available = bridgeAvailable()
 
 const status = ref<SyncStatus | null>(null)
 const config = ref<SyncConfig | null>(null)
+/** Builtin target module detection (`rkp-mini-deployer targets`). */
+const builtins = ref<BuiltinTargetInfo[] | null>(null)
+const builtinError = ref<string | null>(null)
 const loading = ref(false)
 const statusError = ref<string | null>(null)
 const notInitialized = ref(false)
@@ -60,31 +73,41 @@ const notInitialized = ref(false)
 const now = ref(nowUnix())
 let clock: number | undefined
 
+// Bottom navigation: one scroll area per tab (`v-show`) keeps each tab's
+// scroll position; the tab itself is never URL state.
+const TABS = [{ label: '状态' }, { label: '部署' }, { label: '更多' }]
+const TAB_ICONS = [Info, Download, More]
+const MORE_TAB = 2
+const tab = ref(0)
+
 const importOpen = ref(false)
 const settingsOpen = ref(false)
-const targetsOpen = ref(false)
 const deployOpen = ref(false)
 const runOpen = ref(false)
 const riskOpen = ref(false)
 const secretOpen = ref(false)
 const secretKind = ref<SecretKind>('age')
+const detailOpen = ref(false)
+const logsOpen = ref(false)
 const tofuOpen = ref(false)
 const tofuFacts = ref<TofuFacts | null>(null)
 const tofuMismatch = ref(false)
+/** The next successful fetch was started from TofuSheet: open DeploySheet after it. */
+const tofuAccepted = ref(false)
 const runSteps = ref<RunSteps | null>(null)
-/** A combined-run snapshot exists on disk (it survives closing the WebUI). */
-const hasLastRun = ref(false)
+/** Deploy outcome of that run: drives the completion text and the reboot hint. */
+const runOutcome = ref<RunDeployOutcome | null>(null)
 
-const secretTitle = computed(() => (secretKind.value === 'age' ? 'age 口令' : 'WebDAV 应用密码'))
+const secretTitle = computed(() => (secretKind.value === 'age' ? '设置密码' : '设置 WebDAV 密码'))
 const secretHint = computed(() =>
   secretKind.value === 'age'
-    ? '发送端通过另一个安全渠道告诉你的 age 口令；保存到 0600 文件后后台循环才能自动拉取。每个同步流应使用唯一口令。'
+    ? '发送端设置的密码，用来解密云端储存的 Keybox；请通过安全渠道获得，每个同步流使用独立密码。'
     : 'WebDAV 应用密码（不是账号登录密码），与链接中的用户名配套；只保存在本机 0600 文件中。',
 )
 
 async function load(): Promise<void> {
   loading.value = true
-  const [s, c] = await Promise.allSettled([readSyncStatus(), readSyncConfig()])
+  const [s, c, b] = await Promise.allSettled([readSyncStatus(), readSyncConfig(), readBuiltinTargets()])
   if (s.status === 'fulfilled') {
     const env = s.value.envelope
     if (env.ok) {
@@ -104,6 +127,13 @@ async function load(): Promise<void> {
     statusError.value = errorMessage(s.reason)
   }
   config.value = c.status === 'fulfilled' ? c.value : null
+  if (b.status === 'fulfilled') {
+    builtins.value = b.value
+    builtinError.value = null
+  } else {
+    builtins.value = null
+    builtinError.value = errorMessage(b.reason)
+  }
   loading.value = false
   now.value = nowUnix()
 }
@@ -115,34 +145,21 @@ const runner = useSyncRunner(async (result) => {
   await handleTask(result)
 })
 
-/** Combined run publishes no envelope: read the published per-step snapshot. */
-async function openRunResult(): Promise<void> {
+/** Op started from this page (null after a reload mid-task): only for button labels. */
+const startedOp = ref<SyncOp | null>(null)
+
+async function collectRunSteps(): Promise<void> {
   try {
     runSteps.value = await readRunSteps()
-    hasLastRun.value = true
-    runOpen.value = true
-  } catch (e) {
-    // A single-step fetch or a malformed snapshot must not reuse older steps.
-    runSteps.value = null
-    hasLastRun.value = false
-    void showSnackbar({ message: errorMessage(e) })
-  }
-}
-
-/**
- * Offer the last combined result after reopening the page: the snapshot is on
- * disk, but the sheet is not forced open again for a result already seen.
- */
-async function probeLastRun(): Promise<void> {
-  try {
-    await readRunSteps()
-    hasLastRun.value = true
+    runOutcome.value = runDeployOutcome(runSteps.value)
   } catch {
-    hasLastRun.value = false
+    // Not a combined run (or a stale single-step snapshot): never reuse older steps.
+    runSteps.value = null
+    runOutcome.value = null
   }
 }
 
-/** TOFU facts travel in the fetch step's error data, as for a single fetch. */
+/** TOFU facts travel in the fetch step's error `data`, as for a single fetch. */
 function showTofuFrom(env: SyncEnvelope<unknown> | null): boolean {
   if (!env || env.ok) return false
   if (env.error.code === 'first_import_needs_confirmation') {
@@ -166,11 +183,19 @@ function showTofuFrom(env: SyncEnvelope<unknown> | null): boolean {
 async function handleTask(result: SyncTaskResult): Promise<void> {
   await load()
   // Branch on the operation before dereferencing any envelope: a combined run
-  // never publishes one.
+  // publishes per-step snapshots, never its own envelope.
   if (result.op === 'run') {
-    await openRunResult()
-    if (runSteps.value) {
-      showTofuFrom(runSteps.value.fetch.envelope as SyncEnvelope<unknown> | null)
+    await collectRunSteps()
+    const fetchEnv = (runSteps.value?.fetch.envelope ?? null) as SyncEnvelope<unknown> | null
+    if (showTofuFrom(fetchEnv)) return
+    const outcome = runOutcome.value
+    if (result.code !== 0) {
+      void showSnackbar({ message: '任务失败，详情见最近一次组合结果' })
+    } else if (outcome) {
+      const hint = runRebootHint(outcome)
+      void showSnackbar({ message: `${runOutcomeLabel(outcome)}${hint ? `，${hint}` : ''}` })
+    } else {
+      void showSnackbar({ message: '运行完成' })
     }
     return
   }
@@ -184,30 +209,34 @@ async function handleTask(result: SyncTaskResult): Promise<void> {
     void showSnackbar({ message: syncErrorText(env.error) })
     return
   }
+  if (result.op === 'check') {
+    const data = env.data as RemoteCheck
+    void showSnackbar({ message: `云端检查：${RECEIVER_CHECK_LABEL[data.outcome] ?? data.outcome}` })
+    return
+  }
   const data = env.data as FetchResult
+  if (tofuAccepted.value) {
+    tofuAccepted.value = false
+    void showSnackbar({ message: `已拉取第 ${data.seq} 版，请确认首次部署` })
+    deployOpen.value = true
+    return
+  }
   void showSnackbar({
-    message: data.changed ? `已拉取 seq ${data.seq}，等待部署` : `远端没有新版本（seq ${data.seq}）`,
+    message: data.changed ? `已拉取第 ${data.seq} 版，等待部署` : `云端没有新版本（第 ${data.seq} 版）`,
   })
 }
 
-const actionBlocked = computed(() => {
-  if (loading.value) return null
-  if (!status.value) return notInitialized.value ? '请先导入同步链接' : '需要先成功读取同步状态'
-  if (!status.value.stream_id) return '请先导入同步链接'
-  if (runner.busy.value) return null
-  if (!status.value.enabled) return '同步未启用：请先完成风险确认并启用'
-  if (!status.value.risk_ack_current) return '风险说明已更新，需要重新确认'
-  return null
-})
-
-const canFetch = computed(() => actionBlocked.value === null && !runner.busy.value && !!status.value)
-const canRun = computed(() => canFetch.value)
-const canDeploy = computed(() => canFetch.value && !!status.value?.staged)
-const noStaged = computed(() => canFetch.value && !status.value?.staged)
-
-const deployedTargets = computed(() => status.value?.deploy_state?.targets ?? [])
+async function startTask(op: SyncOp): Promise<void> {
+  startedOp.value = op
+  try {
+    await runner.start(syncTaskArgs(op))
+  } catch (e) {
+    void showSnackbar({ message: errorMessage(e) })
+  }
+}
 
 async function startFetch(acceptFirst?: string): Promise<void> {
+  startedOp.value = 'fetch'
   try {
     await runner.start(syncTaskArgs('fetch', acceptFirst))
   } catch (e) {
@@ -215,19 +244,12 @@ async function startFetch(acceptFirst?: string): Promise<void> {
   }
 }
 
-async function startRun(): Promise<void> {
-  try {
-    await runner.start(syncTaskArgs('run'))
-  } catch (e) {
-    void showSnackbar({ message: errorMessage(e) })
-  }
-}
-
-function openRisk(): void {
-  importOpen.value = false
-  settingsOpen.value = false
-  riskOpen.value = true
-}
+const canRunTask = computed(
+  () => !!status.value?.stream_id && !loading.value && !runner.busy.value && runner.phase.value !== 'stale',
+)
+/** `启用` replaces 立即部署 until the stream is enabled with the current risk text. */
+const needsEnable = computed(() => !!status.value && (!status.value.enabled || !status.value.risk_ack_current))
+const canDeploy = computed(() => canRunTask.value && !!status.value?.enabled && !!status.value.risk_ack_current)
 
 function openImport(): void {
   settingsOpen.value = false
@@ -236,8 +258,6 @@ function openImport(): void {
 
 function openSecret(kind: SecretKind): void {
   secretKind.value = kind
-  importOpen.value = false
-  settingsOpen.value = false
   secretOpen.value = true
 }
 
@@ -247,6 +267,7 @@ function onImported(_result: ImportResult): void {
 
 function onTofuAccept(plaintextSha256: string): void {
   tofuOpen.value = false
+  tofuAccepted.value = true
   void startFetch(plaintextSha256)
 }
 
@@ -259,8 +280,8 @@ onMounted(async () => {
   clock = window.setInterval(() => (now.value = nowUnix()), 60_000)
   if (!available) return
   await runner.check()
-  if (!status.value) await load()
-  await probeLastRun()
+  await load()
+  await collectRunSteps()
 })
 
 onBeforeUnmount(() => clearInterval(clock))
@@ -268,20 +289,11 @@ onBeforeUnmount(() => clearInterval(clock))
 
 <template>
   <div class="app">
-    <MiuixTopAppBar title="RKP-Mini · 部署端">
-      <template #actions>
-        <MiuixIconButton aria-label="刷新状态" :disabled="loading" @click="load">
-          <MiuixIcon :icon="Refresh" />
-        </MiuixIconButton>
-        <MiuixIconButton aria-label="设置" @click="settingsOpen = true">
-          <MiuixIcon :icon="Settings" />
-        </MiuixIconButton>
-      </template>
-    </MiuixTopAppBar>
+    <MiuixTopAppBar title="RKP-Mini · 部署端" />
 
-    <MiuixScrollArea class="app__scroll">
+    <MiuixScrollArea v-if="!available" v-show="tab !== MORE_TAB" class="app__scroll">
       <main class="page">
-        <MiuixCard v-if="!available">
+        <MiuixCard>
           <div class="notice">
             <MiuixText type="title4" weight="medium" color="var(--m-color-error)">未检测到 KernelSU 接口</MiuixText>
             <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
@@ -289,92 +301,101 @@ onBeforeUnmount(() => clearInterval(clock))
             </MiuixText>
           </div>
         </MiuixCard>
+      </main>
+    </MiuixScrollArea>
 
-        <template v-else>
-          <ReceiverStatusCard
+    <!-- One scroll area per tab (v-show) so each keeps its own scroll position. -->
+    <template v-else>
+      <MiuixScrollArea v-show="tab === 0" class="app__scroll">
+        <main class="page">
+          <DeployedCard
+            :status="status"
+            :not-initialized="notInitialized"
+            :loading="loading"
+            :error="statusError"
+            :runner="runner"
+            :busy-op="startedOp"
+            :now="now"
+            @detail="detailOpen = true"
+            @refresh="load"
+          />
+          <AutoStatusRow
             :status="status"
             :config="config"
             :loading="loading"
             :error="statusError"
-            :not-initialized="notInitialized"
-            :busy="runner.busy.value"
-            :now="now"
-            @import="openImport"
-            @risk="openRisk"
-            @deploy="deployOpen = true"
-            @retry="load"
-            @secret="openSecret"
+            @open="tab = $event"
           />
+          <MiuixSmallTitle text="已安装模块" />
+          <ModulesCard :builtins="builtins" :error="builtinError" :status="status" :loading="loading" />
+        </main>
+      </MiuixScrollArea>
 
-          <MiuixCard v-if="status?.stream_id">
-            <div class="actions-card">
-              <MiuixText type="title4" weight="medium">同步操作</MiuixText>
-              <div class="actions">
-                <MiuixButton type="primary" :disabled="!canFetch" @click="startFetch()">
-                  {{ runner.busy.value ? '任务进行中…' : '拉取' }}
-                </MiuixButton>
-                <MiuixButton :disabled="!canDeploy" @click="deployOpen = true">部署</MiuixButton>
-                <MiuixButton :disabled="!canRun" @click="startRun">立即运行（拉取并部署）</MiuixButton>
-                <MiuixButton v-if="hasLastRun" :disabled="runner.busy.value" @click="openRunResult()">
-                  查看最近一次组合结果
-                </MiuixButton>
-                <MiuixButton :disabled="runner.busy.value || loading" @click="targetsOpen = true">部署目标</MiuixButton>
-              </div>
-              <MiuixText v-if="actionBlocked" type="footnote1" color="var(--m-color-error)">
-                {{ actionBlocked }}
-              </MiuixText>
-              <MiuixText v-else-if="noStaged" type="footnote1" color="var(--app-warning)">
-                部署需要先“拉取”并验证一份 keybox。
-              </MiuixText>
-              <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-                长任务在后台运行，离开页面不会中断；完成后自动刷新状态。首次拉取与首次部署都需要显式核对。
-              </MiuixText>
-            </div>
-          </MiuixCard>
-
+      <MiuixScrollArea v-show="tab === 1" class="app__scroll">
+        <main class="page">
+          <DeployStatusCard
+            :status="status"
+            :not-initialized="notInitialized"
+            :loading="loading"
+            :error="statusError"
+            :config="config"
+            :runner="runner"
+            :busy-op="startedOp"
+            :now="now"
+            :can-refresh="canRunTask"
+            :run-outcome="runOutcome"
+            @import="openImport"
+            @check="startTask('check')"
+            @run="startTask('run')"
+            @deploy="deployOpen = true"
+            @risk="riskOpen = true"
+            @secret="openSecret"
+            @result="runOpen = true"
+          />
+          <div v-if="status?.stream_id" class="actions">
+            <MiuixButton v-if="needsEnable" type="primary" @click="riskOpen = true">启用</MiuixButton>
+            <MiuixButton v-else type="primary" :disabled="!canDeploy" @click="startTask('run')">立即部署</MiuixButton>
+            <MiuixButton :disabled="runner.busy.value" @click="settingsOpen = true">部署设置</MiuixButton>
+          </div>
           <MiuixText class="footnote" type="footnote1" color="var(--m-color-on-surface-variant-actions)" align="center">
             跨设备使用接收到的 keybox 属于 keybox 克隆/冒充，不是合法的 RKP provisioning；同步只做结构与密钥匹配校验，未验证证书签名、根信任与吊销。
           </MiuixText>
-        </template>
+        </main>
+      </MiuixScrollArea>
+    </template>
+
+    <MiuixScrollArea v-show="tab === MORE_TAB" class="app__scroll">
+      <main class="page">
+        <MoreTab :active="tab === MORE_TAB" @logs="logsOpen = true" />
       </main>
     </MiuixScrollArea>
+
+    <MiuixNavigationBar :model-value="tab" :items="TABS" @update:model-value="tab = $event">
+      <template #icon="{ index }">
+        <MiuixIcon :icon="TAB_ICONS[index]" />
+      </template>
+    </MiuixNavigationBar>
 
     <MiuixSnackbarHost />
 
     <template v-if="available">
-      <ImportSheet
-        v-model="importOpen"
-        @imported="onImported"
-        @risk="openRisk"
-        @secret="openSecret"
-      />
-      <TofuSheet
-        v-model="tofuOpen"
-        :facts="tofuFacts"
-        :mismatch="tofuMismatch"
-        @accept="onTofuAccept"
-        @retry="onTofuRetry"
-      />
+      <ImportSheet v-model="importOpen" @imported="onImported" @risk="riskOpen = true" @secret="openSecret" />
+      <TofuSheet v-model="tofuOpen" :facts="tofuFacts" :mismatch="tofuMismatch" @accept="onTofuAccept" @retry="onTofuRetry" />
       <DeploySheet v-model="deployOpen" @changed="load" />
-      <TargetsSheet v-model="targetsOpen" :deployed="deployedTargets" @changed="load" />
-      <ReceiverSettingsSheet
+      <DeploySettingsSheet
         v-model="settingsOpen"
         :status="status"
-        @refresh="load"
-        @risk="openRisk"
-        @import="openImport"
+        :busy="runner.busy.value"
         @secret="openSecret"
+        @import="openImport"
+        @changed="load"
       />
+      <DeployedDetailSheet v-model="detailOpen" :status="status" :now="now" />
       <RunResultSheet v-model="runOpen" :steps="runSteps" />
       <RiskSheet v-model="riskOpen" @enabled="load" />
-      <SecretSheet
-        v-model="secretOpen"
-        :kind="secretKind"
-        :title="secretTitle"
-        :hint="secretHint"
-        @saved="load"
-      />
+      <SecretSheet v-model="secretOpen" :kind="secretKind" :title="secretTitle" :hint="secretHint" @saved="load" />
     </template>
+    <LogsSheet v-model="logsOpen" />
   </div>
 </template>
 
@@ -396,16 +417,14 @@ onBeforeUnmount(() => clearInterval(clock))
   flex-direction: column;
   gap: 12px;
 }
-.actions-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
+.page :deep(.m-small-title) {
+  padding: 4px 16px 0;
 }
 .actions {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  margin-top: 4px;
 }
 .notice {
   padding: 16px;
@@ -415,5 +434,9 @@ onBeforeUnmount(() => clearInterval(clock))
 }
 .footnote {
   padding: 4px 16px 0;
+}
+/* The snackbar host is teleported to <body> with bottom: 0; keep it above the navigation bar (64px items + 1px divider). */
+:global(.m-snackbar-host) {
+  bottom: 65px;
 }
 </style>

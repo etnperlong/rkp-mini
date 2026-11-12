@@ -21,7 +21,7 @@
 > - 签发端页面分为“状态 / 签发 / 同步 / 更多”四个 Tab，用 `MiuixNavigationBar` 固定在底部；当前 Tab 只是组件状态，
 >   不写 URL/历史，返回键仍直接关闭 WebUI。原设置弹层成为“更多”页（`MoreTab.vue`）。状态卡按 KernelSU Miuix 首页
 >   `StatusCard`（`HomeMiuix.kt`）着色：按状态染色的卡片底 + 右下角裁切的 110px Material Rounded 图标。
->   部署端仍是单页，后续按同一方式改造。
+>   部署端同样分为“状态 / 部署 / 更多”三个 Tab（见 §7.1 末尾）。
 > - 下文的 `rkp-mini` / `rkp-sync` 命令名、`dist/`、`dist-receiver/` 与 `rkp_mini`/`rkp_sync`
 >   模块 id 均为设计阶段的历史写法，按上面这段替换。
 
@@ -437,6 +437,25 @@ SenderSyncSheet：自动推送（`auto_push` 开关 + 最小剩余有效期）�
 日志统一在 LogsSheet（“更多 → 日志”，每次打开重新读取）：签发日志 `logs/issue-*.log`、后台日志 `logs/auto.log`
 （auto-loop.sh：自动签发 + 自动推送）、页面内存调试日志；同步设置弹层不再显示日志。
 结果弹层的“查看签发日志”直接打开 LogsSheet 并展开最新签发日志。
+
+部署端：同样的 Tab 外壳（`MiuixNavigationBar` 固定在底部，Tab 只是组件状态），三个 Tab，无顶栏按钮：
+
+```
+MiuixTopAppBar(title="RKP-Mini · 部署端")
+状态  DeployedCard「当前证书」（已部署 keybox：着色 + 角标图标 + 大号剩余天数；右上角刷新；点击 → DeployedDetailSheet）、
+      AutoStatusRow（自动拉取 / 自动部署，点击跳到“部署”）、ModulesCard（只列已安装的受支持模块：启停、是否部署目标、上次结果）
+部署  DeployStatusCard「远程部署」（存储方式 / 同步时间 / 自动部署；警告条可点：有新版本、待确认 → DeploySheet、
+      密码缺失、风险过期、上次错误；右上角 = runner `check`（check-remote，只检查不拉取）；上次任务在卡内）、
+      “立即部署”（runner `run` = fetch + apply --if-staged）或“启用”、“部署设置”
+更多  MoreTab：外观、日志（共享 LogsSheet：后台日志 logs/sync.log + 调试日志）、只读配置、关于
+```
+
+DeploySettingsSheet：自动部署（`auto_deploy` + 最短剩余有效期 + 身份变化策略 + 轮换提前天数）、部署目标（增删；只能添加已安装模块；
+TEESimulator 可指定 `/data/adb/teesim` 下的 `.xml` 文件名，默认 `keybox.xml`，改名 = remove-target + add-target --path）、
+云端存储（同步链接 → ImportSheet、WebDAV 密码、代理）、加密（“密码”）、其他（标签）、保存、危险区（移除已部署的 keybox =
+`rkp-mini-deployer remove --yes`；清除本地数据 = `forget --yes [--staging]`，同时清掉导入的链接）。页面不提供“禁用同步”。
+首次导入：`run`/`fetch` 报 `first_import_needs_confirmation` → TofuSheet → `fetch <sha>` 成功后直接打开 DeploySheet。
+手动部署成功显示“运行完成”；确有目标被写入时提示“建议重启手机以完全重新加载 keybox”，没有新版本时不提示。
 
 ### 7.2 组件映射（`miuix-vue` 已核对的导出名）
 

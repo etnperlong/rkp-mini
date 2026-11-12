@@ -6,12 +6,26 @@ import { daysLeft, formatDate, formatDateTime } from '../../../shared/lib/format
 import {
   syncCodeLabel,
   syncErrorText,
+  type CheckOutcome,
   type DeployPlan,
-  type SecretStatus,
   type SyncErrorInfo,
-  type TargetState,
   type TofuFacts,
 } from '../../../shared/lib/sync'
+
+// Qualcomm native RKP leaves last ≈12–14 days, so the display threshold stays
+// small (the issuer page uses the same 3 days).
+/** A deployed keybox counts as "expiring" from this many days left. */
+export const EXPIRING_DAYS = 3
+
+/** Receiver wording for the cached `check-remote` outcome. */
+export const RECEIVER_CHECK_LABEL: Record<CheckOutcome, string> = {
+  in_sync: '云端与本机一致',
+  remote_ahead: '云端有新版本',
+  remote_behind: '云端版本比本机验证的旧（拉取会被拒绝，需要发送端重新推送）',
+  diverged: '同一版本号的内容不一致',
+  missing: '云端没有同步文件',
+  error: '云端检查失败',
+}
 
 /** Codes only the local deployer binary can return. */
 const DEPLOY_CODE: Record<string, string> = {
@@ -61,41 +75,10 @@ export function leafLabel(notAfter: number | null | undefined, now: number): str
   return `${formatDate(notAfter)}（${days < 0 ? `已过期 ${-days} 天` : `剩余 ${days} 天`}）`
 }
 
-export function secretText(s: SecretStatus | undefined): string {
-  if (!s) return '不需要'
-  if (!s.present) return '缺失'
-  return s.ok ? `已设置（${s.mode ?? '0600'}）` : `权限异常（${s.mode ?? '未知'}）`
-}
-
-export function secretTone(s: SecretStatus | undefined): PillTone {
-  if (!s) return 'neutral'
-  if (!s.present) return 'error'
-  return s.ok ? 'ok' : 'warning'
-}
-
-export function targetText(t: TargetState | undefined): string {
-  if (!t || !t.deployed_sha256) return '尚未部署'
-  if (t.last_error) return `错误：${deployCodeLabel(t.last_error.code)}`
-  if (t.reload_status) return `已部署 · reload ${t.reload_status}`
-  return '已部署'
-}
-
-export function targetTone(t: TargetState | undefined): PillTone {
-  if (!t || !t.deployed_sha256) return 'neutral'
-  if (t.last_error) return 'error'
-  if (t.reload_status && t.reload_status !== 'ok') return 'warning'
-  return 'ok'
-}
-
 export function pendingTitle(reason: string): string {
   if (reason === 'first_deploy') return '首次部署待确认'
   if (reason === 'identity_change') return '身份变化待确认'
   return `待确认（${reason}）`
-}
-
-export function pendingDetail(reason: string): string {
-  if (reason === 'first_deploy') return '已验证的 keybox 尚未写入任何目标，需要你确认后才能部署。'
-  return '远端换了新的 RKP 身份，当前自动轮换策略不放行，需要你明确批准。'
 }
 
 const GATE_REASON: Record<string, string> = {

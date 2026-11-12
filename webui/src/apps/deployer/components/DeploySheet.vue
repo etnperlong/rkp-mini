@@ -11,6 +11,7 @@ import {
   MiuixIconButton,
   MiuixProgressIndicator,
   MiuixText,
+  showSnackbar,
 } from 'miuix-vue'
 import { Close } from 'miuix-vue/icons'
 import StatusPill from '../../../shared/components/StatusPill.vue'
@@ -25,7 +26,7 @@ import {
   shortHash,
   stamp,
 } from '../lib/display'
-import { deployApply, readDeployPlan } from '../lib/deploy'
+import { deployApply, readDeployPlan, reportWrote } from '../lib/deploy'
 import { nowUnix } from '../../../shared/lib/format'
 import {
   TARGET_LABEL,
@@ -142,7 +143,15 @@ async function apply(): Promise<void> {
           : {}
     const call = await deployApply(approval)
     if (call.envelope.ok) {
-      report.value = call.envelope.data
+      const result = call.envelope.data
+      report.value = result
+      void showSnackbar({
+        message: reportWrote(result)
+          ? '运行完成，建议重启手机以完全重新加载 keybox'
+          : result.pending
+            ? '运行完成，新版本等待确认后部署'
+            : '运行完成，没有需要部署的新版本',
+      })
       emit('changed')
       return
     }

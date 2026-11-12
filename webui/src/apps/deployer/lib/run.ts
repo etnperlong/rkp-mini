@@ -19,6 +19,7 @@ import type {
   SyncEnvelope,
   TofuFacts,
 } from '../../../shared/lib/sync'
+import { reportWrote } from './deploy'
 
 export type DeploySkip = 'nothing_staged' | 'auto_deploy_false'
 export type DeployOutcome = DeployReport | DeployPlan | { skipped: DeploySkip }
@@ -131,4 +132,63 @@ export async function readRunSteps(): Promise<RunSteps> {
     },
     stderr: sections[7],
   }
+}
+
+// ---- Outcome ---------------------------------------------------------------------
+
+/** What a combined run did to the targets (a failed step wins). */
+export type RunDeployOutcome =
+  | { kind: 'written' }
+  | { kind: 'unchanged' }
+  | { kind: 'pending' }
+  | { kind: 'skipped'; reason: DeploySkip }
+  | { kind: 'failed' }
+
+export function isDeploySkipped(value: unknown): value is { skipped: DeploySkip } {
+  return typeof value === 'object' && value !== null && 'skipped' in value
+}
+
+export function isDeployReport(value: unknown): value is DeployReport {
+  return typeof value === 'object' && value !== null && 'deployed' in value && 'targets' in value
+}
+
+/**
+ * Derive the visible outcome from the published deploy step: skip and pending
+ * mean nothing was written; a report whose successful targets all report
+ * `reload_status: skipped` is the idempotent pass (nothing new on disk).
+ */
+export function runDeployOutcome(steps: RunSteps): RunDeployOutcome {
+  const env = steps.deploy.envelope
+  if (!env || !env.ok) return { kind: 'failed' }
+  const data = env.data
+  if (isDeploySkipped(data)) return { kind: 'skipped', reason: data.skipped }
+  if (isDeployReport(data)) {
+    if (data.pending) return { kind: 'pending' }
+    if (reportWrote(data)) return { kind: 'written' }
+    return data.deployed ? { kind: 'unchanged' } : { kind: 'failed' }
+  }
+  return { kind: 'failed' }
+}
+
+/** One line for the snackbar, the 部署 card task line and the result sheet. */
+export function runOutcomeLabel(outcome: RunDeployOutcome): string {
+  switch (outcome.kind) {
+    case 'written':
+      return '运行完成'
+    case 'unchanged':
+      return '运行完成，没有需要部署的新版本'
+    case 'pending':
+      return '运行完成，新版本等待确认后部署'
+    case 'skipped':
+      return outcome.reason === 'auto_deploy_false'
+        ? '运行完成，自动部署已关闭（auto_deploy=false）'
+        : '运行完成，没有已验证的 keybox'
+    case 'failed':
+      return '运行失败，详情见最近一次组合结果'
+  }
+}
+
+/** Shown only when a keybox actually reached a target. */
+export function runRebootHint(outcome: RunDeployOutcome): string | null {
+  return outcome.kind === 'written' ? '建议重启手机以完全重新加载 keybox' : null
 }

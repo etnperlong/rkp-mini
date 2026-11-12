@@ -131,7 +131,7 @@ const webdavUser = computed(() => {
 
     <div class="sheet-body">
       <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-        粘贴发送端分享的 rkpsync:// 链接或其 JSON。链接只包含存储位置，不包含 age 口令；口令另行设置。
+        粘贴发送端分享的 rkpsync:// 链接或其 JSON。链接只包含存储位置，不包含密码；密码另行设置。
       </MiuixText>
 
       <div class="sheet-group">
@@ -176,7 +176,7 @@ const webdavUser = computed(() => {
 
           <div v-if="preview.blocked" class="banner banner--error">
             <MiuixText type="body2" color="var(--m-color-error)">
-              本地已跟随另一个同步流并验证到 seq {{ preview.verified_seq ?? 0 }}，不能直接导入。请先在设置中“忘记同步数据”后重试。
+              本地已跟随另一个同步流并验证到 seq {{ preview.verified_seq ?? 0 }}，不能直接导入。请先在部署设置中“清除本地数据”后重试。
             </MiuixText>
           </div>
           <div v-else-if="preview.stream_change" class="banner banner--warn">
@@ -198,7 +198,7 @@ const webdavUser = computed(() => {
             {{ applying ? '导入中…' : '确认导入' }}
           </MiuixButton>
           <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-            导入只保存位置信息；还需要风险确认、age 口令，并在“拉取”里完成首次 TOFU 核对后才会有 keybox。
+            导入只保存位置信息；还需要风险确认与密码，并在“部署”页完成首次 TOFU 核对后才会有 keybox。
           </MiuixText>
         </div>
       </template>
@@ -212,12 +212,12 @@ const webdavUser = computed(() => {
         <div class="sheet-group">
           <MiuixButton v-if="!result.enabled" type="primary" @click="emit('risk')">接受风险并启用同步</MiuixButton>
           <MiuixButton :type="result.enabled ? 'primary' : 'default'" @click="emit('secret', 'age')">
-            设置 / 更换 age 口令
+            设置 / 更换密码
           </MiuixButton>
           <MiuixButton v-if="webdavUser" @click="emit('secret', 'webdav-password')">设置 WebDAV 应用密码</MiuixButton>
         </div>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          age 口令必须通过另一个安全渠道从发送端获得；不要把它放进链接、二维码或聊天记录。
+          密码必须通过另一个安全渠道从发送端获得；不要把它放进链接、二维码或聊天记录。
         </MiuixText>
         <MiuixButton @click="open = false">完成</MiuixButton>
       </template>

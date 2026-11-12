@@ -7,9 +7,13 @@
 // target report a write failure; `omk_incompatible` makes the omk target report
 // `omk_incompatible` (plan warns for every gate) while the others succeed, and
 // behaves like `ok` when no omk target is configured.
-// Combined run (&run=): ok | fetch_fail | missing_envelope | skipped | stale
+// Combined run (&run=): ok | fetch_fail | missing_envelope | skipped | stale | noop
+//   (`noop` = idempotent pass: the deploy step reports every target as already
+//    matching with reload_status `skipped`, so nothing new was deployed)
 // Installed target modules (&modules=): comma list of omk | teesim | tricky_store,
 //   each optionally `:disabled`; `none`; `fail` (detection error). Default omk,tricky_store.
+// Cached remote check (&remote=): none | in_sync | ahead | behind | diverged | missing | error
+//   (`none` = never checked; its `check` task reports in_sync).
 //
 // Sample import links (also accepted as their JSON):
 //   rkpsync://v1/import?p=eyJ2IjoxLCJwcm92aWRlciI6Imdpc3QiLCJ1cmwiOiJodHRwczovL2dpc3QuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2V2YW5zL2FiYzEyMy9yYXcvcmtwLXN5bmMuYWdlIiwiZ2lzdF9pZCI6ImFiYzEyMyIsImZpbGVuYW1lIjoicmtwLXN5bmMuYWdlIiwic3RyZWFtX2lkIjoic3RfZGVtb19yZWNlaXZlciIsImxhYmVsIjoicGhvbmUtYSIsImZvcm1hdCI6ImFnZS1hcm1vciJ9
@@ -20,6 +24,7 @@
 import type { ExecResult } from '../../../shared/lib/ksu'
 import { nowUnix } from '../../../shared/lib/format'
 import type {
+  CheckOutcome,
   DeployPlan,
   DeployReport,
   DeployState,
@@ -27,10 +32,13 @@ import type {
   ImportResult,
   LocationInfo,
   Pending,
+  RemoteCheck,
+  RemoteFact,
   RiskStatement,
   Staged,
   SyncConfig,
   SyncEnvelope,
+  SyncErrorInfo,
   SyncState,
   SyncStatus,
   TargetReport,
@@ -145,6 +153,8 @@ const deployMode = params.get('deploy') ?? 'ok'
 const runMode = params.get('run') ?? 'ok'
 /** Which builtin-target modules `targets` reports as installed. */
 const modulesMode = params.get('modules') ?? 'omk,tricky_store'
+/** Cached `check-remote` record: none | in_sync | ahead | behind | diverged | missing | error. */
+const remoteMode = params.get('remote') ?? 'none'
 
 const BUILTIN_TARGETS: BuiltinTargetInfo[] = [
   {
@@ -376,12 +386,76 @@ function buildStatus(): SyncStatus {
     password_mode: state.password_mode,
     secrets,
     sync_state: buildSyncState(),
-    remote_check: null,
+    remote_check: cachedRemoteCheck(),
     deploy_state: buildDeployState(),
     staged: buildStaged(),
     targets,
     identity_change_policy: state.identity_change_policy,
   }
+}
+
+/** `remote=` value → the outcome recorded in remote-check.json. */
+const REMOTE_OUTCOME: Record<string, CheckOutcome> = {
+  in_sync: 'in_sync',
+  behind: 'remote_behind',
+  ahead: 'remote_ahead',
+  diverged: 'diverged',
+  missing: 'missing',
+  error: 'error',
+}
+
+/** When a `check` task last ran in this preview; null = never (fresh `at` each status read). */
+let remoteCheckedAt: number | null = null
+
+/** `remote-check.json` for the `remote=` scenario at time `at`. */
+function buildRemoteCheck(at: number): RemoteCheck {
+  const outcome: CheckOutcome = remoteMode === 'none' ? 'in_sync' : (REMOTE_OUTCOME[remoteMode] ?? 'in_sync')
+  const local = state.sync_state
+  const deployed = state.deployed
+  let remote: RemoteFact | null = {
+    seq: deployed?.seq ?? local?.seq ?? 0,
+    plaintext_sha256: state.staged?.plaintext_sha256 ?? local?.plaintext_sha256 ?? null,
+    keybox_sha256: deployed?.keybox_sha256 ?? local?.keybox_sha256 ?? null,
+    device_id: local?.device_id ?? null,
+    issued_at: agoDays(2),
+    keybox_not_after: atDays(deployed?.leaf_not_after_days ?? 118),
+  }
+  let error: SyncErrorInfo | null = null
+
+  if (outcome === 'remote_ahead' && remote) {
+    remote = { ...remote, seq: remote.seq + 1, keybox_sha256: NEXT_KEYBOX }
+  } else if (outcome === 'remote_behind' && remote) {
+    remote = { ...remote, keybox_sha256: 'e7b9c1d3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9' }
+  } else if (outcome === 'diverged' && remote) {
+    remote = { ...remote, plaintext_sha256: '9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c' }
+  } else if (outcome === 'missing') {
+    remote = null
+  } else if (outcome === 'error') {
+    remote = null
+    error = { stage: 'remote', code: 'network', message: 'mock: remote unavailable' }
+  }
+
+  return {
+    at,
+    role: 'receiver',
+    outcome,
+    remote,
+    local: { seq: local?.seq ?? null, keybox_sha256: local?.keybox_sha256 ?? null },
+    error,
+  }
+}
+
+/** Cached record: null until a version is imported, or for `remote=none` before any check. */
+function cachedRemoteCheck(): RemoteCheck | null {
+  if (!initialized || !state.stream_id) return null
+  if (remoteMode === 'none' && remoteCheckedAt === null) return null
+  return buildRemoteCheck(remoteCheckedAt ?? agoDays(0.1))
+}
+
+/** A `check-remote` run: fresh record, remembered like `<root>/sync/remote-check.json`. */
+function runRemoteCheck(): RemoteCheck {
+  remoteCheckedAt = nowUnix()
+  return buildRemoteCheck(remoteCheckedAt)
 }
 
 function buildConfig(): SyncConfig {
@@ -780,6 +854,7 @@ function applyImport(spec: ImportSpec): ImportResult {
   state.webdav_user = spec.user
   state.url = spec.provider === 'url' ? spec.url : ''
   const notes = ['location saved; nothing was downloaded or deployed']
+  remoteCheckedAt = null
   if (!state.age_present) notes.push('set the age passphrase with `rkp-mini-sync secret set age`')
   if (spec.provider === 'webdav' && spec.user) notes.push('set the WebDAV app password')
   if (!state.risk_ack) notes.push('sync stays disabled until the risk statement is accepted')
@@ -933,6 +1008,33 @@ function deployStep(): { code: number; json: string; err: string } {
   if (!state.auto_deploy) {
     return { code: 0, json: JSON.stringify(okEnv({ skipped: 'auto_deploy_false' })), err: '' }
   }
+  // `run=noop`: an idempotent pass rewrites nothing, so every target reports
+  // reload_status `skipped` (the real `repair_all` behaviour).
+  if (runMode === 'noop') {
+    try {
+      const plan = planData(false)
+      const report: DeployReport = {
+        keybox_sha256: plan.staged.keybox_sha256,
+        seq: plan.staged.seq,
+        deployed: true,
+        pending: null,
+        warnings: plan.warnings,
+        targets: state.targets.map((t) => ({
+          id: t.id,
+          path: t.path,
+          ok: true,
+          sha256: plan.staged.keybox_sha256,
+          reload: t.reload ?? 'auto',
+          reload_status: 'skipped',
+          error: null,
+        })),
+      }
+      return { code: 0, json: JSON.stringify(okEnv(report)), err: '' }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return { code: 9, json: JSON.stringify(errEnv('state', 'nothing_staged', message)), err: message }
+    }
+  }
   try {
     const plan = planData(false)
     if (plan.gate.kind === 'first_deploy') {
@@ -1038,8 +1140,17 @@ function handleDeploy(args: string[]): ExecResult {
     if (state.targets.some((t) => t.id === id)) {
       return toExec(errOutcome('config', 'duplicate_target_id', `duplicate target id \`${id}\``))
     }
-    state.targets.push({ id, path: d.path, owner: d.owner, mode: d.mode, reload: 'auto' })
-    return toExec(okOutcome({ id, path: d.path, reload: 'auto' }))
+    // `--path` mirrors the runtime: only a *.xml file directly inside /data/adb/teesim.
+    const pathArg = flagValue(args, '--path')
+    let path = d.path
+    if (pathArg !== null) {
+      if (id !== 'teesim' || !/^\/data\/adb\/teesim\/[A-Za-z0-9._-]{1,64}\.xml$/.test(pathArg)) {
+        return toExec(errOutcome('config', 'config_invalid', `invalid --path for target \`${id}\``))
+      }
+      path = pathArg
+    }
+    state.targets.push({ id, path, owner: d.owner, mode: d.mode, reload: 'auto' })
+    return toExec(okOutcome({ id, path, reload: 'auto' }))
   }
 
   if (sub === 'remove-target') {
@@ -1278,7 +1389,9 @@ function launch(taskArgs: string[]): void {
       const outcome =
         files.op === 'fetch'
           ? doFetch(taskArgs[1])
-          : errOutcome('config', 'usage', `unknown sync task \`${files.op}\``)
+          : files.op === 'check'
+            ? okOutcome(runRemoteCheck())
+            : errOutcome('config', 'usage', `unknown sync task \`${files.op}\``)
       const exec = toExec(outcome)
       files.json = exec.stdout
       files.err = exec.stderr
@@ -1393,6 +1506,14 @@ export async function mockExec(command: string): Promise<ExecResult> {
 
   if (command.startsWith('rm -f ')) return { errno: 0, stdout: '', stderr: '' }
   if (command.startsWith('tail -n ')) return { errno: 0, stdout: logText(), stderr: '' }
+  // 更多 tab: read-only config, module.prop and the deployer's --version.
+  if (command.startsWith('cat ') && command.includes('/config.toml')) {
+    return { errno: 0, stdout: `[sync]\nrole = "receiver"\nenabled = true\nprovider = "gist"\nlabel = "phone-a"\n\n[deploy]\nidentity_change_policy = "scheduled"\nrotation_lead_days = 4\nauto_deploy = true\n`, stderr: '' }
+  }
+  if (command.startsWith('cat ') && command.includes('/module.prop')) {
+    return { errno: 0, stdout: 'id=rkp_mini_deployer\nname=RKP-Mini Deployer\nversion=v0.2.0\nversionCode=2\n', stderr: '' }
+  }
+  if (command.endsWith(' --version')) return { errno: 0, stdout: 'rkp-mini-deployer 0.2.0\n', stderr: '' }
 
   const args = shellArgs(command)
   const jsonAt = args.indexOf('--json')
@@ -1450,6 +1571,7 @@ export async function mockExec(command: string): Promise<ExecResult> {
     state.loop_running = false
     state.age_present = false
     state.webdav_password_present = false
+    remoteCheckedAt = null
     state.sync_state = null
     state.deployed = null
     state.pending = null

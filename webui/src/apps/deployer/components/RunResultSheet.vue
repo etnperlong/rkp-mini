@@ -30,12 +30,20 @@ import {
   WARNING_LABEL,
   syncErrorText,
   type DeployPlan,
-  type DeployReport,
   type SyncEnvelope,
   type SyncErrorInfo,
   type TofuFacts,
 } from '../../../shared/lib/sync'
-import type { DeployOutcome, DeploySkip, RunSteps, StepResult } from '../lib/run'
+import {
+  isDeployReport,
+  isDeploySkipped,
+  runDeployOutcome,
+  runOutcomeLabel,
+  runRebootHint,
+  type DeploySkip,
+  type RunSteps,
+  type StepResult,
+} from '../lib/run'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ steps: RunSteps | null }>()
@@ -84,17 +92,12 @@ function isTofu(value: unknown): value is TofuFacts {
   )
 }
 
-function isDeployReport(value: unknown): value is DeployReport {
-  return typeof value === 'object' && value !== null && 'deployed' in value && 'targets' in value
-}
-
 function isDeployPlan(value: unknown): value is DeployPlan {
   return typeof value === 'object' && value !== null && 'gate' in value && 'staged' in value
 }
 
-function isSkipped(value: unknown): value is { skipped: DeploySkip } {
-  return typeof value === 'object' && value !== null && 'skipped' in value
-}
+const outcome = computed(() => (props.steps && props.steps.overall === 0 ? runDeployOutcome(props.steps) : null))
+const rebootHint = computed(() => (outcome.value ? runRebootHint(outcome.value) : null))
 
 function stepTone(view: StepView<unknown> | null, code: number | null): PillTone {
   if (!view || view.kind === 'not_run') return 'neutral'
@@ -141,6 +144,12 @@ const tofuFromFetch = computed(() => {
       </template>
 
       <template v-else>
+        <div class="outcome">
+          <MiuixText type="body1" :color="outcome?.kind === 'failed' ? 'var(--m-color-error)' : undefined">
+            {{ outcome ? runOutcomeLabel(outcome) : '最近一次组合结果' }}
+          </MiuixText>
+          <MiuixText v-if="rebootHint" type="footnote1" color="var(--app-warning)">{{ rebootHint }}</MiuixText>
+        </div>
         <div class="row">
           <span class="row__k">总体结果</span>
           <StatusPill
@@ -318,7 +327,7 @@ const tofuFromFetch = computed(() => {
           </template>
 
           <template v-else-if="deployStep?.kind === 'ok'">
-            <template v-if="isSkipped(deployStep.data)">
+            <template v-if="isDeploySkipped(deployStep.data)">
               <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
                 {{ skipLabel(deployStep.data) }}
               </MiuixText>
@@ -393,6 +402,14 @@ const tofuFromFetch = computed(() => {
 </template>
 
 <style scoped>
+.outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: var(--m-radius-md);
+  background: var(--app-sheet-group);
+}
 .section {
   display: flex;
   flex-direction: column;

@@ -4,7 +4,7 @@
 # from the page. State lives in $TMP; the page polls:
 #   sync-task.lock/       directory, present while running (mtime = start)
 #   sync-task.last.code   exit code, written last (mtime = end)
-#   sync-task.last.json   stdout: single --json envelope  (fetch only)
+#   sync-task.last.json   stdout: single --json envelope  (fetch / check)
 #   sync-task.last.err    stderr diagnostics (seq/hash/codes only)
 #   sync-task.last.op     operation name
 #   sync-task.last.steps  composed run: 8-section snapshot written by run.sh
@@ -37,6 +37,7 @@ case "$OP" in
     fi
     ;;
   run) ;;
+  check) [ -z "$ARG" ] || exit 2 ;;
   *) exit 2 ;;
 esac
 
@@ -46,8 +47,10 @@ mkdir "$TMP/sync-task.lock" 2>/dev/null || exit 9   # a task is already running
 trap 'rmdir "$TMP/sync-task.lock" 2>/dev/null' EXIT
 
 case "$OP" in
-  fetch)
-    if [ -n "$ARG" ]; then
+  fetch|check)
+    if [ "$OP" = check ]; then
+      set -- check-remote
+    elif [ -n "$ARG" ]; then
       set -- fetch --accept-first "$ARG"
     else
       set -- fetch

@@ -573,7 +573,8 @@ export async function readSyncLog(lines = 200): Promise<string> {
 
 /**
  * Sender: push | rotate | check (check-remote) | delete (remote-delete --yes).
- * Receiver: fetch [plaintext sha] | run. One runner, so ops never overlap.
+ * Receiver: fetch [plaintext sha] | check (check-remote) | run.
+ * One runner, so ops never overlap.
  */
 export type SyncOp = 'push' | 'rotate' | 'check' | 'delete' | 'fetch' | 'run'
 export type SyncTaskResult = TaskResult<SyncEnvelope<unknown>>

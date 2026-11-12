@@ -27,6 +27,12 @@ case "$op" in
   rotate)
     set -- rotate-password --from-file "$DATA/sync/inbox/rotate.hex" --hex
     ;;
+  check)
+    set -- check-remote
+    ;;
+  delete)
+    set -- remote-delete --yes
+    ;;
   *) exit 2 ;;
 esac
 

@@ -11,7 +11,7 @@ Three independent commands. They never link or invoke each other; module scripts
 |Binary|Commands|
 |---|---|
 |`rkp-mini-issuer`|`status`, `issue` (`--if-expiring-days N`), `config init\|show\|set auto_issue_days N`, internal `__ta-worker`|
-|`rkp-mini-sync`|`init`, `risk`, `enable`, `disable`, `forget`, `secret set`, `config show\|set`, `status`, `check-auto [--require-verified]`, `push`, `share`, `rotate-password`, `import`, `fetch`|
+|`rkp-mini-sync`|`init`, `risk`, `enable`, `disable`, `forget [--reset]`, `secret set`, `config show\|set`, `status`, `check-auto [--require-verified]`, `check-remote`, `push`, `share`, `rotate-password`, `remote-delete`, `import`, `fetch`|
 |`rkp-mini-deployer`|`plan`, `apply`, `targets`, `add-target`, `remove-target`, `remove` (local only)|
 
 Removed names are usage errors (exit 2), not aliases: binaries `rkp-mini`/`rkp-sync`, `sync-now`, `run`, and every `deploy …` subcommand.
@@ -64,7 +64,8 @@ Module scripts (`/system/bin/sh`):
 - Issuer: `action.sh` = foreground `issue --acknowledge`. `service.sh` always starts `auto-loop.sh` (pid `tmp/auto-loop.pid`, log `logs/auto.log`); it exits by itself on a tick where `auto_issue_days <= 0` and `check-auto` fails, and the WebUI restarts it when either job is enabled. It wakes every 30 min and compares wall-clock time with `tmp/auto-loop.next` (sleep does not count suspend time); a due round (≈12 h) runs `issue --if-expiring-days N` under the WebUI's `tmp/issue.lock` (held → skipped), writing `tmp/auto-issue.last.{at,json,err}` then `.code` last, then `push --auto` when `check-auto` passes. `rkp-mini-sync status` `loop_running` on the sender means this loop is alive.
 - Deployer: `service.sh` starts `sync-loop.sh` (pid `tmp/sync-loop.pid`, log `logs/sync.log`) only when `rkp-mini-sync check-auto` passes.
 - Deployer: `action.sh` = `exec sh run.sh action`; loop ≈8 h: `sh run.sh auto`, then appends each step sidecar to the log.
-- `webroot/runner/{issue,sync}.sh` are the WebUI's background tasks: `mkdir` lock `<root>/tmp/<name>.lock` (contention → exit 9), outputs `<name>.last.{json,err,op}`, `<name>.last.code` written last. Issuer `sync.sh` accepts `push`/`rotate`; deployer `sync.sh` accepts `fetch [sha]`/`run`. Roles are fixed per script.
+- `webroot/runner/{issue,sync}.sh` are the WebUI's background tasks: `mkdir` lock `<root>/tmp/<name>.lock` (contention → exit 9), outputs `<name>.last.{json,err,op}`, `<name>.last.code` written last. Issuer `sync.sh` accepts `push`/`rotate`/`check` (`check-remote`)/`delete` (`remote-delete --yes`); deployer `sync.sh` accepts `fetch [sha]`/`run`. Roles are fixed per script.
+- `check-remote` (both roles) is the only read-only remote command: it decrypts and compares, writes nothing but `<root>/sync/remote-check.json` (`status --json` → `remote_check`). `remote-delete` (sender) refuses a remote it cannot decrypt as its own stream; deleting the remote is not revocation. Sender `[sync].auto_push = false` fails `check-auto` with `auto_push_disabled` (manual `push` unaffected).
 
 Combo runner (`modules/deployer/run.sh` + sourced `lib/run.sh`), the only orchestration layer:
 

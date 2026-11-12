@@ -29,7 +29,8 @@ Two modules use them: **RKP-Mini Issuer** (`rkp_mini_issuer`, ships issuer + syn
 - `rkp-mini-issuer status` — read-only prereq + keybox check, updates module description.
 - `rkp-mini-issuer issue --acknowledge` — generate P-256 key → fetch RKP challenge → sign
   CSR via KeyMint `0x3122` → `signCertificates` → validate chain → write keybox.
-- `rkp-mini-sync` — sender: `push`, `share`, `rotate-password`; receiver: `import`, `fetch`.
+- `rkp-mini-sync` — sender: `push`, `share`, `rotate-password`, `remote-delete`; receiver: `import`,
+  `fetch`; both: `check-remote` (read-only update check).
 - `rkp-mini-deployer` — `plan`, `apply`, `targets`, `add-target`, `remove-target`, `remove`.
 - KernelSU WebUI — issuer page: status, prerequisite checks, one-tap issuance with
   result/failure diagnostics, certificate details, issue logs, read-only config and the
@@ -166,9 +167,12 @@ Identity changes on the receiver follow `[deploy].identity_change_policy`: `sche
 leaf's expiry and when the new leaf outlives it; otherwise it is held as `pending`. OMK's
 `retire_stale_keybox_bound_keys` (default true) deletes client keys bound to a replaced keybox.
 
-Disable with `sync disable` (stops loops, keeps deployed keyboxes); `sync forget` deletes local
-secrets/state; `deployer remove --yes` deletes deployed keyboxes. Uninstalling either module
-keeps its data root. Disabling is not revocation: change the passphrase
+Disable with `sync disable` (stops loops, keeps deployed keyboxes); on the sender
+`sync config set auto_push false` stops only the automatic push. `sync forget` deletes local
+secrets/state (`--reset` on the sender also drops the `[sync]` table); `sync remote-delete --yes`
+deletes the sender's remote file (a whole Gist); `deployer remove --yes` deletes deployed keyboxes.
+Uninstalling either module keeps its data root. Neither disabling nor deleting the remote file is
+revocation: receivers keep what they fetched. Change the passphrase
 (`sync rotate-password`) **and** re-issue the keybox. Old Gist revisions still decrypt with the
 old passphrase. Treat a lost device or root compromise on either side as a passphrase and key
 leak.

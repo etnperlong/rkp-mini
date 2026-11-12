@@ -36,6 +36,8 @@ pub struct CreatedGist {
 
 pub struct Gist<'a> {
     http: &'a Http,
+    /// REST API base; `GITHUB_API` except in tests.
+    base: String,
     filename: String,
     raw_url: Option<Url>,
     gist_id: RefCell<Option<String>>,
@@ -59,6 +61,7 @@ impl<'a> Gist<'a> {
             .transpose()?;
         Ok(Gist {
             http,
+            base: GITHUB_API.to_string(),
             filename: filename.to_string(),
             raw_url,
             gist_id: RefCell::new(gist_id.map(str::to_string)),
@@ -78,7 +81,7 @@ impl<'a> Gist<'a> {
     }
 
     fn api(&self, method: &str, path: &str, body: Option<&[u8]>) -> Result<Response> {
-        let url = Url::parse(&format!("{GITHUB_API}{path}")).expect("static base");
+        let url = Url::parse(&format!("{}{path}", self.base)).expect("static base");
         let auth = self.auth_header();
         let mut headers: Vec<(&str, &str)> = vec![
             ("Accept", "application/vnd.github+json"),
@@ -293,6 +296,38 @@ impl Transport for Gist<'_> {
             }
         }
     }
+
+    /// A gist cannot be emptied, so removing the file means deleting the gist.
+    fn delete(&self, expected: Option<&str>) -> Result<()> {
+        if self.token.is_none() {
+            return Err(err(
+                Stage::Config,
+                "token_missing",
+                "deleting a gist needs a token with `gist` scope (gist_token_file)",
+            ));
+        }
+        let Some(id) = self.gist_id.borrow().clone() else {
+            return Ok(());
+        };
+        if let Some(exp) = expected {
+            match self.fetch_api(None)? {
+                Fetch::Body { token, .. } if token.as_deref() != Some(exp) => {
+                    return Err(err(
+                        Stage::Remote,
+                        "remote_conflict",
+                        "gist changed since it was read (another writer?)",
+                    ))
+                }
+                Fetch::Missing => return Ok(()),
+                _ => {}
+            }
+        }
+        let r = self.api("DELETE", &format!("/gists/{id}"), None)?;
+        match r.status {
+            200 | 204 | 404 => Ok(()),
+            s => Err(self.api_error(s, "delete gist")),
+        }
+    }
 }
 
 pub struct Webdav<'a> {
@@ -486,6 +521,21 @@ impl Transport for Webdav<'_> {
                 cleanup();
                 Err(status_error(s, "MOVE"))
             }
+        }
+    }
+
+    /// Conditional DELETE; 412 (changed since read) maps to `remote_conflict`.
+    fn delete(&self, expected: Option<&str>) -> Result<()> {
+        let mut h = Vec::new();
+        let cond;
+        if let Some(t) = expected.filter(|t| !t.is_empty()) {
+            cond = t.to_string();
+            h.push(("If-Match", cond.as_str()));
+        }
+        let r = self.send("DELETE", &self.file_url, &h, None)?;
+        match r.status {
+            200 | 202 | 204 | 404 => Ok(()),
+            s => Err(status_error(s, "DELETE")),
         }
     }
 }
@@ -702,8 +752,14 @@ mod tests {
                     }
                     "MOVE" => (405, String::new(), vec![]),
                     "DELETE" => {
-                        files.remove(&path);
-                        (204, String::new(), vec![])
+                        let cur = files.get(&path).map(|b| etag(b));
+                        match headers.get("if-match") {
+                            Some(m) if cur.as_ref() != Some(m) => (412, String::new(), vec![]),
+                            _ => {
+                                files.remove(&path);
+                                (204, String::new(), vec![])
+                            }
+                        }
                     }
                     "MKCOL" => (201, String::new(), vec![]),
                     _ => (400, String::new(), vec![]),
@@ -799,5 +855,115 @@ mod tests {
         };
         assert_eq!(bytes, b"cipher");
         assert!(u.put(b"x", None).is_err());
+        assert_eq!(
+            rkp_mini_core::error::to_sync_error(&u.delete(None).unwrap_err()).code,
+            "read_only_provider"
+        );
+    }
+
+    #[test]
+    fn webdav_delete_is_conditional() {
+        let (base, files, log) = webdav_server(true);
+        let http = dev_http();
+        let url = Url::parse(&format!("{base}/rkp/x.age")).unwrap();
+        let w = Webdav::new(&http, url, None, None);
+        w.put(b"v1", None).unwrap();
+        let Fetch::Body { token, .. } = w.fetch(None).unwrap() else {
+            panic!()
+        };
+        // A stale token still sends If-Match, so the server answers 412.
+        let e = w.delete(Some("\"stale\"")).unwrap_err();
+        assert_eq!(
+            rkp_mini_core::error::to_sync_error(&e).code,
+            "remote_conflict"
+        );
+        assert!(files.lock().unwrap().contains_key("/rkp/x.age"));
+        w.delete(token.as_deref()).unwrap();
+        assert!(!files.lock().unwrap().contains_key("/rkp/x.age"));
+        assert!(log
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.as_str() == "DELETE /rkp/x.age"));
+    }
+
+    /// Minimal GitHub gist API: GET returns one file + `updated_at`, DELETE 204.
+    fn gist_stub(updated_at: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", l.local_addr().unwrap());
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let l2 = log.clone();
+        std::thread::spawn(move || {
+            for s in l.incoming() {
+                let mut s = s.unwrap();
+                let mut r = BufReader::new(s.try_clone().unwrap());
+                let mut first = String::new();
+                if r.read_line(&mut first).unwrap() == 0 {
+                    continue;
+                }
+                let mut parts = first.split_whitespace();
+                let method = parts.next().unwrap().to_string();
+                let path = parts.next().unwrap().to_string();
+                let mut len = 0usize;
+                loop {
+                    let mut line = String::new();
+                    r.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((k, v)) = line.split_once(':') {
+                        if k.trim().eq_ignore_ascii_case("content-length") {
+                            len = v.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0; len];
+                r.read_exact(&mut body).unwrap();
+                l2.lock().unwrap().push(format!("{method} {path}"));
+                let (status, out) = match method.as_str() {
+                    "DELETE" => (204, String::new()),
+                    _ => (
+                        200,
+                        serde_json::json!({
+                            "updated_at": updated_at,
+                            "files": { "rkp-sync.age": { "content": "x", "truncated": false } },
+                        })
+                        .to_string(),
+                    ),
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    out.len()
+                );
+                s.write_all(resp.as_bytes()).unwrap();
+                s.write_all(out.as_bytes()).unwrap();
+            }
+        });
+        (base, log)
+    }
+
+    #[test]
+    fn gist_delete_uses_the_api_with_cas() {
+        let (base, log) = gist_stub("2026-01-01T00:00:00Z");
+        let http = dev_http();
+        let token = SecretString::from("gh".to_string());
+        let mut g = Gist::new(&http, None, Some("g1"), "rkp-sync.age", Some(token)).unwrap();
+        g.base = base;
+        let Fetch::Body { token: tok, .. } = g.fetch_fresh().unwrap() else {
+            panic!()
+        };
+        // Stale token: refused before any DELETE.
+        let e = g.delete(Some("updated_at:other")).unwrap_err();
+        assert_eq!(
+            rkp_mini_core::error::to_sync_error(&e).code,
+            "remote_conflict"
+        );
+        assert!(!log.lock().unwrap().iter().any(|l| l.starts_with("DELETE")));
+        g.delete(tok.as_deref()).unwrap();
+        assert!(log
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.as_str() == "DELETE /gists/g1"));
     }
 }

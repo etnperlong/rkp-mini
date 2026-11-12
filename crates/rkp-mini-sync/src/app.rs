@@ -113,6 +113,29 @@ pub fn record_error(cfg: &Config, e: &anyhow::Error, now: i64) {
     let _ = state::save(&cfg.sync_state_path(), &s);
 }
 
+/// Last `check-remote` record; a corrupt file reads as `None`.
+pub fn load_remote_check(cfg: &Config) -> Option<Value> {
+    let bytes = rkp_mini_core::fsutil::read_limited(&cfg.remote_check_path(), 64 * 1024).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Write the `check-remote` record atomically (0600) beside sync-state.json.
+pub fn save_remote_check(cfg: &Config, record: &Value) -> Result<()> {
+    let path = cfg.remote_check_path();
+    let io = |e: std::io::Error| {
+        err(
+            Stage::State,
+            "state_write",
+            format!("write {}: {e}", path.display()),
+        )
+    };
+    if let Some(dir) = path.parent() {
+        rkp_mini_core::fsutil::ensure_private_dir(dir).map_err(io)?;
+    }
+    rkp_mini_core::fsutil::atomic_write(&path, record.to_string().as_bytes(), 0o600, None)
+        .map_err(io)
+}
+
 /// Secret-file presence/permission summary (never contents).
 pub fn secret_status(path: &Path) -> Value {
     use std::os::unix::fs::MetadataExt;

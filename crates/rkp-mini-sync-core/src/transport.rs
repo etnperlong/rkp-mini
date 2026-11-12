@@ -44,6 +44,20 @@ pub trait Transport {
     fn fetch_fresh(&self) -> Result<Fetch> {
         self.fetch(None)
     }
+
+    /// Delete the envelope. `expected` is the token from the fetch that
+    /// preceded it; providers with compare-and-swap refuse when it changed.
+    /// A provider that reports the file as absent counts as success.
+    fn delete(&self, _expected: Option<&str>) -> Result<()> {
+        Err(err(
+            Stage::Config,
+            "read_only_provider",
+            format!(
+                "provider \"{}\" cannot delete the remote file",
+                self.provider()
+            ),
+        ))
+    }
 }
 
 /// Envelope stored as a single file on the local filesystem.
@@ -111,5 +125,28 @@ impl Transport for DirTransport {
                 format!("write {}: {e}", self.path.display()),
             )
         })
+    }
+
+    fn delete(&self, expected: Option<&str>) -> Result<()> {
+        if let Some(exp) = expected {
+            if let Fetch::Body { token, .. } = self.fetch(None)? {
+                if token.as_deref() != Some(exp) {
+                    return Err(err(
+                        Stage::Remote,
+                        "remote_conflict",
+                        "remote changed since it was read",
+                    ));
+                }
+            }
+        }
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(err(
+                Stage::Remote,
+                "remote_write",
+                format!("remove {}: {e}", self.path.display()),
+            )),
+        }
     }
 }

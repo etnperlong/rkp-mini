@@ -77,6 +77,8 @@ impl IdentityPolicy {
 pub struct SyncSection {
     pub role: Option<Role>,
     pub enabled: bool,
+    /// Sender: push after each automatic issue round. Manual pushes ignore it.
+    pub auto_push: bool,
     pub risk_ack_version: u32,
     pub risk_ack_at: i64,
     pub provider: String,
@@ -107,6 +109,7 @@ impl Default for SyncSection {
         SyncSection {
             role: None,
             enabled: false,
+            auto_push: true,
             risk_ack_version: 0,
             risk_ack_at: 0,
             provider: String::new(),
@@ -362,6 +365,11 @@ impl Config {
         self.sync_dir().join("sync-state.json")
     }
 
+    /// Last `check-remote` result, beside `sync-state.json`.
+    pub fn remote_check_path(&self) -> PathBuf {
+        self.sync_dir().join("remote-check.json")
+    }
+
     pub fn deploy_state_path(&self) -> PathBuf {
         self.root.join("deploy").join("deploy-state.json")
     }
@@ -589,6 +597,21 @@ pub fn write_config(path: &Path, bytes: &[u8]) -> Result<()> {
     })
 }
 
+/// Remove a whole table (comment-preserving); other tables and top-level
+/// keys keep their text. Returns whether the table existed.
+pub fn remove_table(path: &Path, table: &str) -> Result<bool> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| cfg_err(format!("read {}: {e}", path.display())))?;
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|e| cfg_err(format!("{}: {e}", path.display())))?;
+    let removed = doc.remove(table).is_some();
+    if removed {
+        write_config(path, doc.to_string().as_bytes())?;
+    }
+    Ok(removed)
+}
+
 /// Append a `[[deploy.targets]]` entry (comment-preserving).
 pub fn add_target(path: &Path, id: &str, fields: &[(&str, &str)]) -> Result<()> {
     let text = std::fs::read_to_string(path)
@@ -663,6 +686,7 @@ pub fn sender_sync_template(stream_id: &str, provider: &str, root: &Path) -> Str
 [sync]
 role = "sender"
 enabled = false
+auto_push = true                  # push after each auto-issue round; manual push is unaffected
 risk_ack_version = 0
 provider = "{provider}"              # gist | webdav
 stream_id = "{stream_id}"
@@ -797,6 +821,7 @@ mod tests {
         let p = write(dir.path(), "config.toml", &body);
         let c = load(&p, Some(Role::Sender), UrlPolicy::default()).unwrap();
         assert!(!c.sync.enabled);
+        assert!(c.sync.auto_push);
         assert_eq!(c.min_validity_days(), 3);
         assert!(c.require_enabled().is_err());
         assert_eq!(c.loop_pid_path(), dir.path().join("tmp/auto-loop.pid"));
@@ -839,6 +864,28 @@ mod tests {
             "[sync]\nrole = \"receiver\"\npassword = \"hunter2\"\n",
         );
         assert!(load(&p, None, UrlPolicy::default()).is_err());
+    }
+
+    #[test]
+    fn remove_table_keeps_comments_and_other_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = format!(
+            "# output comment\noutput_dir = \"{}\"\nauto_issue_days = 3\n\n[sync]\nrole = \"sender\"\nprovider = \"gist\"\n\n# other table\n[other]\nk = \"v\" # trailing\n",
+            dir.path().join("output").display()
+        );
+        let p = write(dir.path(), "c.toml", &body);
+        assert!(remove_table(&p, "sync").unwrap());
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert!(!text.contains("[sync]") && !text.contains("role ="));
+        assert!(text.contains("# output comment") && text.contains("auto_issue_days = 3"));
+        assert!(text.contains("# other table") && text.contains("# trailing"));
+        assert!(!remove_table(&p, "sync").unwrap(), "already gone");
+        assert_eq!(
+            load(&p, Some(Role::Sender), UrlPolicy::default())
+                .map_err(|e| rkp_mini_core::error::to_sync_error(&e).code)
+                .unwrap_err(),
+            "not_initialized"
+        );
     }
 
     #[test]

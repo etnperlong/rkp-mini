@@ -277,8 +277,15 @@ fn remove_file(path: &Path, removed: &mut Vec<String>) -> Result<()> {
     Ok(())
 }
 
-pub fn forget(ctx: &Ctx, yes: bool, staging: bool) -> Result<Output> {
+pub fn forget(ctx: &Ctx, yes: bool, staging: bool, reset: bool) -> Result<Output> {
     let cfg = ctx.load(None)?;
+    if reset && cfg.role != Role::Sender {
+        return Err(err(
+            Stage::Config,
+            "wrong_role",
+            "--reset removes the [sync] table and is sender-only",
+        ));
+    }
     if !yes
         && (!ctx.interactive(false)
             || !tty::confirm(
@@ -299,6 +306,7 @@ pub fn forget(ctx: &Ctx, yes: bool, staging: bool) -> Result<Output> {
         cfg.gist_token_file(),
         cfg.webdav_password_file(),
         cfg.sync_state_path(),
+        cfg.remote_check_path(),
     ] {
         remove_file(&p, &mut removed)?;
     }
@@ -325,15 +333,24 @@ pub fn forget(ctx: &Ctx, yes: bool, staging: bool) -> Result<Output> {
             removed.push(cfg.staging_dir().display().to_string());
         }
     }
+    if reset {
+        // Leaves the issuer's top-level keys ([deploy] belongs to receivers).
+        config::remove_table(&cfg.path, "sync")?;
+    }
     let mut text = String::from("forgot local sync data (remote untouched):");
     for r in &removed {
         text.push_str(&format!("\n  removed {r}"));
+    }
+    if reset {
+        text.push_str(
+            "\nremoved the [sync] table; run `rkp-mini-sync init --role sender` to start over",
+        );
     }
     if cfg.role == Role::Receiver && !staging {
         text.push_str("\nstaged keybox kept; add --staging to delete it");
     }
     Ok(Output::ok(
-        json!({ "removed": removed, "enabled": false }),
+        json!({ "removed": removed, "enabled": false, "reset": reset }),
         text,
     ))
 }
@@ -438,6 +455,7 @@ fn settable(role: Role, key: &str) -> Option<(&'static str, Kind)> {
             "provider" | "gist_id" | "gist_filename" | "webdav_endpoint" | "webdav_path"
             | "webdav_user",
         ) => Some(("sync", Kind::Str)),
+        (Role::Sender, "auto_push") => Some(("sync", Kind::Bool)),
         (Role::Receiver, "identity_change_policy") => Some(("deploy", Kind::Str)),
         (Role::Receiver, "rotation_lead_days") => Some(("deploy", Kind::Uint)),
         (Role::Receiver, "auto_deploy") => Some(("deploy", Kind::Bool)),
@@ -552,6 +570,7 @@ pub fn config_show(ctx: &Ctx) -> Result<Output> {
     match cfg.role {
         Role::Sender => {
             data["output_dir"] = json!(cfg.output_dir.display().to_string());
+            data["auto_push"] = json!(cfg.sync.auto_push);
         }
         Role::Receiver => {
             data["identity_change_policy"] = json!(cfg.deploy.identity_change_policy.as_str());
@@ -573,7 +592,8 @@ pub fn config_show(ctx: &Ctx) -> Result<Output> {
 ///
 /// `require_verified` is the first-round gate for the combined receiver
 /// flow: it additionally needs a completed first import (a verified sync
-/// state). It never contacts the remote. Plain `check-auto` is unchanged.
+/// state). It never contacts the remote. A sender with `auto_push = false`
+/// fails with `auto_push_disabled` (the issuer loop gates its push job on it).
 pub fn check_auto(ctx: &Ctx, require_verified: bool) -> Result<Output> {
     let cfg = ctx.load(None)?;
     if require_verified && cfg.role != Role::Receiver {
@@ -585,6 +605,13 @@ pub fn check_auto(ctx: &Ctx, require_verified: bool) -> Result<Output> {
     }
     cfg.require_enabled()?;
     cfg.require_stream()?;
+    if cfg.role == Role::Sender && !cfg.sync.auto_push {
+        return Err(err(
+            Stage::Config,
+            "auto_push_disabled",
+            "auto_push = false; unattended pushes are off",
+        ));
+    }
     if cfg.sync.password_mode != PasswordMode::SecretFile {
         return Err(err(
             Stage::Config,
@@ -644,6 +671,7 @@ pub fn status(ctx: &Ctx) -> Result<Output> {
         "password_mode": match cfg.sync.password_mode { PasswordMode::SecretFile => "secret-file", PasswordMode::Prompt => "prompt" },
         "secrets": secrets,
         "sync_state": sync_state,
+        "remote_check": app::load_remote_check(&cfg),
     });
     let mut text = format!(
         "role: {}\nenabled: {} (risk accepted: {})\nprovider: {}\nlocation: {}\nstream: {}\n",
@@ -703,7 +731,9 @@ pub fn status(ctx: &Ctx) -> Result<Output> {
                 "local keybox: {}\n",
                 kb["summary"].as_str().unwrap_or("-")
             ));
+            text.push_str(&format!("auto_push: {}\n", cfg.sync.auto_push));
             data["local_keybox"] = kb;
+            data["auto_push"] = json!(cfg.sync.auto_push);
         }
         Role::Receiver => {
             let deploy_state: Option<DeployState> = state::load(&cfg.deploy_state_path())?;
@@ -911,6 +941,116 @@ mod tests {
         };
         assert_eq!(code_of(check_auto(&ctx, true)), "wrong_role");
         assert!(check_auto(&ctx, false).is_ok());
+    }
+
+    #[test]
+    fn sender_auto_push_gates_check_auto() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        std::fs::write(
+            &config,
+            format!(
+                "output_dir = \"{}\"\n{}",
+                dir.path().join("output").display(),
+                config::sender_sync_template("st_01JTESTSTREAM", "gist", dir.path())
+            ),
+        )
+        .unwrap();
+        config::edit_table(
+            &config,
+            "sync",
+            &[
+                ("enabled", Value::Bool(true)),
+                ("risk_ack_version", Value::Int(RISK_VERSION as i64)),
+            ],
+        )
+        .unwrap();
+        let ctx = Ctx {
+            global: Global {
+                config: Some(config),
+                ..Global::default()
+            },
+        };
+        assert!(check_auto(&ctx, false).is_ok());
+        config_set(&ctx, "auto_push", "false").unwrap();
+        assert_eq!(code_of(check_auto(&ctx, false)), "auto_push_disabled");
+        assert_eq!(
+            code_of(config_set(&ctx, "auto_push", "maybe")),
+            "config_invalid"
+        );
+        assert_eq!(
+            config_show(&ctx).unwrap().data["auto_push"],
+            serde_json::Value::Bool(false)
+        );
+        let status = status(&ctx).unwrap();
+        assert_eq!(status.data["auto_push"], serde_json::Value::Bool(false));
+        config_set(&ctx, "auto_push", "true").unwrap();
+        assert!(check_auto(&ctx, false).is_ok());
+        assert_eq!(code_of(check_auto(&ctx, true)), "wrong_role");
+    }
+
+    #[test]
+    fn auto_push_is_sender_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_config, ctx) = receiver(dir.path());
+        assert_eq!(
+            code_of(config_set(&ctx, "auto_push", "false")),
+            "key_not_settable"
+        );
+    }
+
+    #[test]
+    fn status_reports_remote_check_and_ignores_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let (config, ctx) = receiver(dir.path());
+        let cfg = load_cfg(&config);
+        assert_eq!(
+            status(&ctx).unwrap().data["remote_check"],
+            serde_json::Value::Null
+        );
+        let rec = serde_json::json!({ "outcome": "remote_ahead", "at": 1, "local": {}, "remote": {}, "error": null, "role": "receiver" });
+        app::save_remote_check(&cfg, &rec).unwrap();
+        assert_eq!(status(&ctx).unwrap().data["remote_check"], rec);
+        std::fs::write(cfg.remote_check_path(), b"{not json").unwrap();
+        assert_eq!(
+            status(&ctx).unwrap().data["remote_check"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn forget_reset_removes_the_sync_table_and_the_check_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        std::fs::write(
+            &config,
+            format!(
+                "output_dir = \"{}\"\n{}",
+                dir.path().join("output").display(),
+                config::sender_sync_template("st_01JTESTSTREAM", "gist", dir.path())
+            ),
+        )
+        .unwrap();
+        let ctx = Ctx {
+            global: Global {
+                config: Some(config.clone()),
+                ..Global::default()
+            },
+        };
+        let cfg = config::load(&config, Some(Role::Sender), UrlPolicy::default()).unwrap();
+        app::save_remote_check(&cfg, &serde_json::json!({ "outcome": "error" })).unwrap();
+        forget(&ctx, true, false, true).unwrap();
+        assert!(!cfg.remote_check_path().exists());
+        assert_eq!(
+            config::load(&config, Some(Role::Sender), UrlPolicy::default())
+                .map_err(|e| to_sync_error(&e).code)
+                .unwrap_err(),
+            "not_initialized"
+        );
+        // --reset is sender-only.
+        let rdir = tempfile::tempdir().unwrap();
+        let (_c, rctx) = receiver(rdir.path());
+        assert_eq!(code_of(forget(&rctx, true, true, true)), "wrong_role");
     }
 
     #[test]

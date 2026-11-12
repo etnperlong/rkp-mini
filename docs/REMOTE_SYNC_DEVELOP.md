@@ -1029,6 +1029,17 @@ UI 必须展示并让用户勾选确认：
 - **禁用并清除远端**：删除 `age.pass`、Gist token、WebDAV 密码、URL、sync/deploy state；可选删除 staging。
 - **移除已部署 keybox**：单独操作，二次确认；可能让 OMK/TEESim 回到无 keybox 状态。
 - 禁用不等于撤销：旧 keybox 仍然存在；真正撤销需换密码 + 重新 issue。
+- **2026-11 更新（发送端）**：自动推送有独立开关 `[sync].auto_push`（默认 `true`；关闭后发送端 `check-auto`
+  失败为 `auto_push_disabled`，只停自动推送，手动 `push` 不受影响）。
+  `remote-delete --yes`（仅发送端）先用本机口令解密云端并核对 stream，再按刚读到的 token 做条件删除：
+  Gist 删除整个 Gist 并清空 `gist_id`/`gist_url`（Gist 不能没有文件；下次 push 新建，接收端需重新导入），
+  WebDAV `DELETE` + `If-Match`（412 → `remote_conflict`）；不动 `sync-state`，seq 按 §7.5 延续。
+  **删除云端文件不等于撤销**：已拉取的接收端仍保留 keybox。`forget --reset`（仅发送端）在 `forget` 之后删除整个
+  `[sync]` 表（保留签发端字段），回到未初始化；不动云端。
+- **2026-11 更新（两端）**：`check-remote` 只读检查云端：解密并核对 stream，与本地比较后把结果写入
+  `<root>/sync/remote-check.json`（`status --json` 的 `remote_check`），不写云端、staging、`sync-state`、`deploy-state`。
+  `outcome`：`in_sync`、`remote_behind`（发送端：云端 keybox 与本机不同，需要推送；接收端：云端 seq 比已验证的旧）、
+  `remote_ahead`（发送端：云端 seq 比上次推送新；接收端：有可拉取的更新）、`diverged`（同 seq 不同内容）、`missing`、`error`。
 
 ### 13.4 跨设备使用
 
@@ -1187,7 +1198,7 @@ sha 参数接受完整 hex 或 ≥16 位前缀。TTY 交互路径不变（仍可
 ### 19.4 配置编辑
 
 - `rkp-mini-sync --json config show`：生效配置（不含任何密钥值，只含 secret 路径与状态）。
-- `rkp-mini-sync config set <key> <value>`：**白名单**，写后重新加载校验，失败回滚。发送端：`provider`、`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`gist_id`、`gist_filename`、`webdav_endpoint`、`webdav_path`、`webdav_user`、`password_mode`。接收端：`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`password_mode`、`identity_change_policy`、`rotation_lead_days`、`auto_deploy`。位置字段（接收端）只经 `import` 写入；`enabled`/`risk_ack_*` 只经 `enable/disable`；部署目标只经 `rkp-mini-deployer add-target/remove-target`。
+- `rkp-mini-sync config set <key> <value>`：**白名单**，写后重新加载校验，失败回滚。发送端：`provider`、`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`gist_id`、`gist_filename`、`webdav_endpoint`、`webdav_path`、`webdav_user`、`password_mode`、`auto_push`。接收端：`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`password_mode`、`identity_change_policy`、`rotation_lead_days`、`auto_deploy`。位置字段（接收端）只经 `import` 写入；`enabled`/`risk_ack_*` 只经 `enable/disable`；部署目标只经 `rkp-mini-deployer add-target/remove-target`。
 - `rkp-mini-issuer` WebUI 原“配置只读”决策仅对 `rkp-mini-issuer` 自身字段保持；`[sync]` 经上面的命令修改，顶层 `auto_issue_days` 经 `rkp-mini-issuer config set auto_issue_days N`（签发页“自动签发设置”）修改。
 
 ### 19.5 页面

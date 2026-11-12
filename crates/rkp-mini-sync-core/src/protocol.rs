@@ -84,6 +84,9 @@ pub struct RemoteHead {
     pub seq: u64,
     pub plaintext_sha256: [u8; 32],
     pub keybox_sha256: [u8; 32],
+    pub device_id: String,
+    pub issued_at: i64,
+    pub keybox_not_after: i64,
     pub token: Option<String>,
 }
 
@@ -136,8 +139,8 @@ pub fn choose_base(
 }
 
 /// Read and decrypt the current remote head. Missing → `None`.
-/// A remote that exists but cannot be decrypted aborts the push.
-fn read_remote_head(
+/// A remote that exists but cannot be decrypted is an error, never `None`.
+pub fn read_remote_head(
     t: &dyn Transport,
     passphrase: &SecretString,
     stream_id: &str,
@@ -159,7 +162,7 @@ fn read_remote_head(
             se.stage,
             &se.code,
             format!(
-                "{}; the remote envelope exists but cannot be opened — refusing to overwrite it",
+                "{}; the remote envelope exists but cannot be opened",
                 se.message
             ),
         )
@@ -170,7 +173,7 @@ fn read_remote_head(
             Stage::Validate,
             "stream_mismatch",
             format!(
-                "remote belongs to stream {} (expected {stream_id}); refusing to overwrite",
+                "remote belongs to stream {} (expected {stream_id})",
                 m.stream_id
             ),
         ));
@@ -179,6 +182,9 @@ fn read_remote_head(
         seq: m.seq,
         plaintext_sha256: sha256(&plaintext),
         keybox_sha256: m.keybox.sha256,
+        device_id: m.keybox.device_id,
+        issued_at: m.issued_at,
+        keybox_not_after: m.keybox.leaf_not_after,
         token,
     }))
 }

@@ -6,6 +6,7 @@
 //! Deployment (exit 9) belongs to `rkp-mini-deployer`.
 
 mod app;
+mod check;
 mod cli;
 mod common;
 mod http;
@@ -76,7 +77,11 @@ fn dispatch(ctx: &Ctx, cmd: Command) -> anyhow::Result<Output> {
         Command::Risk => common::risk(ctx),
         Command::Enable { accept_risk } => common::enable(ctx, accept_risk),
         Command::Disable => common::disable(ctx),
-        Command::Forget { yes, staging } => common::forget(ctx, yes, staging),
+        Command::Forget {
+            yes,
+            staging,
+            reset,
+        } => common::forget(ctx, yes, staging, reset),
         Command::SecretSet {
             kind,
             from_file,
@@ -85,7 +90,9 @@ fn dispatch(ctx: &Ctx, cmd: Command) -> anyhow::Result<Output> {
         Command::ConfigShow => common::config_show(ctx),
         Command::ConfigSet { key, value } => common::config_set(ctx, &key, &value),
         Command::Status => common::status(ctx),
+        Command::CheckRemote => check::check_remote(ctx),
         Command::CheckAuto { require_verified } => common::check_auto(ctx, require_verified),
+        Command::RemoteDelete { yes } => check::remote_delete(ctx, yes),
         Command::Push {
             force,
             allow_expiring,

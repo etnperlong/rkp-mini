@@ -36,20 +36,24 @@ COMMON:
   enable [--accept-risk VERSION]
                            accept the risk statement (TTY phrase or exact version)
   disable                  stop sync/automatic runs; keeps deployed keybox
-  forget [--yes] [--staging]
-                           delete local secrets/state (remote is not touched)
+  forget [--yes] [--staging] [--reset]
+                           delete local secrets/state (remote is not touched);
+                           --reset (sender only) also removes the [sync] table
   secret set age|gist-token|webdav-password [--from-file PATH [--hex]]
                            read a secret from the TTY (no echo), stdin, or a
                            0600 inbox file that is deleted afterwards
   config show              effective configuration (secret paths only)
   config set KEY VALUE     change one allow-listed, non-secret setting
   status                   local state; never contacts the remote
+  check-remote             compare the remote with local state (read-only);
+                           writes sync/remote-check.json
   check-auto [--require-verified]
                            exit 0 when unattended runs are allowed;
                            --require-verified also needs a completed first import
 
 SENDER:
   push [--force] [--allow-expiring] [--auto]
+  remote-delete [--yes]    delete the remote envelope; local state is kept
   share [--label TEXT]     print the import link/QR (never contains the password)
   rotate-password [--from-file PATH [--hex]]
                            re-encrypt the current keybox with a new passphrase
@@ -93,6 +97,7 @@ pub enum Command {
     Forget {
         yes: bool,
         staging: bool,
+        reset: bool,
     },
     SecretSet {
         kind: SecretKind,
@@ -105,8 +110,12 @@ pub enum Command {
         value: String,
     },
     Status,
+    CheckRemote,
     CheckAuto {
         require_verified: bool,
+    },
+    RemoteDelete {
+        yes: bool,
     },
     Push {
         force: bool,
@@ -137,12 +146,14 @@ impl Command {
     /// Role a command requires (None = either).
     pub fn role(&self) -> Option<Role> {
         match self {
-            Command::Push { .. } | Command::Share { .. } | Command::RotatePassword { .. } => {
-                Some(Role::Sender)
-            }
+            Command::Push { .. }
+            | Command::Share { .. }
+            | Command::RotatePassword { .. }
+            | Command::RemoteDelete { .. } => Some(Role::Sender),
             // `check-auto` is used by both module loops; only the
             // `--require-verified` flag is receiver-only (checked in common).
             Command::Import { .. } | Command::Fetch { .. } => Some(Role::Receiver),
+            // `check-remote` works for both roles.
             _ => None,
         }
     }
@@ -221,6 +232,7 @@ pub fn parse(args: &[String]) -> Result<(Global, Command)> {
         "forget" => Command::Forget {
             yes: flags.flag("--yes"),
             staging: flags.flag("--staging"),
+            reset: flags.flag("--reset"),
         },
         "secret" => {
             const USAGE: &str = "usage: rkp-mini-sync secret set age|gist-token|webdav-password [--from-file PATH [--hex]]";
@@ -256,8 +268,12 @@ pub fn parse(args: &[String]) -> Result<(Global, Command)> {
             _ => bail!("usage: rkp-mini-sync config show|set"),
         },
         "status" => Command::Status,
+        "check-remote" => Command::CheckRemote,
         "check-auto" => Command::CheckAuto {
             require_verified: flags.flag("--require-verified"),
+        },
+        "remote-delete" => Command::RemoteDelete {
+            yes: flags.flag("--yes"),
         },
         "push" => Command::Push {
             force: flags.flag("--force"),
@@ -359,6 +375,28 @@ mod tests {
             Some(Role::Sender),
             "push is sender-only"
         );
+    }
+
+    #[test]
+    fn remote_commands_have_the_right_roles() {
+        use rkp_mini_runtime::config::Role;
+        assert_eq!(
+            p(&["check-remote"]).unwrap().1.role(),
+            None,
+            "check-remote works for both roles"
+        );
+        assert_eq!(
+            p(&["remote-delete", "--yes"]).unwrap().1.role(),
+            Some(Role::Sender)
+        );
+        assert!(matches!(
+            p(&["forget", "--reset", "--yes"]).unwrap().1,
+            Command::Forget {
+                yes: true,
+                reset: true,
+                ..
+            }
+        ));
     }
 
     #[test]

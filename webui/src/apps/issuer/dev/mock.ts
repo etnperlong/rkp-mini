@@ -257,11 +257,11 @@ export async function mockExec(command: string): Promise<ExecResult> {
   if (command.startsWith('cat ') && command.includes('status.json')) {
     return ok(JSON.stringify(liveStatus(), null, 2))
   }
-  if (command.endsWith(' --version')) return ok('rkp-mini-issuer 0.2.0\n')
+  if (command.endsWith(' --version')) return ok('rkp-mini-issuer 0.3.0\n')
   if (command.startsWith('cat ') && command.includes('config.toml')) return ok(CONFIG_TOML)
   if (command.startsWith('cat ') && command.includes('module.prop')) {
     return ok(
-      'id=rkp_mini_issuer\nname=RKP-Mini Issuer\nversion=v0.2.0\nversionCode=2\nauthor=Evans Mike\n',
+      'id=rkp_mini_issuer\nname=RKP-Mini Issuer\nversion=v0.3.0\nversionCode=3\nauthor=Evans Mike\n',
     )
   }
   if (command.startsWith('ls -1t ')) return ok(logs.join('\n') + '\n')

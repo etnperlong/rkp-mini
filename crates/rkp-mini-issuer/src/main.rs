@@ -43,6 +43,7 @@ fn command_is_json(cmd: &Command) -> bool {
     match cmd {
         Command::Status(a) => a.json,
         Command::Issue(a) => a.json,
+        Command::ConfigSet(a) => a.json,
         _ => false,
     }
 }
@@ -79,6 +80,18 @@ fn dispatch(cmd: Command) -> anyhow::Result<i32> {
         }
         Command::ConfigShow { config } => {
             config::show(&config::resolve_path(&config))?;
+            Ok(0)
+        }
+        Command::ConfigSet(a) => {
+            let days = config::set(&config::resolve_path(&a.config), &a.key, &a.value)?;
+            if a.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "ok": true, "data": { "auto_issue_days": days } })
+                );
+            } else {
+                println!("auto_issue_days = {days}");
+            }
             Ok(0)
         }
         Command::TaWorker { dir } => Ok(rkp::keymint::worker_main(&dir)),

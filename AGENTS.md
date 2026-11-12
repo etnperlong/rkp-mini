@@ -10,7 +10,7 @@ Three independent commands. They never link or invoke each other; module scripts
 
 |Binary|Commands|
 |---|---|
-|`rkp-mini-issuer`|`status`, `issue` (`--if-expiring-days N`), `config init\|show`, internal `__ta-worker`|
+|`rkp-mini-issuer`|`status`, `issue` (`--if-expiring-days N`), `config init\|show\|set auto_issue_days N`, internal `__ta-worker`|
 |`rkp-mini-sync`|`init`, `risk`, `enable`, `disable`, `forget`, `secret set`, `config show\|set`, `status`, `check-auto [--require-verified]`, `push`, `share`, `rotate-password`, `import`, `fetch`|
 |`rkp-mini-deployer`|`plan`, `apply`, `targets`, `add-target`, `remove-target`, `remove` (local only)|
 
@@ -52,7 +52,7 @@ Exit contracts (`--json` prints exactly one envelope; only each `main` calls `pr
 
 |Binary|Codes|
 |---|---|
-|issuer (own `error.rs`)|1 generic, 2 config/usage, 3 prerequisites, 4 HTTP, 5 TA/CSR, 6 chain/keybox, 7 writes. `status` always exits 0 (blockers are data). `--json` is honoured only by `status` and `issue`|
+|issuer (own `error.rs`)|1 generic, 2 config/usage, 3 prerequisites, 4 HTTP, 5 TA/CSR, 6 chain/keybox, 7 writes. `status` always exits 0 (blockers are data). `--json` is honoured only by `status`, `issue` and `config set`|
 |sync|0, 2 config/usage/risk/`wrong_role`, 8 remote/decrypt/validate/state, 1 other|
 |deployer|0 (including `data.skipped` and `data.pending`), 2 config/usage/`wrong_role`/missing `--yes`, 8 state (`nothing_staged`, `staging_corrupt`, `locked`, `confirmation_mismatch`), 9 a target failed (envelope carries `data`), 1 other|
 

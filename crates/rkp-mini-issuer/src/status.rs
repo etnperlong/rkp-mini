@@ -217,12 +217,39 @@ pub fn update_module_description(text: &str) -> Result<()> {
     Ok(())
 }
 
+fn auto_loop_pid_path() -> PathBuf {
+    Path::new(config::DATA_DIR)
+        .join("tmp")
+        .join("auto-loop.pid")
+}
+
+/// Whether the issuer module's `auto-loop.sh` is alive (pid file, no locking).
+pub fn auto_loop_running() -> bool {
+    loop_running_at(&auto_loop_pid_path())
+}
+
+fn loop_running_at(path: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(pid) = text.trim().parse::<i32>() else {
+        return false;
+    };
+    if pid <= 1 {
+        return false;
+    }
+    // SAFETY: signal 0 only checks for existence/permission.
+    let rc = unsafe { libc::kill(pid, 0) };
+    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
 /// Build the §8.4 status object.
 pub fn status_json(
     status: &DeviceStatus,
     keybox: &KeyboxInfo,
     keybox_path: &Path,
     description: &str,
+    auto_issue: (u32, bool),
 ) -> serde_json::Value {
     let now = util::now_unix();
     let days_left = keybox.not_after.map(|na| util::days_left(na, now));
@@ -251,6 +278,7 @@ pub fn status_json(
             "error": keybox.error,
         },
         "description": description,
+        "auto_issue": { "days": auto_issue.0, "loop_running": auto_issue.1 },
     })
 }
 
@@ -315,7 +343,13 @@ pub fn run(args: &StatusArgs) -> Result<i32> {
     let keybox_path = Path::new(&cfg.output_dir).join("keybox.xml");
     let kb = keybox::inspect(&keybox_path);
     let description = description_for(&status, &kb);
-    let obj = status_json(&status, &kb, &keybox_path, &description);
+    let obj = status_json(
+        &status,
+        &kb,
+        &keybox_path,
+        &description,
+        (cfg.auto_issue_days, auto_loop_running()),
+    );
 
     write_status_files(&obj, &description);
 
@@ -420,5 +454,33 @@ mod tests {
             ..Default::default()
         };
         assert!(description_for(&base_status(), &kb).starts_with("❌ keybox 无效："));
+    }
+
+    #[test]
+    fn status_json_carries_auto_issue() {
+        let obj = status_json(
+            &base_status(),
+            &KeyboxInfo::default(),
+            Path::new("/nonexistent/keybox.xml"),
+            "d",
+            (30, false),
+        );
+        assert_eq!(obj["auto_issue"]["days"], 30);
+        assert_eq!(obj["auto_issue"]["loop_running"], false);
+        assert!(obj["ok"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn loop_running_false_without_usable_pid_file() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!loop_running_at(&dir.path().join("auto-loop.pid")));
+        let p = dir.path().join("garbage.pid");
+        std::fs::write(&p, b"not-a-pid\n").unwrap();
+        assert!(!loop_running_at(&p));
+        std::fs::write(&p, b"0\n").unwrap();
+        assert!(!loop_running_at(&p));
+        // Above pid_max on Linux, so never a live process.
+        std::fs::write(&p, b"2147483647\n").unwrap();
+        assert!(!loop_running_at(&p));
     }
 }

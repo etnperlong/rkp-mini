@@ -23,9 +23,8 @@ ta_timeout_seconds = 30
 proxy = ""                        # e.g. "http://127.0.0.1:7890"; empty = direct
 log_retention = 10                # keep the most recent N issue logs
 
-# Re-issue when the current leaf has <= N days left. Used only by the sync
-# loop (`rkp-mini-issuer issue --if-expiring-days N` before `rkp-mini-sync push`) while
-# remote sync is enabled. 0 = off.
+# Re-issue when the current leaf has <= N days left. Read by the issuer
+# module's auto-loop.sh; independent of remote sync. 0 = off.
 auto_issue_days = 0
 "#;
 
@@ -232,14 +231,96 @@ pub fn init(path: &Path) -> Result<()> {
         println!("config already exists: {}", path.display());
         return Ok(());
     }
+    write_template(path)?;
+    println!("wrote config: {}", path.display());
+    Ok(())
+}
+
+fn write_template(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| err(Stage::Write, "io", format!("mkdir {parent:?}: {e}")))?;
     }
     util::atomic_write(path, TEMPLATE.as_bytes(), 0o600)
+        .map_err(|e| err(Stage::Write, "io", format!("write {path:?}: {e}")))
+}
+
+/// Highest accepted `auto_issue_days` (0 = off).
+pub const MAX_AUTO_ISSUE_DAYS: u32 = 365;
+
+/// `config set`: comment-preserving edit of the top-level `auto_issue_days`.
+/// Returns the value that was written.
+pub fn set(path: &Path, key: &str, value: &str) -> Result<u32> {
+    if key != "auto_issue_days" {
+        return Err(err(
+            Stage::Config,
+            "key_not_settable",
+            format!("`{key}` cannot be set by rkp-mini-issuer; only auto_issue_days"),
+        ));
+    }
+    let invalid = || {
+        err(
+            Stage::Config,
+            "invalid_value",
+            format!(
+                "auto_issue_days must be 0..={}, got {value:?}",
+                MAX_AUTO_ISSUE_DAYS
+            ),
+        )
+    };
+    let days: u32 = value.trim().parse().map_err(|_| invalid())?;
+    if days > MAX_AUTO_ISSUE_DAYS {
+        return Err(invalid());
+    }
+
+    if !path.exists() {
+        write_template(path)?;
+    }
+    let old =
+        std::fs::read(path).map_err(|e| err(Stage::Write, "io", format!("read {path:?}: {e}")))?;
+    let text = std::str::from_utf8(&old)
+        .map_err(|_| err(Stage::Config, "config_invalid", "config is not UTF-8"))?;
+    let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| {
+        err(
+            Stage::Config,
+            "config_invalid",
+            format!("TOML parse error: {e}"),
+        )
+    })?;
+
+    // Top-level key only. Writing into the existing slot keeps the key's own
+    // comment block (`Table::insert` reformats the key); the cloned value decor
+    // keeps an inline comment.
+    let decor = doc
+        .get(key)
+        .and_then(|i| i.as_value())
+        .map(|v| v.decor().clone());
+    let mut item = toml_edit::value(i64::from(days));
+    if let Some(decor) = decor {
+        *item.as_value_mut().expect("value").decor_mut() = decor;
+        *doc.get_mut(key).expect("key present") = item;
+    } else {
+        let _ = doc.insert(key, item);
+    }
+    util::atomic_write(path, doc.to_string().as_bytes(), 0o600)
         .map_err(|e| err(Stage::Write, "io", format!("write {path:?}: {e}")))?;
-    println!("wrote config: {}", path.display());
-    Ok(())
+
+    let reloaded = load(path).and_then(|cfg| {
+        if cfg.auto_issue_days == days {
+            Ok(())
+        } else {
+            Err(err(
+                Stage::Config,
+                "config_invalid",
+                "auto_issue_days did not round-trip",
+            ))
+        }
+    });
+    if let Err(e) = reloaded {
+        let _ = util::atomic_write(path, &old, 0o600);
+        return Err(e);
+    }
+    Ok(days)
 }
 
 /// `config show`: print the effective (merged) config; no secrets to hide.
@@ -341,5 +422,77 @@ mod tests {
             load_with_warnings(tmp_cfg("[sync]\nrole = \"sender\"\nenabled = false\n").path())
                 .unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    fn set_err_code(path: &Path, key: &str, value: &str) -> String {
+        let e = set(path, key, value).unwrap_err();
+        let app = crate::error::to_app_error(&e);
+        assert_eq!(app.stage, Stage::Config, "exit code 2");
+        app.code
+    }
+
+    #[test]
+    fn set_preserves_comments_and_other_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        let body = "# keep me\noutput_dir = \"/data/x\"\n\n# about the threshold\nauto_issue_days = 0  # inline\n\n[sync]\nrole = \"sender\"\nenabled = false\n";
+        std::fs::write(&p, body).unwrap();
+        assert_eq!(set(&p, "auto_issue_days", "45").unwrap(), 45);
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert!(text.contains("# keep me"), "{text}");
+        assert!(text.contains("# about the threshold"), "{text}");
+        assert!(text.contains("auto_issue_days = 45"), "{text}");
+        assert!(text.contains("# inline"), "{text}");
+        assert!(
+            text.contains("[sync]\nrole = \"sender\"\nenabled = false"),
+            "{text}"
+        );
+        assert_eq!(load(&p).unwrap().auto_issue_days, 45);
+    }
+
+    #[test]
+    fn set_inserts_missing_key_before_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        let body = "# top\noutput_dir = \"/data/x\"\n\n[sync]\nrole = \"sender\"\n";
+        std::fs::write(&p, body).unwrap();
+        assert_eq!(set(&p, "auto_issue_days", "7").unwrap(), 7);
+        let text = std::fs::read_to_string(&p).unwrap();
+        let key = text.find("auto_issue_days = 7").expect("inserted");
+        let table = text.find("[sync]").expect("table kept");
+        assert!(key < table, "{text}");
+        assert!(text.contains("# top"));
+        assert_eq!(load(&p).unwrap().auto_issue_days, 7);
+    }
+
+    #[test]
+    fn set_creates_missing_file_from_template() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("nested/config.toml");
+        assert_eq!(set(&p, "auto_issue_days", "30").unwrap(), 30);
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert!(text.contains("output_dir ="), "{text}");
+        assert!(text.contains("auto_issue_days = 30"));
+        assert_eq!(load(&p).unwrap().auto_issue_days, 30);
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn set_rejects_other_keys_and_bad_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        let body = "output_dir = \"/data/x\"\n";
+        std::fs::write(&p, body).unwrap();
+        assert_eq!(set_err_code(&p, "output_dir", "/x"), "key_not_settable");
+        for bad in ["366", "-1", "abc", ""] {
+            assert_eq!(
+                set_err_code(&p, "auto_issue_days", bad),
+                "invalid_value",
+                "{bad:?}"
+            );
+        }
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
     }
 }

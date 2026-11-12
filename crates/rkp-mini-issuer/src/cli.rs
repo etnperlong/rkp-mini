@@ -15,6 +15,8 @@ USAGE:
                   [--output DIR] [--server URL] [--fingerprint FP]
                   [--if-expiring-days N]   (skip unless the current leaf has <= N days left)
   rkp-mini-issuer config init|show [--config PATH]
+  rkp-mini-issuer config set auto_issue_days N [--json] [--config PATH]
+                  (N = 0..=365; 0 = off; used by the module's auto-loop.sh)
   rkp-mini-issuer --version
   rkp-mini-issuer --help
 ";
@@ -39,12 +41,21 @@ pub struct IssueArgs {
     pub if_expiring_days: Option<u32>,
 }
 
+#[derive(Debug, Default)]
+pub struct ConfigSetArgs {
+    pub key: String,
+    pub value: String,
+    pub json: bool,
+    pub config: Option<PathBuf>,
+}
+
 #[derive(Debug)]
 pub enum Command {
     Status(StatusArgs),
     Issue(IssueArgs),
     ConfigInit { config: Option<PathBuf> },
     ConfigShow { config: Option<PathBuf> },
+    ConfigSet(ConfigSetArgs),
     TaWorker { dir: PathBuf },
     Version,
     Help,
@@ -102,6 +113,33 @@ pub fn parse(args: &[String]) -> Result<Command> {
         }
         "config" => {
             let sub = it.next().unwrap_or_default();
+            if sub == "set" {
+                let mut a = ConfigSetArgs::default();
+                let mut positional = Vec::new();
+                while let Some(arg) = it.next() {
+                    match arg.as_str() {
+                        "--json" => a.json = true,
+                        "--config" => {
+                            a.config = Some(PathBuf::from(take_value("--config", &mut it)?))
+                        }
+                        other => {
+                            if other.starts_with("--") {
+                                bail!("unknown config set flag: {other}");
+                            }
+                            positional.push(other.to_string());
+                        }
+                    }
+                }
+                let mut pos = positional.into_iter();
+                match (pos.next(), pos.next(), pos.next()) {
+                    (Some(k), Some(v), None) => {
+                        a.key = k;
+                        a.value = v;
+                        return Ok(Command::ConfigSet(a));
+                    }
+                    _ => bail!("config set needs exactly KEY VALUE"),
+                }
+            }
             let mut config = None;
             while let Some(arg) = it.next() {
                 match arg.as_str() {
@@ -112,7 +150,7 @@ pub fn parse(args: &[String]) -> Result<Command> {
             match sub.as_str() {
                 "init" => Ok(Command::ConfigInit { config }),
                 "show" => Ok(Command::ConfigShow { config }),
-                "" => bail!("config requires a subcommand: init|show"),
+                "" => bail!("config requires a subcommand: init|show|set"),
                 other => bail!("unknown config subcommand: {other}"),
             }
         }

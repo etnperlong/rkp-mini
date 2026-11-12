@@ -1523,6 +1523,7 @@ dependencies = [
  "tempfile",
  "time",
  "toml 0.8.23",
+ "toml_edit",
  "ureq",
  "x509-cert",
  "zeroize",

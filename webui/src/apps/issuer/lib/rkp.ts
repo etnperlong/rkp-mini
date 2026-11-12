@@ -172,6 +172,18 @@ export async function setAutoIssueDays(days: number): Promise<number> {
   return env.data.auto_issue_days
 }
 
+/** Delete the issued keybox and its artifacts (`remove --yes`); refused while an issuance holds issue.lock. */
+export async function removeKeybox(): Promise<{ removed: string[]; output_dir: string }> {
+  const r = await run(`'${BIN}' remove --yes --json`)
+  if (r.errno !== 0 && !r.stdout.trim()) throw new CommandError('exit', `退出码 ${r.errno}`, r.stderr.trim())
+  const env = parseLastJsonLine<Envelope<{ removed: string[]; output_dir: string }>>(r.stdout)
+  if (!env.ok) {
+    const label = env.error.code === 'issue_running' ? '签发进行中，请稍后再试' : env.error.message
+    throw new CommandError('exit', `${stageLabel(env.error.stage)}：${label}`, JSON.stringify(env.error))
+  }
+  return env.data
+}
+
 /** Start `auto-loop.sh` detached; its pid file makes repeat starts harmless. */
 export async function startAutoLoop(): Promise<void> {
   await exec(

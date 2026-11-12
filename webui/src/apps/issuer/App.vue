@@ -16,10 +16,9 @@ import { Info, Lock, More, UploadCloud } from 'miuix-vue/icons'
 import StatusCard from './components/StatusCard.vue'
 import AutoStatusRow from './components/AutoStatusRow.vue'
 import CheckCard from './components/CheckCard.vue'
-import IssueCard from './components/IssueCard.vue'
-import KeyboxSummaryCard from './components/KeyboxSummaryCard.vue'
+import IssueStatusCard from './components/IssueStatusCard.vue'
 import IssueSheet from './components/IssueSheet.vue'
-import AutoIssueSheet from './components/AutoIssueSheet.vue'
+import IssueSettingsSheet from './components/IssueSettingsSheet.vue'
 import ResultSheet from './components/ResultSheet.vue'
 import DetailSheet from './components/DetailSheet.vue'
 import MoreTab from './components/MoreTab.vue'
@@ -59,7 +58,7 @@ const statusLoading = ref(false)
 const statusCached = ref(false)
 
 const issueOpen = ref(false)
-const autoIssueOpen = ref(false)
+const issueSettingsOpen = ref(false)
 const resultOpen = ref(false)
 const detailOpen = ref(false)
 
@@ -320,16 +319,22 @@ onBeforeUnmount(() => clearInterval(clock))
 
       <MiuixScrollArea v-show="tab === 1" class="app__scroll">
         <main class="page">
-          <KeyboxSummaryCard :status="status" :loading="statusLoading" :now="now" @detail="detailOpen = true" />
-          <IssueCard :runner="runner" :now="now" @open="resultOpen = true" />
+          <IssueStatusCard
+            :status="status"
+            :loading="statusLoading"
+            :error="statusError?.message ?? null"
+            :runner="runner"
+            :now="now"
+            @detail="detailOpen = true"
+            @refresh="onRefresh"
+            @result="resultOpen = true"
+          />
           <div class="actions">
             <MiuixText v-if="issueBlockedReason" type="footnote1" color="var(--m-color-error)" align="center">
               {{ issueBlockedReason }}
             </MiuixText>
-            <MiuixButton type="primary" :disabled="!canIssue" @click="issueOpen = true">
-              {{ runner.busy.value ? '签发进行中…' : '手动签发' }}
-            </MiuixButton>
-            <MiuixButton @click="autoIssueOpen = true">自动签发设置</MiuixButton>
+            <MiuixButton type="primary" :disabled="!canIssue" @click="issueOpen = true">立即签发</MiuixButton>
+            <MiuixButton @click="issueSettingsOpen = true">签发设置</MiuixButton>
           </div>
           <MiuixText class="footnote" type="footnote1" color="var(--m-color-on-surface-variant-actions)" align="center">
             签发结果取决于设备固件与 Google RKP 服务，不保证 Play Integrity 通过。
@@ -388,7 +393,12 @@ onBeforeUnmount(() => clearInterval(clock))
         @confirm="onConfirmIssue"
       />
       <ResultSheet v-model="resultOpen" :runner="runner" @logs="openLogs(true)" />
-      <AutoIssueSheet v-model="autoIssueOpen" :status="status" @changed="loadStatus(false)" />
+      <IssueSettingsSheet
+        v-model="issueSettingsOpen"
+        :status="status"
+        :busy="runner.busy.value"
+        @changed="loadStatus(false)"
+      />
       <DetailSheet v-if="status" v-model="detailOpen" :status="status" :now="now" />
       <SyncDetailSheet v-model="syncDetailOpen" :status="syncStatus" :now="now" />
       <SenderSyncSheet

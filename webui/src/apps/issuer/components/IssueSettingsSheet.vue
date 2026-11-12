@@ -1,13 +1,15 @@
 <script setup lang="ts">
-// Auto-issue settings (issuer-owned `auto_issue_days`). The value is written by
+// Issue settings. Auto-issue (issuer-owned `auto_issue_days`) is written by
 // `rkp-mini-issuer config set`; the loop itself is `auto-loop.sh`, started here
 // whenever auto-issue is on and its pid file says it is not running. The last
 // run is read straight from the loop's `tmp/auto-issue.last.*` files (C6).
+// The danger zone deletes the local keybox and its artifacts (`remove --yes`).
 import { computed, ref, watch } from 'vue'
 import {
   MiuixBasicComponent,
   MiuixBottomSheet,
   MiuixButton,
+  MiuixDialog,
   MiuixIcon,
   MiuixIconButton,
   MiuixInput,
@@ -24,6 +26,7 @@ import {
   AUTO_ISSUE_DEFAULT_DAYS,
   AUTO_ISSUE_WARN_DAYS,
   readAutoIssueLast,
+  removeKeybox,
   setAutoIssueDays,
   stageLabel,
   startAutoLoop,
@@ -32,8 +35,30 @@ import {
 } from '../lib/rkp'
 
 const open = defineModel<boolean>({ required: true })
-const props = defineProps<{ status: StatusData | null }>()
+/** `busy`: an issuance is running, so nothing may be deleted. */
+const props = defineProps<{ status: StatusData | null; busy: boolean }>()
 const emit = defineEmits<{ changed: [] }>()
+
+const confirmRemove = ref(false)
+const removing = ref(false)
+
+async function remove(): Promise<void> {
+  if (removing.value) return
+  removing.value = true
+  error.value = null
+  try {
+    const r = await removeKeybox()
+    confirmRemove.value = false
+    open.value = false
+    emit('changed')
+    void showSnackbar({ message: r.removed.length ? '本地证书已删除' : '本地没有可删除的证书' })
+  } catch (e) {
+    confirmRemove.value = false
+    error.value = message(e)
+  } finally {
+    removing.value = false
+  }
+}
 
 const on = ref(false)
 const days = ref(String(AUTO_ISSUE_DEFAULT_DAYS))
@@ -133,7 +158,7 @@ async function save(): Promise<void> {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="自动签发设置">
+  <MiuixBottomSheet v-model="open" title="签发设置">
     <template #start-action>
       <MiuixIconButton aria-label="关闭" @click="open = false">
         <MiuixIcon :icon="Close" />
@@ -141,6 +166,7 @@ async function save(): Promise<void> {
     </template>
 
     <div class="sheet-body">
+      <MiuixSmallTitle text="自动签发" />
       <div class="sheet-group">
         <MiuixSwitchPreference
           v-model="on"
@@ -179,12 +205,54 @@ async function save(): Promise<void> {
 
       <MiuixButton type="primary" :disabled="saving || !status" @click="save">{{ saving ? '保存中…' : '保存' }}</MiuixButton>
       <MiuixText v-if="error" type="footnote1" color="var(--m-color-error)">{{ error }}</MiuixText>
+
+      <MiuixSmallTitle text="危险区" color="var(--m-color-error)" />
+      <div class="sheet-group danger-group">
+        <MiuixBasicComponent
+          title="删除本地证书"
+          :summary="
+            status?.keybox.exists
+              ? '删除 keybox.xml、备份、私钥与证书链；不影响云端文件'
+              : '本地没有已签发的证书'
+          "
+          title-color="var(--m-color-error)"
+          clickable
+          :disabled="busy || removing || !status?.keybox.exists"
+          @click="confirmRemove = true"
+        />
+      </div>
     </div>
+
+    <MiuixDialog
+      v-model="confirmRemove"
+      title="删除本地证书？"
+      summary="将删除输出目录中的 keybox.xml、keybox.xml.prev、私钥、证书链与 meta.json，无法恢复。读取该 keybox 的模块将失去证书；已同步到云端的文件不受影响。若开启了自动签发，下一轮检查会重新签发。"
+    >
+      <div class="dialog-actions">
+        <MiuixButton @click="confirmRemove = false">取消</MiuixButton>
+        <MiuixButton class="danger-btn" type="primary" :disabled="removing || busy" @click="remove">
+          {{ removing ? '删除中…' : '确认删除' }}
+        </MiuixButton>
+      </div>
+    </MiuixDialog>
   </MiuixBottomSheet>
 </template>
 
 <style scoped>
 .sheet-body :deep(.m-small-title) {
   padding: 4px 0 0;
+}
+.danger-group {
+  background: color-mix(in srgb, var(--m-color-error) 8%, var(--app-sheet-group));
+}
+.dialog-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.danger-btn.m-button--primary:not(.m-button--disabled) {
+  background: var(--m-color-error);
+  color: #fff;
 }
 </style>

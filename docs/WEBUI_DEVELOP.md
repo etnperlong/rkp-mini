@@ -408,18 +408,21 @@ unzip -l "$ZIP" | grep -q 'webroot/index.html' || { echo "! webroot missing" >&2
 MiuixTopAppBar(title="RKP-Mini · 签发端")
 状态  StatusCard（按状态着色 + 角标图标）、AutoStatusRow（自动签发：issuer status 的 auto_issue.days > 0 且
       auto-loop.sh 在运行；自动推送：sync status 的 enabled + risk_ack_current + auto_push + loop_running）、CheckCard、“刷新状态”
-签发  KeyboxSummaryCard（只读一行摘要）、IssueCard、不可签发原因、“手动签发”、“自动签发设置”、免责脚注
+签发  IssueStatusCard（同 SyncStatusCard 样式：有效期至 / 剩余天数 / 自动签发；即将过期/过期/无效时警告条；
+      签发任务与上次结果在卡内；右上角状态即刷新入口，签发中显示“签发中 + 用时”；点击 → DetailSheet）、
+      不可签发原因、“立即签发”、“签发设置”、免责脚注
 同步  SyncStatusCard（存储方式 / 同步时间 / 自动推送；异常时警告条；点击 → SyncDetailSheet；右上角状态即刷新入口，
       点击经 runner `check` 运行 `check-remote`，任务进行中在同一位置显示“检查中/推送中 + 用时”）、“立即推送”或“启用”、“分享”、“同步设置”
 更多  MoreTab：外观、日志入口、只读配置、关于（每次切入重新读取）
 MiuixNavigationBar  状态 / 签发 / 同步 / 更多
 MiuixSnackbarHost   （挂载一次；上移到导航栏之上）
-IssueSheet / ResultSheet / DetailSheet / AutoIssueSheet / LogsSheet / 同步相关弹层（全局，覆盖在 Tab 之上）
+IssueSheet / ResultSheet / DetailSheet / IssueSettingsSheet / LogsSheet / 同步相关弹层（全局，覆盖在 Tab 之上）
 ```
 
-AutoIssueSheet：开关 + 提前天数（1–365，默认 3；大于 14 时显示频繁签发警告——本机 RKP 证书只有约 12–14 天有效期）→ `rkp-mini-issuer config set auto_issue_days N --json`；
+IssueSettingsSheet（“签发设置”）：自动签发开关 + 提前天数（1–365，默认 3；大于 14 时显示频繁签发警告——本机 RKP 证书只有约 12–14 天有效期）→ `rkp-mini-issuer config set auto_issue_days N --json`；
 开启时以 `setsid` 启动 `auto-loop.sh`（pid 锁保证重复启动无害）。“上次自动检查”直接读
 `tmp/auto-issue.last.{at,code,json,err}`（`code` 最后写入，缺失视为没有已完成的检查）。
+危险区“删除本地证书”经 MiuixDialog 确认后执行 `rkp-mini-issuer remove --yes --json`（签发进行中或本地无证书时禁用）。
 
 同步页进入时只显示缓存（`status --json`，含上次 `remote_check`），不联网；只有点右上角状态才联网检查。
 `MiuixCard` 开启按压反馈时会在 pointerdown 里 `setPointerCapture`，之后的 click 全部落到卡片本身：卡片内的按钮

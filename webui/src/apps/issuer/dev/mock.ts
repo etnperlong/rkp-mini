@@ -235,6 +235,13 @@ export async function mockExec(command: string): Promise<ExecResult> {
     autoIssue.days = n
     return ok(`${JSON.stringify({ ok: true, data: { auto_issue_days: n } })}\n`)
   }
+  if (command.includes(' remove --yes --json')) {
+    const dir = '/data/misc/keystore/rkp-mini/output'
+    const had = (STATUS[scenario] ?? STATUS.ready).keybox.exists
+    const names = ['keybox.xml', 'keybox.xml.prev', 'private-key.pem', 'cert-chain.pem', 'cert-chain.der', 'meta.json']
+    scenario = 'missing'
+    return ok(`${JSON.stringify({ ok: true, data: { removed: had ? names.map((n) => `${dir}/${n}`) : [], output_dir: dir } })}\n`)
+  }
   if (command.includes('/auto-issue.last.code')) {
     return ok(
       [SEP, autoLast.at ?? '', SEP, autoLast.code ?? '', SEP, autoLast.json.trimEnd(), SEP, autoLast.err].join('\n'),

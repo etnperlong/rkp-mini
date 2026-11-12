@@ -2,6 +2,7 @@ import { appConfig } from '@app-config'
 import { exec } from '../../../shared/lib/ksu'
 import { CommandError, parseLastJsonLine, resolveModuleDir } from '../../../shared/lib/command'
 import { daysLeft, nowUnix } from '../../../shared/lib/format'
+import { ICON_CHECK_CIRCLE, ICON_ERROR, ICON_HELP, ICON_WARNING } from '../../../shared/lib/icons'
 
 // ---- Paths ------------------------------------------------------------------
 
@@ -168,6 +169,15 @@ export const KEYBOX_STATE_LABEL: Record<KeyboxState, string> = {
   expired: '已过期',
   invalid: '无效',
   missing: '未签发',
+}
+
+/** Accent colour (CSS value) and icon path (shared/lib/icons.ts) per state. */
+export const KEYBOX_STATE_VISUAL: Record<KeyboxState, { color: string; icon: string }> = {
+  valid: { color: 'var(--app-ok)', icon: ICON_CHECK_CIRCLE },
+  expiring: { color: 'var(--app-warning)', icon: ICON_WARNING },
+  expired: { color: 'var(--m-color-error)', icon: ICON_ERROR },
+  invalid: { color: 'var(--m-color-error)', icon: ICON_ERROR },
+  missing: { color: 'var(--m-color-on-surface-variant-actions)', icon: ICON_HELP },
 }
 
 const BLOCKER_LABEL: Record<string, string> = {

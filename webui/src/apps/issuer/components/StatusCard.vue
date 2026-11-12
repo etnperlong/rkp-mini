@@ -2,15 +2,10 @@
 import { computed } from 'vue'
 import { MiuixButton, MiuixCard, MiuixIcon, MiuixProgressIndicator, MiuixText } from 'miuix-vue'
 import { ChevronForward } from 'miuix-vue/icons'
-import StatusPill, { type PillTone } from '../../../shared/components/StatusPill.vue'
 import FoldBlock from '../../../shared/components/FoldBlock.vue'
+import SvgIcon from '../../../shared/components/SvgIcon.vue'
 import { CommandError } from '../../../shared/lib/command'
-import {
-  KEYBOX_STATE_LABEL,
-  keyboxState,
-  type KeyboxState,
-  type StatusData,
-} from '../lib/rkp'
+import { KEYBOX_STATE_LABEL, KEYBOX_STATE_VISUAL, keyboxState, type StatusData } from '../lib/rkp'
 import { daysLeft, formatAgo, formatDateTime } from '../../../shared/lib/format'
 
 const props = defineProps<{
@@ -24,14 +19,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{ detail: []; retry: [] }>()
 
-const TONE: Record<KeyboxState, PillTone> = {
-  valid: 'ok',
-  expiring: 'warning',
-  expired: 'error',
-  invalid: 'error',
-  missing: 'neutral',
-}
-
 const ERROR_KIND: Record<CommandError['kind'], string> = {
   exec: '无法执行命令',
   exit: '命令返回错误',
@@ -44,12 +31,19 @@ const days = computed(() => (kb.value?.not_after != null ? daysLeft(kb.value.not
 </script>
 
 <template>
-  <MiuixCard :show-indication="!!kb?.exists" @click="kb?.exists && emit('detail')">
+  <!-- KernelSU Miuix home style: state-tinted card with an oversized icon clipped at the bottom-right corner. -->
+  <MiuixCard
+    :class="state && `status-card--${state}`"
+    :press-feedback="kb?.exists ? 'tilt' : 'none'"
+    :show-indication="!!kb?.exists"
+    @click="kb?.exists && emit('detail')"
+  >
+    <SvgIcon v-if="state" class="status__mark" :path="KEYBOX_STATE_VISUAL[state].icon" :color="KEYBOX_STATE_VISUAL[state].color" />
     <div class="status">
       <div class="status__head">
         <MiuixText type="title4" weight="medium">证书状态</MiuixText>
         <MiuixProgressIndicator v-if="loading" type="infinite" :size="18" />
-        <StatusPill v-else-if="state" :tone="TONE[state]" :label="KEYBOX_STATE_LABEL[state]" />
+        <MiuixText v-else-if="state" type="body2" weight="medium">{{ KEYBOX_STATE_LABEL[state] }}</MiuixText>
       </div>
 
       <!-- Read failure with no data to fall back on -->
@@ -60,13 +54,12 @@ const days = computed(() => (kb.value?.not_after != null ? daysLeft(kb.value.not
 
       <template v-else-if="status && kb && state">
         <div v-if="state === 'valid' || state === 'expiring'" class="status__hero">
-          <span class="status__days" :class="{ 'status__days--warn': state === 'expiring' }">{{ days }}</span>
+          <span class="status__days">{{ days }}</span>
           <MiuixText type="body1">天后过期</MiuixText>
         </div>
         <MiuixText v-else-if="state === 'expired'" type="title3" color="var(--m-color-error)">证书已过期</MiuixText>
         <MiuixText v-else-if="state === 'invalid'" type="title3" color="var(--m-color-error)">keybox 无效</MiuixText>
         <MiuixText v-else type="title3">尚未签发证书</MiuixText>
-
         <MiuixText v-if="kb.not_after != null" type="body2" color="var(--m-color-on-surface-variant-summary)">
           {{ state === 'expired' ? '过期于' : '有效期至' }} {{ formatDateTime(kb.not_after) }}
         </MiuixText>
@@ -109,6 +102,33 @@ const days = computed(() => (kb.value?.not_after != null ? daysLeft(kb.value.not
 </template>
 
 <style scoped>
+/* MiuixCard paints its background from --m-card-color. Without color-mix() the
+   warning/error cards keep the default surface; the corner icon still shows the state. */
+.status-card--valid {
+  --m-card-color: var(--app-ok-container);
+}
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  .status-card--expiring {
+    --m-card-color: color-mix(in srgb, var(--app-warning) 16%, var(--m-color-surface-container));
+  }
+  .status-card--expired,
+  .status-card--invalid {
+    --m-card-color: color-mix(in srgb, var(--m-color-error) 12%, var(--m-color-surface-container));
+  }
+}
+/* KernelSU: 110dp icon, offset (27dp, 31dp) past the bottom-end corner. */
+.status__mark {
+  position: absolute;
+  right: -27px;
+  bottom: -31px;
+  width: 110px;
+  height: 110px;
+  pointer-events: none;
+}
+.status,
+.status ~ * {
+  position: relative;
+}
 .status {
   padding: 16px;
   display: flex;
@@ -131,11 +151,7 @@ const days = computed(() => (kb.value?.not_after != null ? daysLeft(kb.value.not
   font-size: 44px;
   font-weight: 600;
   line-height: 1.1;
-  color: var(--m-color-primary);
   font-variant-numeric: tabular-nums;
-}
-.status__days--warn {
-  color: var(--app-warning);
 }
 .status__stats {
   display: flex;
@@ -145,6 +161,12 @@ const days = computed(() => (kb.value?.not_after != null ? daysLeft(kb.value.not
   padding: 12px;
   border-radius: 12px;
   background: var(--m-color-secondary-variant);
+}
+/* Translucent so the tinted card shows through. */
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  .status__stats {
+    background: color-mix(in srgb, var(--m-color-surface-container) 55%, transparent);
+  }
 }
 .stat {
   flex: 1;

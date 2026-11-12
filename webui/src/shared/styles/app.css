@@ -3,12 +3,16 @@
 
 :root {
   --app-warning: #f5a623;
+  /* "OK" status card: KernelSU Miuix home StatusCard colours (HomeMiuix.kt). */
+  --app-ok: #36d167;
+  --app-ok-container: #dffae4;
   /* Grouped rows inside bottom sheets (sheet background is --m-color-background). */
   --app-sheet-group: #f7f7f7;
 }
 
 .m-theme-dark {
   --app-warning: #ffb74d;
+  --app-ok-container: #1a3825;
   --app-sheet-group: #2e2e2e;
 }
 

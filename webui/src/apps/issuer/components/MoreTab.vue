@@ -12,7 +12,7 @@ import {
 } from 'miuix-vue'
 import { ChevronForward } from 'miuix-vue/icons'
 import FoldBlock from '../../../shared/components/FoldBlock.vue'
-import { BIN, CONFIG, DATA, MODULE_DIR, readConfig, readModuleProp, readVersion } from '../lib/rkp'
+import { CONFIG, DATA, readConfig, readModuleProp, readVersion } from '../lib/rkp'
 import { CommandError } from '../../../shared/lib/command'
 import { saveTheme } from '../../../shared/lib/theme'
 
@@ -93,10 +93,8 @@ watch(
   <MiuixSmallTitle text="关于" />
   <MiuixCard>
     <MiuixBasicComponent title="模块版本" :summary="moduleVersion" />
-    <MiuixBasicComponent title="二进制" :summary="binVersion" />
-    <MiuixBasicComponent title="二进制路径" :summary="BIN" />
+    <MiuixBasicComponent title="二进制版本" :summary="binVersion" />
     <MiuixBasicComponent title="数据目录" :summary="DATA" />
-    <MiuixBasicComponent title="模块目录" :summary="MODULE_DIR" />
   </MiuixCard>
 </template>
 

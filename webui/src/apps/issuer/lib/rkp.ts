@@ -125,10 +125,11 @@ export async function readCachedStatus(): Promise<StatusData> {
   }
 }
 
+/** `rkp-mini-issuer --version` prints `rkp-mini-issuer 0.2.0`; keep the version only. */
 export async function readVersion(): Promise<string> {
   const r = await run(`'${BIN}' --version`)
   if (r.errno !== 0) throw new CommandError('exit', `退出码 ${r.errno}`, r.stderr.trim())
-  return r.stdout.trim()
+  return r.stdout.trim().split(/\s+/).pop() ?? ''
 }
 
 export async function readConfig(): Promise<string> {

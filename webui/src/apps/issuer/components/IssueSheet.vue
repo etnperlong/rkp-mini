@@ -21,8 +21,8 @@ function confirm(): void {
 
 const points = [
   '每次签发都会生成全新的 P-256 密钥，由设备 KeyMint TA（Native V2，0x3122）签名 CSR，再向 Google RKP 服务申请证书。',
-  '需要联网，通常耗时数秒到一分钟；签发在后台进行，期间可以离开此页面。',
-  '失败时保留原有 keybox；结果不保证 Play Integrity 通过。',
+  '需要联网，通常几秒到一分钟。签发在后台进行，可以离开此页面。',
+  '失败不会影响现有证书；签发成功也不保证通过 Play Integrity。',
 ]
 </script>
 
@@ -41,14 +41,13 @@ const points = [
         </li>
         <li>
           <MiuixText type="body2">
-            {{ props.hasKeybox ? '成功后将覆盖' : '成功后将写入' }}
-            <code>{{ props.keyboxPath }}</code>{{ props.hasKeybox ? '（旧文件备份为 keybox.xml.prev）' : '' }}。
+            成功后保存到 <code>{{ props.keyboxPath }}</code>{{ props.hasKeybox ? '，旧文件备份为 keybox.xml.prev' : '' }}。
           </MiuixText>
         </li>
       </ul>
 
       <div class="sheet-group">
-        <MiuixCheckboxPreference v-model="acknowledged" title="我已了解并确认签发" summary="等同于命令行的 --acknowledge" />
+        <MiuixCheckboxPreference v-model="acknowledged" title="我已了解，确认签发" />
       </div>
 
       <MiuixButton type="primary" :disabled="!acknowledged" @click="confirm">开始签发</MiuixButton>

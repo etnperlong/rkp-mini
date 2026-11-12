@@ -24,16 +24,28 @@ import ResultSheet from './components/ResultSheet.vue'
 import DetailSheet from './components/DetailSheet.vue'
 import MoreTab from './components/MoreTab.vue'
 import LogsSheet from './components/LogsSheet.vue'
-import SenderSyncCard from './components/SenderSyncCard.vue'
 import SenderSyncSheet from './components/SenderSyncSheet.vue'
 import SenderShareSheet from './components/SenderShareSheet.vue'
 import SenderRotateSheet from './components/SenderRotateSheet.vue'
+import SyncStatusCard from './components/SyncStatusCard.vue'
+import SyncDetailSheet from './components/SyncDetailSheet.vue'
+import RiskSheet from '../../shared/components/RiskSheet.vue'
 import SecretSheet from '../../shared/components/SecretSheet.vue'
 import { bridgeAvailable } from '../../shared/lib/ksu'
 import { CommandError } from '../../shared/lib/command'
 import { blockerLabel, readCachedStatus, readStatus, type StatusData } from './lib/rkp'
 import { useIssueRunner } from './lib/issueRunner'
-import { readSyncStatus, syncErrorText, useSyncRunner, type SecretKind, type SyncStatus } from '../../shared/lib/sync'
+import {
+  CHECK_OUTCOME_LABEL,
+  readSyncStatus,
+  syncErrorText,
+  syncTaskArgs,
+  useSyncRunner,
+  type CheckOutcome,
+  type SecretKind,
+  type SyncOp,
+  type SyncStatus,
+} from '../../shared/lib/sync'
 import { nowUnix } from '../../shared/lib/format'
 import { initTheme } from '../../shared/lib/theme'
 
@@ -74,6 +86,8 @@ const syncNotInitialized = ref(false)
 const syncError = ref<string | null>(null)
 const syncLoading = ref(false)
 const syncSheetOpen = ref(false)
+const syncDetailOpen = ref(false)
+const syncRiskOpen = ref(false)
 const shareOpen = ref(false)
 const rotateOpen = ref(false)
 const secretOpen = ref(false)
@@ -81,8 +95,8 @@ const secretKind = ref<SecretKind>('age')
 
 const SECRET_SHEET: Record<SecretKind, { title: string; hint: string }> = {
   age: {
-    title: '设置 age 口令',
-    hint: '每个同步流使用独立的强口令（建议 6 个以上随机单词或 20+ 随机字符）；接收端需要用它解密。',
+    title: '设置密码',
+    hint: '每个同步流使用独立的强密码（建议 6 个以上随机单词或 20+ 随机字符）；接收端需要用它解密云端储存的 Keybox。',
   },
   'gist-token': {
     title: '设置 Gist token',
@@ -176,14 +190,47 @@ async function loadSyncStatus(): Promise<void> {
 // truth, so a task started before the page opened still reports here.
 const syncRunner = useSyncRunner(async (result) => {
   await loadSyncStatus()
-  const ok = result.code === 0 && result.envelope?.ok === true
-  void showSnackbar({
-    message: ok
-      ? result.op === 'rotate'
-        ? '口令轮换完成'
-        : '推送完成'
-      : '同步任务失败，详情见同步卡片',
-  })
+  let message = '同步任务失败，详情见同步卡片'
+  const env = result.envelope
+  if (result.code === 0 && env !== null && env.ok) {
+    const data = env.data as Record<string, unknown>
+    if (result.op === 'check') {
+      message = `云端检查：${CHECK_OUTCOME_LABEL[data.outcome as CheckOutcome] ?? '完成'}`
+    } else if (result.op === 'rotate') {
+      message = '密码已重置，接收端需要同时更新'
+    } else if (result.op === 'delete') {
+      message = data.deleted === true ? '云端文件已删除' : '云端没有可删除的文件'
+    } else {
+      message = '推送完成'
+    }
+  }
+  void showSnackbar({ message })
+})
+
+/** Op started from this page (null after a reload mid-task): only for button labels. */
+const startedOp = ref<SyncOp | null>(null)
+
+/** A sync tab button starts one runner task; the runner rejects a second one. */
+async function startSyncTask(op: SyncOp): Promise<void> {
+  startedOp.value = op
+  try {
+    await syncRunner.start(syncTaskArgs(op))
+  } catch (e) {
+    void showSnackbar({ message: e instanceof Error ? e.message : String(e) })
+  }
+}
+
+const canRunSync = computed(
+  () => syncStatus.value !== null && !syncRunner.busy.value && syncRunner.phase.value !== 'stale',
+)
+const canPushSync = computed(() => {
+  const s = syncStatus.value
+  return canRunSync.value && s !== null && s.enabled && s.risk_ack_current
+})
+/** `启用` replaces 立即推送 until the stream is enabled with the current risk text. */
+const syncNeedsEnable = computed(() => {
+  const s = syncStatus.value
+  return s !== null && (!s.enabled || !s.risk_ack_current)
 })
 
 async function onRefresh(): Promise<void> {
@@ -292,17 +339,29 @@ onBeforeUnmount(() => clearInterval(clock))
 
       <MiuixScrollArea v-show="tab === 2" class="app__scroll">
         <main class="page">
-          <SenderSyncCard
+          <SyncStatusCard
             :status="syncStatus"
             :not-initialized="syncNotInitialized"
             :loading="syncLoading"
             :error="syncError"
             :runner="syncRunner"
             :now="now"
-            @settings="syncSheetOpen = true"
-            @share="shareOpen = true"
+            :busy-op="startedOp"
+            :can-refresh="canRunSync"
+            @detail="syncDetailOpen = true"
             @changed="loadSyncStatus()"
+            @refresh="startSyncTask('check')"
           />
+          <div v-if="syncStatus" class="actions">
+            <MiuixButton v-if="syncNeedsEnable" type="primary" @click="syncRiskOpen = true">启用</MiuixButton>
+            <MiuixButton v-else type="primary" :disabled="!canPushSync" @click="startSyncTask('push')">
+              立即推送
+            </MiuixButton>
+            <MiuixButton :disabled="syncRunner.busy.value || !syncStatus?.enabled" @click="shareOpen = true">
+              分享
+            </MiuixButton>
+            <MiuixButton :disabled="syncRunner.busy.value" @click="syncSheetOpen = true">同步设置</MiuixButton>
+          </div>
         </main>
       </MiuixScrollArea>
     </template>
@@ -331,16 +390,19 @@ onBeforeUnmount(() => clearInterval(clock))
       <ResultSheet v-model="resultOpen" :runner="runner" @logs="openLogs(true)" />
       <AutoIssueSheet v-model="autoIssueOpen" :status="status" @changed="loadStatus(false)" />
       <DetailSheet v-if="status" v-model="detailOpen" :status="status" :now="now" />
+      <SyncDetailSheet v-model="syncDetailOpen" :status="syncStatus" :now="now" />
       <SenderSyncSheet
         v-model="syncSheetOpen"
         :status="syncStatus"
         :busy="syncRunner.busy.value"
         @secret="openSecret"
-        @rotate="rotateOpen = true"
+        @rotate="(startedOp = 'rotate'), (rotateOpen = true)"
+        @delete="startSyncTask('delete')"
         @changed="loadSyncStatus()"
       />
       <SenderShareSheet v-model="shareOpen" />
       <SenderRotateSheet v-model="rotateOpen" :runner="syncRunner" />
+      <RiskSheet v-model="syncRiskOpen" @enabled="loadSyncStatus()" />
       <SecretSheet
         v-model="secretOpen"
         :kind="secretKind"

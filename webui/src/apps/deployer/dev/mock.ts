@@ -376,6 +376,7 @@ function buildStatus(): SyncStatus {
     password_mode: state.password_mode,
     secrets,
     sync_state: buildSyncState(),
+    remote_check: null,
     deploy_state: buildDeployState(),
     staged: buildStaged(),
     targets,

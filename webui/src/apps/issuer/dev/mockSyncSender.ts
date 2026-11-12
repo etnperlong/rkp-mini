@@ -2,12 +2,26 @@
 // Query parameters:
 //   ?sync=     uninit | disabled | ready | error | nosecret      (sync state)
 //   ?syncpush= ok | noop | fail                     (result of one push task)
+//   ?remote=   none | in_sync | behind | ahead | diverged | missing | error
+//              (cached remote_check; `none` = never checked, and its `check`
+//               task reports in_sync)
+//   ?autopush= on | off                                     (default on)
 //
 // Secrets: the WebUI writes them as `echo <hex> > .../sync/inbox/<kind>.hex`.
 // This mock never reads, stores or logs that hex; it only flips the presence
 // flag the page displays. The dispatch log in mock.ts redacts it too.
 import type { ExecResult } from '../../../shared/lib/ksu'
-import type { PushResult, RiskStatement, SenderConfigKey, ShareResult, SyncConfig, SyncState, SyncStatus } from '../../../shared/lib/sync'
+import type {
+  CheckOutcome,
+  PushResult,
+  RemoteCheck,
+  RiskStatement,
+  SenderConfigKey,
+  ShareResult,
+  SyncConfig,
+  SyncState,
+  SyncStatus,
+} from '../../../shared/lib/sync'
 import { nowUnix } from '../../../shared/lib/format'
 import readyStatus from './fixtures/sync/sender-status-ready.json'
 import disabledStatus from './fixtures/sync/sender-status-disabled.json'
@@ -20,6 +34,7 @@ import pushOk from './fixtures/sync/sender-push-ok.json'
 import pushNoop from './fixtures/sync/sender-push-noop.json'
 import pushFail from './fixtures/sync/sender-push-fail.json'
 import rotateOk from './fixtures/sync/sender-rotate-ok.json'
+import remoteFixture from './fixtures/sync/sender-remote-check.json'
 import logText from './fixtures/sync/sender-sync.log?raw'
 
 const SEP = '<<<RKP-SEP>>>'
@@ -29,6 +44,18 @@ const RISK = riskFixture as unknown as RiskStatement
 const params = new URLSearchParams(location.search)
 const scenario = params.get('sync') ?? 'ready'
 const pushOutcome = params.get('syncpush') ?? 'ok'
+const remoteParam = params.get('remote') ?? 'none'
+const autoPush = (params.get('autopush') ?? 'on') !== 'off'
+
+/** `remote=` value → the outcome recorded in remote-check.json. */
+const REMOTE_OUTCOME: Record<string, CheckOutcome> = {
+  in_sync: 'in_sync',
+  behind: 'remote_behind',
+  ahead: 'remote_ahead',
+  diverged: 'diverged',
+  missing: 'missing',
+  error: 'error',
+}
 
 const STATUS: Record<string, SyncStatus> = {
   ready: readyStatus as unknown as SyncStatus,
@@ -59,7 +86,46 @@ function liveStatus(base: SyncStatus): SyncStatus {
 
 let initialized = scenario !== 'uninit'
 let status = liveStatus(STATUS[scenario] ?? STATUS.ready)
+status.auto_push = autoPush
 const config = structuredClone(baseConfig) as unknown as SyncConfig
+
+/** `remote-check.json` for the `remote=` scenario at time `at`. */
+function buildCheck(at: number): RemoteCheck {
+  const outcome: CheckOutcome = remoteParam === 'none' ? 'in_sync' : (REMOTE_OUTCOME[remoteParam] ?? 'in_sync')
+  const base = structuredClone(remoteFixture) as unknown as RemoteCheck
+  const local = status.sync_state
+  base.at = at
+  base.outcome = outcome
+  base.local = {
+    seq: local?.verified_seq ?? null,
+    keybox_sha256: status.local_keybox?.keybox_sha256 ?? null,
+  }
+  if (base.remote) {
+    base.remote.seq = local?.verified_seq ?? base.remote.seq
+    base.remote.keybox_sha256 = status.local_keybox?.keybox_sha256 ?? base.remote.keybox_sha256
+  }
+  if (outcome === 'missing') {
+    base.remote = null
+  } else if (outcome === 'error') {
+    base.remote = null
+    base.error = { stage: 'remote', code: 'network', message: 'mock: remote unavailable' }
+  } else if (base.remote) {
+    if (outcome === 'remote_ahead') base.remote.seq += 1
+    else if (outcome === 'remote_behind') base.remote.keybox_sha256 = 'e7b9c1d3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9'
+    else if (outcome === 'diverged') base.remote.plaintext_sha256 = '9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c'
+  }
+  return base
+}
+
+/** A `check-remote` run: fresh record, stored like the binary writes it. */
+function runCheck(): RemoteCheck {
+  const record = buildCheck(nowUnix())
+  status.remote_check = record
+  return record
+}
+
+/** `remote=none` means the check never ran, so nothing is cached. */
+status.remote_check = remoteParam === 'none' ? null : buildCheck(nowUnix() - 300)
 
 // ---- Envelopes -------------------------------------------------------------------
 
@@ -114,6 +180,27 @@ function applyPush(): void {
   status.loop_running = true
 }
 
+/** `remote-delete --yes`: the file is gone, so the cached check says `missing`. */
+function deleteRemote(): { deleted: boolean; provider: string; location: string } {
+  status.remote_check = {
+    at: nowUnix(),
+    role: 'sender',
+    outcome: 'missing',
+    remote: null,
+    local: {
+      seq: status.sync_state?.verified_seq ?? null,
+      keybox_sha256: status.local_keybox?.keybox_sha256 ?? null,
+    },
+    error: null,
+  }
+  return { deleted: true, provider: status.provider, location: status.location ?? '' }
+}
+
+/** Success envelope as the runner's `sync-task.last.json` content. */
+function okTask(data: unknown): { json: string; err: string; code: number } {
+  return { json: `${JSON.stringify({ ok: true, data })}\n`, err: '', code: 0 }
+}
+
 function taskResult(op: string): { json: string; err: string; code: number } {
   if (op === 'rotate') {
     status.secrets.age = { path: `${SYNC_SECRETS}/age.pass`, present: true, mode: '0600', ok: true }
@@ -126,7 +213,9 @@ function taskResult(op: string): { json: string; err: string; code: number } {
     if (pushOutcome === 'ok') applyPush()
     return { json: `${JSON.stringify(pushOutcome === 'noop' ? pushNoop : pushOk)}\n`, err: '', code: 0 }
   }
-  return { json: `${JSON.stringify({ ok: true, data: {} })}\n`, err: '', code: 0 }
+  if (op === 'check') return okTask(runCheck())
+  if (op === 'delete') return okTask(deleteRemote())
+  return okTask({})
 }
 
 function launch(op: string): void {
@@ -173,6 +262,8 @@ function dispatch(sub: string, command: string): ExecResult {
     status = liveStatus(STATUS.disabled)
     status.provider = provider
     status.location = null
+    status.auto_push = autoPush
+    status.remote_check = null
     config.provider = provider
     return okJson({ initialized: true, provider })
   }
@@ -196,18 +287,34 @@ function dispatch(sub: string, command: string): ExecResult {
   }
 
   if (sub.startsWith('forget --yes')) {
+    const reset = sub.includes('--reset')
     initialized = false
     status.enabled = false
     status.sync_state = null
+    status.remote_check = null
+    // `--reset` drops the whole [sync] table: the next `init` starts from the template.
+    if (reset) Object.assign(config, structuredClone(baseConfig))
     return okJson({
-      removed: ['sync-state.json', 'sync/secrets/age.pass', 'sync/secrets/gist.token'],
+      removed: ['sync-state.json', 'sync/remote-check.json', 'sync/secrets/age.pass', 'sync/secrets/gist.token'],
       enabled: false,
+      reset,
     })
+  }
+
+  if (sub === 'check-remote') {
+    if (!initialized) return errJson(2, 'config', 'not_initialized', 'sync is not initialized yet')
+    return okJson(runCheck())
+  }
+
+  if (sub.startsWith('remote-delete')) {
+    if (!initialized) return errJson(2, 'config', 'not_initialized', 'sync is not initialized yet')
+    return okJson(deleteRemote())
   }
 
   if (sub === 'config show') {
     config.enabled = status.enabled
     config.provider = status.provider
+    config.auto_push = status.auto_push
     return okJson(config)
   }
 
@@ -218,15 +325,19 @@ function dispatch(sub: string, command: string): ExecResult {
     if (key === 'provider' && raw !== 'gist' && raw !== 'webdav') {
       return errJson(2, 'config', 'config_invalid', `provider must be gist or webdav`)
     }
-    const value = NUMERIC.includes(key) ? Number(raw) : raw
+    if (key === 'auto_push' && raw !== 'true' && raw !== 'false') {
+      return errJson(2, 'config', 'config_invalid', 'auto_push must be true or false')
+    }
+    const value = NUMERIC.includes(key) ? Number(raw) : key === 'auto_push' ? raw === 'true' : raw
     if (typeof value === 'number' && (!Number.isFinite(value) || value < 0)) {
       return errJson(2, 'config', 'config_invalid', `${key} must be a non-negative integer`)
     }
-    ;(config as unknown as Record<string, string | number>)[key] = value
+    ;(config as unknown as Record<string, string | number | boolean>)[key] = value
     if (key === 'provider') {
       status.provider = raw
       status.location = null
     }
+    if (key === 'auto_push') status.auto_push = value === true
     return okJson({ key, value })
   }
 

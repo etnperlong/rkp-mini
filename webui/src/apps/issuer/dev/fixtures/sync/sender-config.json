@@ -24,5 +24,6 @@
     "webdav_password": "/data/misc/keystore/rkp-mini/sync/secrets/webdav.pass"
   },
   "inbox": "/data/misc/keystore/rkp-mini/sync/inbox",
+  "auto_push": true,
   "output_dir": "/data/misc/keystore/rkp-mini/output"
 }

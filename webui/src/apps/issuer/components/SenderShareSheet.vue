@@ -114,9 +114,9 @@ const location = computed(() => {
         </div>
 
         <div class="notice">
-          <MiuixText type="body2" weight="medium" color="var(--app-warning)">链接与二维码不含 age 密码</MiuixText>
+          <MiuixText type="body2" weight="medium" color="var(--app-warning)">链接与二维码不含密码</MiuixText>
           <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-            请在接收端内粘贴或扫码导入，然后把 age 口令通过另一个安全渠道单独发送。任何拿到链接的人都能下载密文，只有密码能解开。
+            请在接收端内粘贴或扫码导入，然后把密码通过另一个安全渠道单独发送。任何拿到链接的人都能下载密文，只有密码能解开。
           </MiuixText>
         </div>
       </template>

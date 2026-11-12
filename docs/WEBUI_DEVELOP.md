@@ -407,9 +407,10 @@ unzip -l "$ZIP" | grep -q 'webroot/index.html' || { echo "! webroot missing" >&2
 ```
 MiuixTopAppBar(title="RKP-Mini · 签发端")
 状态  StatusCard（按状态着色 + 角标图标）、AutoStatusRow（自动签发：issuer status 的 auto_issue.days > 0 且
-      auto-loop.sh 在运行；自动推送：sync status 的 enabled + risk_ack_current + loop_running）、CheckCard、“刷新状态”
+      auto-loop.sh 在运行；自动推送：sync status 的 enabled + risk_ack_current + auto_push + loop_running）、CheckCard、“刷新状态”
 签发  KeyboxSummaryCard（只读一行摘要）、IssueCard、不可签发原因、“手动签发”、“自动签发设置”、免责脚注
-同步  SenderSyncCard（不再含自动签发设置）
+同步  SyncStatusCard（存储方式 / 同步时间 / 自动推送；异常时警告条；点击 → SyncDetailSheet；右上角状态即刷新入口，
+      点击经 runner `check` 运行 `check-remote`，任务进行中在同一位置显示“检查中/推送中 + 用时”）、“立即推送”或“启用”、“分享”、“同步设置”
 更多  MoreTab：外观、日志入口、只读配置、关于（每次切入重新读取）
 MiuixNavigationBar  状态 / 签发 / 同步 / 更多
 MiuixSnackbarHost   （挂载一次；上移到导航栏之上）
@@ -419,6 +420,13 @@ IssueSheet / ResultSheet / DetailSheet / AutoIssueSheet / LogsSheet / 同步相�
 AutoIssueSheet：开关 + 提前天数（1–365，默认 3；大于 14 时显示频繁签发警告——本机 RKP 证书只有约 12–14 天有效期）→ `rkp-mini-issuer config set auto_issue_days N --json`；
 开启时以 `setsid` 启动 `auto-loop.sh`（pid 锁保证重复启动无害）。“上次自动检查”直接读
 `tmp/auto-issue.last.{at,code,json,err}`（`code` 最后写入，缺失视为没有已完成的检查）。
+
+同步页进入时只显示缓存（`status --json`，含上次 `remote_check`），不联网；只有点右上角状态才联网检查。
+`MiuixCard` 开启按压反馈时会在 pointerdown 里 `setPointerCapture`，之后的 click 全部落到卡片本身：卡片内的按钮
+必须 `@pointerdown.stop`，否则点不到且会触发卡片点击。
+SenderSyncSheet：自动推送（`auto_push` 开关 + 最小剩余有效期）、云端存储（含 Gist token / WebDAV 凭据入口）、
+加密（“密码”，不提 age、不显示是否已设置）、其他（标签）、保存、危险区（红色；删除云端文件 / 重置加密密码 /
+清除本地数据 / 完全重置同步设置，均先 MiuixDialog 确认）。密钥缺失或权限错误只在状态卡警告条提示。
 
 数据与后台任务（`useIssueRunner`、`useSyncRunner`、状态读取）都留在 `App.vue`，切换 Tab 不重新读取。
 日志统一在 LogsSheet（“更多 → 日志”，每次打开重新读取）：签发日志 `logs/issue-*.log`、后台日志 `logs/auto.log`

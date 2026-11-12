@@ -1030,7 +1030,7 @@ UI 必须展示并让用户勾选确认：
 - **移除已部署 keybox**：单独操作，二次确认；可能让 OMK/TEESim 回到无 keybox 状态。
 - 禁用不等于撤销：旧 keybox 仍然存在；真正撤销需换密码 + 重新 issue。
 - **2026-11 更新（发送端）**：自动推送有独立开关 `[sync].auto_push`（默认 `true`；关闭后发送端 `check-auto`
-  失败为 `auto_push_disabled`，只停自动推送，手动 `push` 不受影响）。
+  失败为 `auto_push_disabled`，只停自动推送，手动 `push` 不受影响），发送端页面不再提供“禁用同步”（CLI `disable` 保留）。
   `remote-delete --yes`（仅发送端）先用本机口令解密云端并核对 stream，再按刚读到的 token 做条件删除：
   Gist 删除整个 Gist 并清空 `gist_id`/`gist_url`（Gist 不能没有文件；下次 push 新建，接收端需重新导入），
   WebDAV `DELETE` + `If-Match`（412 → `remote_conflict`）；不动 `sync-state`，seq 按 §7.5 延续。
@@ -1204,6 +1204,11 @@ sha 参数接受完整 hex 或 ≥16 位前缀。TTY 交互路径不变（仍可
 ### 19.5 页面
 
 - **发送端**（`rkp_mini_issuer` WebUI 新增“远程同步”卡片 + 底部弹层）：状态（启用、provider、位置、seq、上次推送/错误、本地 keybox 到期、自动循环是否运行）；初始化；provider 配置；设置 age 口令 / Gist token / WebDAV 密码；风险确认弹层（§13.2 每条独立复选框，默认全不勾，全勾才可提交，含 §19.1 debug manager 残余风险）；启用/禁用；立即推送；分享（URI + 由 `share --json` 的 `qr` 矩阵本地渲染的二维码 + “不含密码”提示）；轮换口令；清除本地数据；同步日志。
+  **2026-11 改版**：同步 Tab 改为签发端状态页风格：状态卡（存储方式、同步时间、自动推送；异常时警告条：云端检查结果、
+  密钥文件缺失/权限错误、风险说明过期、上次错误）点击打开详情（位置、同步 ID、本机/云端 keybox、上次推送 seq）；
+  进入时只读本地缓存，“刷新状态”经 runner 运行 `check-remote`。设置弹层：自动推送（开关 + 最小剩余有效期）、
+  云端存储（含 Gist token / WebDAV 凭据）、加密（“密码”）、其他（标签）、危险区（删除云端文件、重置加密密码、
+  清除本地数据、完全重置同步设置；均先弹窗确认）。日志统一在“更多 → 日志”。
 - **接收端**（`rkp_mini_deployer` 模块 `webroot/`，同一 Vue 工程的第二个入口）：粘贴导入链接 → `import --check` 预览位置 → 确认后 `import --yes`；风险确认；口令/WebDAV 密码；目标增删（omk/teesim/tricky_store）；策略设置；拉取（TOFU 弹层展示事实后 `--accept-first <sha>`）；部署（先 `rkp-mini-deployer plan`，首次/身份变化弹层展示 old→new、OMK key 删除警告、TEESim re-attest、“未做根信任检查”，再带 sha 执行）；pending 提示；立即运行；禁用；清除；移除已部署 keybox（两步确认）；日志。
 - “部署目标”弹层先调用 `rkp-mini-deployer targets`：只有 `module.installed` 为 true 的内置目标可以添加；未检测到模块的目标显示为不可选并给出模块 id；检测失败时不提供任何添加入口。已停用的模块仍可选择，但会提示启用前不会重载。
 - 长任务（push、fetch、rotate-password）走 `webroot/runner/sync.sh <op> [非密钥参数]`，与 `issue.sh` 相同的 `setsid` + 状态文件 + 轮询模型；短命令（status/plan/config/secret/enable）直接 `exec`。

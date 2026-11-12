@@ -24,6 +24,8 @@
       "ok": false
     }
   },
+  "auto_push": true,
+  "remote_check": null,
   "sync_state": {
     "v": 1,
     "provider": "gist",

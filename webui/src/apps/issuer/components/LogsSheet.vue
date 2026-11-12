@@ -125,7 +125,7 @@ watch(open, (v) => {
         />
       </div>
       <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-        自动签发与自动推送的记录（最后 200 行），只含 provider、seq、hash 与错误码，不含口令或 token。
+        自动签发与自动推送的记录（最后 200 行），只含 provider、seq、hash 与错误码，不含密码或 token。
       </MiuixText>
 
       <MiuixSmallTitle text="调试日志" />

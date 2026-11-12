@@ -23,6 +23,8 @@
       "ok": false
     }
   },
+  "auto_push": true,
+  "remote_check": null,
   "sync_state": null,
   "local_keybox": {
     "path": "/data/misc/keystore/rkp-mini/output/keybox.xml",

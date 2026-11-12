@@ -2,7 +2,7 @@
 // Two small cards: is unattended issuance / push actually active? The issuer
 // now owns auto-issue (`auto_issue` in its status: the days setting plus whether
 // its auto-loop.sh is alive). Push still needs sync enabled with current risk
-// acceptance, and `loop_running` there now means the same auto-loop.sh.
+// acceptance and `auto_push` on; `loop_running` there means the same auto-loop.sh.
 import { computed } from 'vue'
 import { MiuixCard, MiuixProgressIndicator, MiuixText } from 'miuix-vue'
 import type { SyncStatus } from '../../../shared/lib/sync'
@@ -34,6 +34,7 @@ const loopOff = computed(() => {
   if (!s) return props.syncNotInitialized ? '同步未初始化' : props.syncError ? '读取同步状态失败' : '读取中…'
   if (!s.enabled) return '同步未启用'
   if (!s.risk_ack_current) return '需重新确认风险'
+  if (s.auto_push === false) return '自动推送已关闭'
   if (!s.loop_running) return '后台进程未运行'
   return null
 })

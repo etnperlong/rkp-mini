@@ -118,7 +118,7 @@ NDK=/path/to/android-ndk ./build.sh                         # arm64 release + bo
 
 |App|Parameters|
 |---|---|
-|issuer (`dev/mock.ts`, `dev/mockSyncSender.ts`)|`mock=ready\|expiring\|expired\|invalid\|missing\|blocked\|status-exit\|status-parse\|status-timeout`, `runner=idle\|running\|overdue\|success\|failure\|crashed\|stale`, `outcome=success\|failure`, `sync=uninit\|disabled\|ready\|error\|nosecret`, `syncpush=ok\|noop\|fail`, `auto=off\|on\|stopped`, `autolast=none\|skipped\|ok\|fail`|
+|issuer (`dev/mock.ts`, `dev/mockSyncSender.ts`)|`mock=ready\|expiring\|expired\|invalid\|missing\|blocked\|status-exit\|status-parse\|status-timeout`, `runner=idle\|running\|overdue\|success\|failure\|crashed\|stale`, `outcome=success\|failure`, `sync=uninit\|disabled\|ready\|error\|nosecret`, `syncpush=ok\|noop\|fail`, `remote=none\|in_sync\|behind\|ahead\|diverged\|missing\|error`, `autopush=on\|off`, `auto=off\|on\|stopped`, `autolast=none\|skipped\|ok\|fail`|
 |deployer (`dev/mock.ts`)|`sync=new\|imported\|ready\|pending_first\|pending_identity\|error`, `fetch=tofu\|ok\|fail\|mismatch`, `deploy=fail\|omk_incompatible`, `run=ok\|fetch_fail\|missing_envelope\|skipped\|stale`, `modules=<comma list of omk\|teesim\|tricky_store, each optionally :disabled>\|none\|fail` (default `omk,tricky_store`)|
 
 The deployer mock persists its runner files in `localStorage` (`rkp.mock.receiver.runner`) so a reload reproduces a finished task; clear storage for a clean scenario.

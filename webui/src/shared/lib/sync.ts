@@ -129,6 +129,29 @@ export interface DeployState {
   pending: Pending | null
 }
 
+/** `check-remote` outcome, first match wins (design §13.3). */
+export type CheckOutcome = 'in_sync' | 'remote_behind' | 'remote_ahead' | 'diverged' | 'missing' | 'error'
+
+/** Head record of the remote file as read by `check-remote`. */
+export interface RemoteFact {
+  seq: number
+  plaintext_sha256: string | null
+  keybox_sha256: string | null
+  device_id: string | null
+  issued_at: number | null
+  keybox_not_after: number | null
+}
+
+/** `<root>/sync/remote-check.json`, surfaced as `status.remote_check`. */
+export interface RemoteCheck {
+  at: number
+  role: SyncRole
+  outcome: CheckOutcome
+  remote: RemoteFact | null
+  local: { seq: number | null; keybox_sha256: string | null }
+  error: SyncErrorInfo | null
+}
+
 export interface LocalKeybox {
   path: string
   valid: boolean
@@ -155,7 +178,10 @@ export interface SyncStatus {
   password_mode: 'secret-file' | 'prompt'
   secrets: { age?: SecretStatus; gist_token?: SecretStatus; webdav_password?: SecretStatus }
   sync_state: SyncState | null
+  /** Cached `check-remote` record (both roles); null when it never ran. */
+  remote_check: RemoteCheck | null
   // sender
+  auto_push?: boolean
   local_keybox?: LocalKeybox
   // receiver
   deploy_state?: DeployState | null
@@ -212,6 +238,7 @@ export interface SyncConfig {
   inbox: string
   // sender
   output_dir?: string
+  auto_push?: boolean
   // receiver
   identity_change_policy?: IdentityPolicy
   rotation_lead_days?: number
@@ -232,6 +259,7 @@ export type SenderConfigKey =
   | 'webdav_path'
   | 'webdav_user'
   | 'password_mode'
+  | 'auto_push'
 export type ReceiverConfigKey =
   | 'label'
   | 'min_validity_days'
@@ -452,8 +480,12 @@ export function disableSync(): Promise<unknown> {
   return data('disable')
 }
 
-export function forgetSync(staging: boolean): Promise<{ removed: string[]; enabled: false }> {
-  return data(`forget --yes${staging ? ' --staging' : ''}`)
+/**
+ * Both roles: remove local sync data (and the secrets) but never the remote file.
+ * `reset` (sender only) also drops the whole `[sync]` table → back to uninitialized.
+ */
+export function forgetSync(staging: boolean, reset = false): Promise<{ removed: string[]; enabled: false; reset: boolean }> {
+  return data(`forget --yes${staging ? ' --staging' : ''}${reset ? ' --reset' : ''}`)
 }
 
 export type SecretKind = 'age' | 'gist-token' | 'webdav-password'
@@ -539,8 +571,11 @@ export async function readSyncLog(lines = 200): Promise<string> {
 
 // ---- Long tasks (detached runner/sync.sh) -----------------------------------------------
 
-/** Sender: push | rotate. Receiver: fetch [plaintext sha] | run. */
-export type SyncOp = 'push' | 'rotate' | 'fetch' | 'run'
+/**
+ * Sender: push | rotate | check (check-remote) | delete (remote-delete --yes).
+ * Receiver: fetch [plaintext sha] | run. One runner, so ops never overlap.
+ */
+export type SyncOp = 'push' | 'rotate' | 'check' | 'delete' | 'fetch' | 'run'
 export type SyncTaskResult = TaskResult<SyncEnvelope<unknown>>
 export type SyncRunner = TaskRunner<SyncEnvelope<unknown>>
 
@@ -579,6 +614,7 @@ const CODE: Record<string, string> = {
   risk_not_acknowledged: '尚未接受风险说明',
   risk_version_mismatch: '风险说明已更新，需要重新确认',
   sync_disabled: '同步已禁用',
+  auto_push_disabled: '自动推送已关闭',
   stream_missing: '尚未配置同步流',
   provider_missing: '尚未选择存储方式',
   secret_missing: '缺少密钥文件',
@@ -641,8 +677,18 @@ export function syncCodeLabel(code: string): string {
   return CODE[code] ?? code
 }
 
+/** Sender wording: what the cached `check-remote` result means for this device. */
+export const CHECK_OUTCOME_LABEL: Record<CheckOutcome, string> = {
+  in_sync: '云端与本机一致',
+  remote_behind: '云端不是最新的 keybox，需要推送',
+  remote_ahead: '云端版本比上次推送新',
+  diverged: '同一版本号的内容不一致',
+  missing: '云端没有同步文件',
+  error: '云端检查失败',
+}
+
 /** `中文说明（code）` when known, else `code: message`. */
-export function syncErrorText(e: SyncErrorInfo): string {
+export function syncErrorText(e: Pick<SyncErrorInfo, 'code' | 'message'>): string {
   const label = CODE[e.code]
   return label ? `${label}（${e.code}）` : `${e.code}: ${e.message}`
 }

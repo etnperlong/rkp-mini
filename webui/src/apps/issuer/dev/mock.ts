@@ -9,6 +9,9 @@
 //   ?autolast= none | skipped | ok | fail   (last auto-issue run in tmp/auto-issue.last.*)
 //   ?sync=    uninit | disabled | ready | error | nosecret        (sync state)
 //   ?syncpush= ok | noop | fail                 (result of one push task)
+//   ?remote=  none | in_sync | behind | ahead | diverged | missing | error
+//                                            (cached remote_check; none = null)
+//   ?autopush= on | off                                      (default on)
 // rkp-mini-sync commands are answered by ./mockSyncSender.ts.
 import type { ExecResult } from '../../../shared/lib/ksu'
 import type { StatusData } from '../lib/rkp'

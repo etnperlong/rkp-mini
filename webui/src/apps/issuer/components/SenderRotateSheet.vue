@@ -58,13 +58,13 @@ watch(
     if (phase === 'launch_failed' && launched.value) {
       void discardRotation()
       launched.value = false
-      error.value = '轮换任务未能启动，新口令未保存'
+      error.value = '轮换任务未能启动，新密码未保存'
     }
   },
 )
 
 const problem = computed(() => {
-  if (!first.value) return '请输入新口令'
+  if (!first.value) return '请输入新密码'
   if (/[\r\n]/.test(first.value)) return '不能包含换行'
   if (first.value !== second.value) return '两次输入不一致'
   if (r.busy.value) return '另一个同步任务正在运行'
@@ -83,7 +83,7 @@ const progress = computed(() => {
   if (!result || !r.showLast.value) return '任务已启动，结果见同步卡片'
   const env = result.envelope
   if (!env) return `任务异常退出（${result.code}）`
-  return env.ok ? '口令轮换完成' : syncErrorText(env.error)
+  return env.ok ? '密码重置完成' : syncErrorText(env.error)
 })
 
 const failed = computed(() => {
@@ -101,11 +101,11 @@ async function begin(): Promise<void> {
     await r.start(syncTaskArgs('rotate'))
     if (r.phase.value === 'launch_failed') {
       await discardRotation()
-      error.value = '轮换任务未能启动，新口令未保存'
+      error.value = '轮换任务未能启动，新密码未保存'
       return
     }
     launched.value = true
-    void showSnackbar({ message: '口令轮换任务已启动' })
+    void showSnackbar({ message: '密码重置任务已启动' })
   } catch (e) {
     await discardRotation()
     error.value = message(e)
@@ -123,7 +123,7 @@ function retry(): void {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="轮换 age 口令">
+  <MiuixBottomSheet v-model="open" title="重置加密密码">
     <template #start-action>
       <MiuixIconButton aria-label="关闭" @click="open = false">
         <MiuixIcon :icon="Close" />
@@ -132,15 +132,15 @@ function retry(): void {
 
     <div class="sheet-body">
       <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-        用新口令重新加密当前 keybox 并上传。旧口令立即失效，接收端必须改成新口令才能继续拉取。
+        用新密码重新加密当前 keybox 并上传。旧密码立即失效，接收端必须改成新密码才能继续拉取。
       </MiuixText>
 
       <div class="sheet-group">
-        <SecretInput v-model="first" label="新口令" :disabled="busy || launched" />
+        <SecretInput v-model="first" label="新密码" :disabled="busy || launched" />
         <SecretInput v-model="second" label="再次输入" :disabled="busy || launched" />
       </div>
       <MiuixText v-if="short" type="footnote1" color="var(--app-warning)">
-        口令较短：建议 6 个以上随机单词或 20+ 随机字符。
+        密码较短：建议 6 个以上随机单词或 20+ 随机字符。
       </MiuixText>
 
       <MiuixText v-if="error" type="footnote1" color="var(--m-color-error)">{{ error }}</MiuixText>
@@ -152,22 +152,22 @@ function retry(): void {
 
       <div v-if="launched" class="notes">
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-          · 接收端需要设置新口令后才能继续拉取；旧口令不再可用。
+          · 接收端需要设置新密码后才能继续拉取；旧密码不再可用。
         </MiuixText>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-          · Gist 的历史 revision 仍然可以用旧口令解密：轮换口令不会删除历史密文。
+          · Gist 的历史 revision 仍然可以用旧密码解密：轮换密码不会删除历史密文。
         </MiuixText>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-          · 真正的撤销 = 重新签发 keybox。已泄露的旧 keybox 仍然有效，换口令只是切断对它的分发。
+          · 真正的撤销 = 重新签发 keybox。已泄露的旧 keybox 仍然有效，换密码只是切断对它的分发。
         </MiuixText>
       </div>
 
       <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-        新口令经 root shell 写入 0600 临时文件，由 rkp-mini-sync 读取并立即删除；不会出现在命令行参数、URL 或日志中。
+        新密码经 root shell 写入 0600 临时文件，由 rkp-mini-sync 读取并立即删除；不会出现在命令行参数、URL 或日志中。
       </MiuixText>
 
       <MiuixButton v-if="!launched" type="primary" :disabled="busy || problem !== null" @click="begin">
-        {{ busy ? '提交中…' : '开始轮换' }}
+        {{ busy ? '提交中…' : '开始重置' }}
       </MiuixButton>
       <template v-else>
         <MiuixButton v-if="failed" :disabled="r.busy.value" @click="retry">重新输入</MiuixButton>

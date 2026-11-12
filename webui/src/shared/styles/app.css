@@ -57,3 +57,8 @@ body {
   -webkit-user-select: text;
   word-break: break-all;
 }
+
+/* Dialog summaries often name paths/URLs with no spaces; let them wrap. */
+.m-dialog__summary {
+  overflow-wrap: anywhere;
+}

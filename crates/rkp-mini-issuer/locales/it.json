@@ -1,0 +1,20 @@
+{
+  "description.expired": "❌ RKP scaduto %{date}",
+  "description.expiring": "✅ RKP %{date} (%{days}, rinnovare presto)",
+  "description.valid": "✅ RKP %{date} (%{days})",
+  "description.invalid": "❌ keybox non valido: %{reason}",
+  "description.blocked": "❌ non emesso (%{hint})",
+  "description.unissued": "❌ non emesso",
+  "description.parse_failed": "analisi non riuscita",
+  "day.one": "%{n} giorno",
+  "day.other": "%{n} giorni",
+  "hint.android_arm64_required": "arm64 richiesto",
+  "hint.root_required": "root richiesto",
+  "hint.qualcomm_required": "non Qualcomm",
+  "hint.soc_unknown": "SoC sconosciuto",
+  "hint.soc_conflicting": "SoC in conflitto",
+  "hint.keymint_library_missing": "libreria keymaster mancante",
+  "hint.smcinvoke_missing": "smcinvoke mancante",
+  "hint.fingerprint_missing": "impronta mancante",
+  "hint.other": "prerequisiti non soddisfatti"
+}

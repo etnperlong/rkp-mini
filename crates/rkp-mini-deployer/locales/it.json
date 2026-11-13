@@ -1,0 +1,4 @@
+{
+  "_version": 1,
+  "module_intro": "Ricevitore keybox remoto (disattivato per impostazione predefinita, gestito da WebUI): distribuisce su OMK/TEESimulator dopo decifratura e verifica age; l'uso su altri dispositivi è clonazione della keybox"
+}

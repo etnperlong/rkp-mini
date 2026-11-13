@@ -3,9 +3,11 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use rust_i18n::t;
 
 use crate::cli::StatusArgs;
 use crate::config::{self, Config};
+use crate::error::{err, Stage};
 use crate::rkp::keybox::{self, KeyboxInfo};
 use crate::util;
 
@@ -131,52 +133,105 @@ fn keybox_lib() -> &'static str {
     crate::rkp::keymint::VENDOR_LIB
 }
 
-/// Short human hint for a blocker code (used in the single-line description).
-pub(crate) fn blocker_hint(code: &str) -> &'static str {
-    match code {
-        "android_arm64_required" => "需 arm64",
-        "root_required" => "需 root",
-        "qualcomm_required" => "非高通",
-        "soc_unknown" => "SoC 未知",
-        "soc_conflicting" => "SoC 冲突",
-        "keymint_library_missing" => "缺 keymaster 库",
-        "smcinvoke_missing" => "smcinvoke 缺失",
-        "fingerprint_missing" => "缺指纹",
-        _ => "前置未满足",
-    }
+/// Canonical locale codes the WebUI persists in `<dataDir>/ui-language`.
+const LOCALES: [&str; 8] = ["zh-CN", "zh-TW", "en", "ja", "ko", "de", "fr", "it"];
+/// Native default when the persisted locale is missing or invalid.
+const DEFAULT_LOCALE: &str = "zh-CN";
+
+/// Translated hint for a blocker code; unknown codes use the generic hint.
+fn hint(locale: &str, code: &str) -> String {
+    let key = match code {
+        "android_arm64_required" => "hint.android_arm64_required",
+        "root_required" => "hint.root_required",
+        "qualcomm_required" => "hint.qualcomm_required",
+        "soc_unknown" => "hint.soc_unknown",
+        "soc_conflicting" => "hint.soc_conflicting",
+        "keymint_library_missing" => "hint.keymint_library_missing",
+        "smcinvoke_missing" => "hint.smcinvoke_missing",
+        "fingerprint_missing" => "hint.fingerprint_missing",
+        _ => "hint.other",
+    };
+    t!(key, locale = locale).into_owned()
+}
+
+/// Short human hint for a blocker code. Diagnostics stay zh-CN by design.
+pub(crate) fn blocker_hint(code: &str) -> String {
+    hint(DEFAULT_LOCALE, code)
+}
+
+/// Day count with the locale's plural form; French treats 0 as singular.
+fn day_text(locale: &str, days: i64) -> String {
+    let one = if locale == "fr" { days <= 1 } else { days == 1 };
+    let key = if one { "day.one" } else { "day.other" };
+    t!(key, locale = locale, n = days).into_owned()
 }
 
 /// "Renew soon" threshold. Native RKP leaves last ≈12–14 days; matches the
 /// recommended auto-issue threshold.
 const EXPIRING_DAYS: i64 = 3;
 
-/// Compose the single-line module description (spec §7.7).
-pub fn description_for(status: &DeviceStatus, keybox: &KeyboxInfo) -> String {
-    let now = util::now_unix();
-    let raw = if keybox.exists {
+fn lang_file() -> PathBuf {
+    Path::new(config::DATA_DIR).join("ui-language")
+}
+
+/// Locale last chosen in the WebUI; a missing or invalid file keeps zh-CN.
+fn load_locale(path: &Path) -> &'static str {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| LOCALES.iter().copied().find(|l| raw.trim() == *l))
+        .unwrap_or(DEFAULT_LOCALE)
+}
+
+/// Locale-explicit renderer; `now` and the locale are injected so tests are
+/// deterministic and never touch the production data dir.
+fn render(locale: &str, status: &DeviceStatus, keybox: &KeyboxInfo, now: i64) -> String {
+    if keybox.exists {
         match keybox.not_after {
-            Some(na) if na <= now => format!("❌ RKP 已过期 {}", util::format_date(na)),
+            Some(na) if na <= now => t!(
+                "description.expired",
+                locale = locale,
+                date = util::format_date(na)
+            )
+            .into_owned(),
             Some(na) if keybox.valid => {
-                let days = util::days_left(na, now);
-                if days <= EXPIRING_DAYS {
-                    format!("✅ RKP {}（{}天，尽快续签）", util::format_date(na), days)
+                let left = util::days_left(na, now);
+                let key = if left <= EXPIRING_DAYS {
+                    "description.expiring"
                 } else {
-                    format!("✅ RKP {}（{}天）", util::format_date(na), days)
-                }
+                    "description.valid"
+                };
+                t!(
+                    key,
+                    locale = locale,
+                    date = util::format_date(na),
+                    days = day_text(locale, left)
+                )
+                .into_owned()
             }
             _ => {
-                let reason = keybox
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| "解析失败".to_string());
-                format!("❌ keybox 无效：{}", reason)
+                // The raw diagnostic text is inserted verbatim, never re-parsed
+                // as a template.
+                let reason = keybox.error.clone().unwrap_or_else(|| {
+                    t!("description.parse_failed", locale = locale).into_owned()
+                });
+                t!("description.invalid", locale = locale, reason = reason).into_owned()
             }
         }
     } else if let Some(b) = status.blockers.first() {
-        format!("❌ 未签发（{}）", blocker_hint(b))
+        t!(
+            "description.blocked",
+            locale = locale,
+            hint = hint(locale, b)
+        )
+        .into_owned()
     } else {
-        "❌ 未签发".to_string()
-    };
+        t!("description.unissued", locale = locale).into_owned()
+    }
+}
+
+/// Compose the single-line module description (spec §7.7) in the WebUI locale.
+pub fn description_for(status: &DeviceStatus, keybox: &KeyboxInfo) -> String {
+    let raw = render(load_locale(&lang_file()), status, keybox, util::now_unix());
     util::single_line(&raw, 120)
 }
 
@@ -374,6 +429,22 @@ pub fn run(args: &StatusArgs) -> Result<i32> {
     Ok(0)
 }
 
+/// A module.prop write failure is a write-stage error (exit 7) for callers.
+fn description_write(res: Result<()>) -> Result<()> {
+    res.map_err(|e| err(Stage::Write, "description_write", e.to_string()))
+}
+
+/// `update-description` command: refresh module.prop only, no status files.
+pub fn run_update_description(config_path: &Option<PathBuf>) -> Result<i32> {
+    let cfg = config::load(&config::resolve_path(config_path))?;
+    let status = detect(&cfg);
+    let kb = keybox::inspect(&Path::new(&cfg.output_dir).join("keybox.xml"));
+    let description = description_for(&status, &kb);
+    description_write(update_module_description(&description))?;
+    println!("{description}");
+    Ok(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,74 +461,198 @@ mod tests {
         }
     }
 
-    #[test]
-    fn description_no_keybox_no_blocker() {
-        let kb = KeyboxInfo::default();
-        assert_eq!(description_for(&base_status(), &kb), "❌ 未签发");
-    }
+    const NOW: i64 = 1_700_000_000;
 
-    #[test]
-    fn description_no_keybox_with_blocker() {
-        let mut s = base_status();
-        s.blockers = vec!["smcinvoke_missing"];
-        let kb = KeyboxInfo::default();
-        assert_eq!(description_for(&s, &kb), "❌ 未签发（smcinvoke 缺失）");
-    }
-
-    #[test]
-    fn description_valid_keybox() {
-        let na = util::now_unix() + 22 * 86_400;
-        let kb = KeyboxInfo {
+    fn kb_at(na: i64, valid: bool) -> KeyboxInfo {
+        KeyboxInfo {
             exists: true,
-            valid: true,
+            valid,
             certificates: 4,
             not_after: Some(na),
-            key_match: true,
+            key_match: valid,
             ..Default::default()
-        };
-        let d = description_for(&base_status(), &kb);
-        assert!(d.starts_with("✅ RKP"));
-        assert!(d.contains("22天"));
+        }
     }
 
     #[test]
-    fn description_expiring_soon() {
-        let na = util::now_unix() + 2 * 86_400;
-        let kb = KeyboxInfo {
-            exists: true,
-            valid: true,
-            not_after: Some(na),
-            key_match: true,
-            ..Default::default()
-        };
-        assert!(description_for(&base_status(), &kb).contains("尽快续签"));
+    fn every_locale_renders_every_state() {
+        let na = NOW + 22 * 86_400;
+        for locale in LOCALES {
+            let cases = [
+                (kb_at(na, true), "valid"),
+                (kb_at(NOW + 2 * 86_400, true), "expiring"),
+                (kb_at(NOW - 86_400, true), "expired"),
+                (kb_at(NOW + 10 * 86_400, false), "invalid"),
+            ];
+            for (kb, state) in cases {
+                let d = render(locale, &base_status(), &kb, NOW);
+                assert_eq!(d.lines().count(), 1, "{locale} {state}: {d}");
+                assert!(!d.contains("%{"), "{locale} {state}: {d}");
+                assert!(!d.contains("description."), "{locale} {state}: {d}");
+                if let Some(na) = kb.not_after.filter(|_| state != "invalid") {
+                    let date = util::format_date(na);
+                    assert!(d.contains(&date), "{locale} {state}: {d}");
+                }
+            }
+            let mut blocked = base_status();
+            blocked.blockers = vec!["fingerprint_missing"];
+            let b = render(locale, &blocked, &KeyboxInfo::default(), NOW);
+            assert!(!b.contains("fingerprint_missing"), "{locale}: {b}");
+            let unissued = render(locale, &base_status(), &KeyboxInfo::default(), NOW);
+            assert_ne!(b, unissued, "{locale}");
+            assert!(!unissued.is_empty(), "{locale}");
+        }
     }
 
     #[test]
-    fn description_expired() {
-        let na = util::now_unix() - 86_400;
-        let kb = KeyboxInfo {
-            exists: true,
-            valid: true,
-            not_after: Some(na),
-            key_match: true,
-            ..Default::default()
-        };
-        assert!(description_for(&base_status(), &kb).starts_with("❌ RKP 已过期"));
+    fn plural_forms_follow_locale_rules() {
+        fn subst(key: &str, locale: &str, n: i64) -> String {
+            t!(key, locale = locale, n = n).into_owned()
+        }
+        for locale in ["en", "de", "it"] {
+            assert_eq!(day_text(locale, 1), subst("day.one", locale, 1), "{locale}");
+            assert_ne!(
+                subst("day.one", locale, 1),
+                subst("day.other", locale, 1),
+                "{locale}"
+            );
+            for n in [0, 2, 5] {
+                assert_eq!(
+                    day_text(locale, n),
+                    subst("day.other", locale, n),
+                    "{locale} {n}"
+                );
+            }
+        }
+        assert_eq!(day_text("fr", 0), subst("day.one", "fr", 0));
+        assert_eq!(day_text("fr", 2), subst("day.other", "fr", 2));
+        // Invariant locales reuse the same text for both categories.
+        for locale in ["zh-CN", "zh-TW", "ja", "ko"] {
+            for n in [0, 1, 2] {
+                assert_eq!(
+                    subst("day.one", locale, n),
+                    subst("day.other", locale, n),
+                    "{locale} {n}"
+                );
+                assert_eq!(
+                    day_text(locale, n),
+                    subst("day.other", locale, n),
+                    "{locale} {n}"
+                );
+            }
+        }
     }
 
     #[test]
-    fn description_invalid_keybox() {
-        let na = util::now_unix() + 10 * 86_400;
+    fn catalog_keys_and_placeholders_match_across_locales() {
+        fn placeholders(s: &str) -> Vec<String> {
+            let mut out: Vec<String> = s
+                .match_indices("%{")
+                .filter_map(|(i, _)| s[i + 2..].split_once('}').map(|(key, _)| key.to_string()))
+                .collect();
+            out.sort();
+            out
+        }
+        fn load(locale: &str) -> serde_json::Map<String, serde_json::Value> {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("locales")
+                .join(format!("{locale}.json"));
+            let raw = std::fs::read_to_string(path).unwrap();
+            serde_json::from_str::<serde_json::Value>(&raw)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .clone()
+        }
+        let base = load(DEFAULT_LOCALE);
+        let mut keys: Vec<&str> = base.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "day.one",
+                "day.other",
+                "description.blocked",
+                "description.expired",
+                "description.expiring",
+                "description.invalid",
+                "description.parse_failed",
+                "description.unissued",
+                "description.valid",
+                "hint.android_arm64_required",
+                "hint.fingerprint_missing",
+                "hint.keymint_library_missing",
+                "hint.other",
+                "hint.qualcomm_required",
+                "hint.root_required",
+                "hint.smcinvoke_missing",
+                "hint.soc_conflicting",
+                "hint.soc_unknown",
+            ]
+        );
+        for locale in LOCALES {
+            let cat = load(locale);
+            assert_eq!(cat.len(), base.len(), "{locale}");
+            for (key, value) in &base {
+                let text = cat
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_else(|| panic!("{locale} missing {key}"));
+                assert!(!text.is_empty(), "{locale} {key}");
+                assert_eq!(
+                    placeholders(text),
+                    placeholders(value.as_str().unwrap()),
+                    "{locale} {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn description_keeps_raw_error_reason() {
+        // Placeholder-like text in the diagnostic must survive untouched.
+        let reason = "bad %{reason} %{hint} 100%";
         let kb = KeyboxInfo {
-            exists: true,
-            valid: false,
-            not_after: Some(na),
-            key_match: false,
-            error: Some("private key does not match leaf".into()),
-            ..Default::default()
+            error: Some(reason.into()),
+            ..kb_at(NOW + 10 * 86_400, false)
         };
-        assert!(description_for(&base_status(), &kb).starts_with("❌ keybox 无效："));
+        for locale in LOCALES {
+            let d = render(locale, &base_status(), &kb, NOW);
+            assert!(d.ends_with(reason), "{locale}: {d}");
+            assert_eq!(d.matches("%{reason}").count(), 1, "{locale}: {d}");
+            assert_eq!(d.matches("%{hint}").count(), 1, "{locale}: {d}");
+        }
+        let no_reason = KeyboxInfo {
+            error: None,
+            ..kb_at(NOW + 10 * 86_400, false)
+        };
+        let failed = t!("description.parse_failed", locale = "en").into_owned();
+        let expected = t!("description.invalid", locale = "en", reason = failed).into_owned();
+        assert_eq!(render("en", &base_status(), &no_reason, NOW), expected);
+    }
+
+    #[test]
+    fn persisted_locale_loads_and_falls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-language");
+        assert_eq!(load_locale(&path), DEFAULT_LOCALE);
+        std::fs::write(&path, "ko\n").unwrap();
+        assert_eq!(load_locale(&path), "ko");
+        std::fs::write(&path, " fr \n").unwrap();
+        assert_eq!(load_locale(&path), "fr");
+        for bad in ["pt-BR\n", "zh\n", "\n", "en-US"] {
+            std::fs::write(&path, bad).unwrap();
+            assert_eq!(load_locale(&path), DEFAULT_LOCALE, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn description_write_failure_uses_write_stage() {
+        let e = description_write(Err(anyhow::anyhow!("boom"))).unwrap_err();
+        let app = crate::error::to_app_error(&e);
+        assert_eq!(app.stage, Stage::Write);
+        assert_eq!(app.code, "description_write");
+        assert_eq!(app.exit_code(), 7);
     }
 
     #[test]

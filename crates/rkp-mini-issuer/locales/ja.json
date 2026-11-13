@@ -1,0 +1,20 @@
+{
+  "description.expired": "❌ RKP 期限切れ %{date}",
+  "description.expiring": "✅ RKP %{date}（%{days}、早めに更新）",
+  "description.valid": "✅ RKP %{date}（%{days}）",
+  "description.invalid": "❌ keybox が無効：%{reason}",
+  "description.blocked": "❌ 未発行（%{hint}）",
+  "description.unissued": "❌ 未発行",
+  "description.parse_failed": "解析失敗",
+  "day.one": "%{n}日",
+  "day.other": "%{n}日",
+  "hint.android_arm64_required": "arm64 が必要",
+  "hint.root_required": "root が必要",
+  "hint.qualcomm_required": "Qualcomm 以外",
+  "hint.soc_unknown": "SoC 不明",
+  "hint.soc_conflicting": "SoC 競合",
+  "hint.keymint_library_missing": "keymaster ライブラリなし",
+  "hint.smcinvoke_missing": "smcinvoke なし",
+  "hint.fingerprint_missing": "fingerprint なし",
+  "hint.other": "前提条件を満たしていません"
+}

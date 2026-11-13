@@ -1,10 +1,12 @@
 //! Deployer commands: preview, apply, and the local target list.
 
-use std::path::Path;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use rkp_mini_core::confirmation::{confirmation_mismatch, sha_confirms};
 use rkp_mini_core::error::{err, Stage, SyncError};
+use rkp_mini_core::fsutil::atomic_write;
 use rkp_mini_runtime::config::{self, Config, Role};
 use rkp_mini_runtime::context::Ctx;
 use rkp_mini_runtime::output::Output;
@@ -379,6 +381,86 @@ pub fn remove(ctx: &Ctx, targets: Vec<String>, yes: bool) -> Result<Output> {
     })
 }
 
+/// Locate the installed module manifest from `<...>/bin/<binary>`.
+///
+/// Split from the command so tests can use a fake installation tree.
+fn module_prop(exe: &Path) -> Option<PathBuf> {
+    Some(exe.parent()?.parent()?.join("module.prop"))
+}
+
+/// One line: collapse whitespace without truncating the introduction.
+fn single_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Replace `description=` in `module.prop`, keeping every other line.
+fn replace_description(content: &str, text: &str) -> String {
+    let line = single_line(text);
+    let mut out = String::with_capacity(content.len() + line.len());
+    let mut replaced = false;
+    for l in content.lines() {
+        if l.starts_with("description=") {
+            out.push_str("description=");
+            out.push_str(&line);
+            replaced = true;
+        } else {
+            out.push_str(l);
+        }
+        out.push('\n');
+    }
+    if !replaced {
+        out.push_str("description=");
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
+/// Write the localized introduction into `prop` from the locale the WebUI
+/// persisted under `data_root`. A missing manifest or failed write is an error.
+pub fn update_description_at(prop: &Path, data_root: &Path) -> Result<Output> {
+    let read = || {
+        let meta = std::fs::metadata(prop)?;
+        let content = std::fs::read_to_string(prop)?;
+        Ok::<_, std::io::Error>((meta, content))
+    };
+    let (meta, content) = read().map_err(|e| {
+        err(
+            Stage::Generic,
+            "module_prop",
+            format!("cannot read {}: {e}", prop.display()),
+        )
+    })?;
+    let text = crate::lang::intro(crate::lang::load(data_root));
+    let updated = replace_description(&content, &text);
+    atomic_write(prop, updated.as_bytes(), meta.mode() & 0o7777, None).map_err(|e| {
+        err(
+            Stage::Generic,
+            "description_write",
+            format!("cannot write {}: {e}", prop.display()),
+        )
+    })?;
+    Ok(Output::ok(json!({ "description": &text }), text))
+}
+
+/// `update-description`: localize only the static module introduction.
+///
+/// Independent of the sync config and approval state; the WebUI calls it after
+/// opening the page or changing the language.
+pub fn update_description() -> Result<Output> {
+    let prop = std::env::current_exe()
+        .ok()
+        .and_then(|exe| module_prop(&exe))
+        .ok_or_else(|| {
+            err(
+                Stage::Generic,
+                "module_prop",
+                "cannot locate module.prop from current_exe",
+            )
+        })?;
+    update_description_at(&prop, Path::new(crate::lang::DATA_ROOT))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -677,5 +759,85 @@ mod tests {
             Some("confirmation_mismatch")
         );
         assert_eq!(std::fs::read(&fx.target).unwrap(), sentinel);
+    }
+
+    #[test]
+    fn resolver_points_at_the_module_root() {
+        assert_eq!(
+            module_prop(Path::new(
+                "/data/adb/modules/rkp_mini_deployer/bin/rkp-mini-deployer"
+            )),
+            Some(PathBuf::from(
+                "/data/adb/modules/rkp_mini_deployer/module.prop"
+            ))
+        );
+        assert_eq!(module_prop(Path::new("rkp-mini-deployer")), None);
+    }
+
+    #[test]
+    fn description_replacement_is_a_single_line_and_keeps_other_fields() {
+        assert_eq!(
+            replace_description("id=x\nname=y\n", "one two"),
+            "id=x\nname=y\ndescription=one two\n"
+        );
+        assert_eq!(
+            replace_description("description=old\n", "a\nb  c"),
+            "description=a b c\n"
+        );
+        assert_eq!(replace_description("", "x"), "description=x\n");
+    }
+
+    #[test]
+    fn description_update_keeps_fields_and_mode() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let dir = tempfile::tempdir().unwrap();
+        let prop = dir.path().join("module.prop");
+        std::fs::write(
+            &prop,
+            "id=rkp_mini_deployer\nname=RKP-Mini Deployer\nversion=v0.3.1\ndescription=old\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&prop, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("ui-language"), "en\n").unwrap();
+
+        let out = update_description_at(&prop, &root).unwrap();
+        let text = std::fs::read_to_string(&prop).unwrap();
+        assert!(text.starts_with("id=rkp_mini_deployer\nname=RKP-Mini Deployer\nversion=v0.3.1\n"));
+        assert_eq!(text.matches("description=").count(), 1);
+        assert!(text.contains(crate::lang::intro("en").as_str()));
+        assert_eq!(out.text, crate::lang::intro("en"));
+        assert_eq!(out.data["description"], out.text);
+        assert_eq!(std::fs::metadata(&prop).unwrap().mode() & 0o777, 0o640);
+
+        // A second run replaces in place instead of appending.
+        update_description_at(&prop, &root).unwrap();
+        assert_eq!(std::fs::read_to_string(&prop).unwrap(), text);
+
+        // No stored locale (or an invalid one) keeps the Chinese intro.
+        let empty = dir.path().join("no-language");
+        let out = update_description_at(&prop, &empty).unwrap();
+        assert_eq!(out.text, crate::lang::intro("zh-CN"));
+    }
+
+    #[test]
+    fn missing_manifest_fails_without_creating_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let prop = dir.path().join("module.prop");
+        let root = dir.path().join("root");
+        let se = to_sync_error(&update_description_at(&prop, &root).err().unwrap());
+        assert_eq!(se.stage, Stage::Generic);
+        assert_eq!(se.exit_code(), 1);
+        assert_eq!(se.code, "module_prop");
+        assert!(!prop.exists());
+
+        // A directory posing as the manifest is still a read failure.
+        std::fs::create_dir(&prop).unwrap();
+        let se = to_sync_error(&update_description_at(&prop, &root).err().unwrap());
+        assert_eq!(se.stage, Stage::Generic);
+        assert_eq!(se.exit_code(), 1);
+        assert_eq!(se.code, "module_prop");
     }
 }

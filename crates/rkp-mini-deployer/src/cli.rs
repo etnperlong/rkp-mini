@@ -35,6 +35,8 @@ COMMANDS:
   remove-target ID         drop a target from the config (file untouched)
   remove [--target ID]... --yes
                            delete deployed keybox files
+  update-description       refresh the module card introduction in the
+                           language last chosen in the WebUI; needs no config
 
 --auto honours [deploy].auto_deploy; --if-staged makes a missing staging/latest.json
 a successful no-op. Neither flag approves anything: an identity change outside
@@ -67,6 +69,7 @@ pub enum Command {
         targets: Vec<String>,
         yes: bool,
     },
+    UpdateDescription,
 }
 
 fn take_value(flag: &str, it: &mut impl Iterator<Item = String>) -> Result<String> {
@@ -138,6 +141,7 @@ pub fn parse(args: &[String]) -> Result<(Global, Command)> {
             }
             Command::Remove { targets, yes }
         }
+        "update-description" => Command::UpdateDescription,
         other => bail!("unknown command `{other}`"),
     };
     flags.finish()?;
@@ -196,6 +200,15 @@ mod tests {
             p(&["remove-target", "teesim"]).unwrap().1,
             Command::RemoveTarget { .. }
         ));
+        let (g, c) = p(&["update-description", "--json"]).unwrap();
+        assert!(g.json);
+        assert!(matches!(c, Command::UpdateDescription));
+    }
+
+    #[test]
+    fn update_description_takes_no_arguments() {
+        assert!(p(&["update-description", "en"]).is_err());
+        assert!(p(&["update-description", "--description", "x"]).is_err());
     }
 
     #[test]

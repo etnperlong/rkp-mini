@@ -4,9 +4,12 @@
 //! carries exactly one result (JSON envelope with `--json`); diagnostics go to
 //! stderr. Exit codes: 0 ok, 2 usage/config/approval, 9 deploy, 1 other.
 
+rust_i18n::i18n!("locales", fallback = "zh-CN");
+
 mod cli;
 mod commands;
 mod deploy;
+mod lang;
 mod modules;
 mod omk;
 
@@ -74,5 +77,6 @@ fn dispatch(ctx: &Ctx, cmd: Command, wrong_role: bool) -> anyhow::Result<Output>
         Command::AddTarget { id, path, reload } => commands::add_target(ctx, &id, path, reload),
         Command::RemoveTarget { id } => commands::remove_target(ctx, &id),
         Command::Remove { targets, yes } => commands::remove(ctx, targets, yes),
+        Command::UpdateDescription => commands::update_description(),
     }
 }

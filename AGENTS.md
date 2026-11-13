@@ -10,9 +10,9 @@ Three independent commands. They never link or invoke each other; module scripts
 
 |Binary|Commands|
 |---|---|
-|`rkp-mini-issuer`|`status`, `issue` (`--if-expiring-days N`), `remove --yes` (deletes the six output artifacts under `tmp/issue.lock`; held lock → `issue_running`, exit 7), `config init\|show\|set auto_issue_days N`, internal `__ta-worker`|
+|`rkp-mini-issuer`|`status`, `update-description` (local description only; write failures exit 7), `issue` (`--if-expiring-days N`), `remove --yes` (deletes the six output artifacts under `tmp/issue.lock`; held lock → `issue_running`, exit 7), `config init\|show\|set auto_issue_days N`, internal `__ta-worker`|
 |`rkp-mini-sync`|`init`, `risk`, `enable`, `disable`, `forget [--reset]`, `secret set`, `config show\|set`, `status`, `check-auto [--require-verified]`, `check-remote`, `push`, `share`, `rotate-password`, `remote-delete`, `import`, `fetch`|
-|`rkp-mini-deployer`|`plan`, `apply`, `targets`, `add-target`, `remove-target`, `remove` (local only)|
+|`rkp-mini-deployer`|`plan`, `apply`, `targets`, `add-target`, `remove-target`, `remove` (local only), `update-description` (module metadata only; no config/init required)|
 
 Removed names are usage errors (exit 2), not aliases: binaries `rkp-mini`/`rkp-sync`, `sync-now`, `run`, and every `deploy …` subcommand.
 
@@ -83,6 +83,7 @@ WebUI (`webui/`, one Bun package, two apps):
 - Contract mirrors: `apps/issuer/lib/rkp.ts` ↔ issuer JSON; `shared/lib/sync.ts` ↔ sync JSON and management commands; `apps/deployer/lib/deploy.ts` ↔ deployer (`bin/rkp-mini-deployer --role receiver --config … --json`); `apps/deployer/lib/run.ts` ↔ `sync-task.last.steps` (requires `last.op == run`, exactly 8 sections, validates each envelope; empty code + envelope = step not executed).
 - The deployer page branches on `result.op === 'run'` before touching an envelope: a combined run publishes none.
 - i18n (`vue-i18n` 11, Composition mode; design record §7.6): every UI string goes through `t()` from `shared/lib/i18n.ts` (typed keys; `tCode` for keys built from machine codes, falling back to the raw code). Source locale `zh-CN.ts` in `shared/locales/`, `apps/<app>/locales/`; `zh-TW`, `en`, `ja`, `ko`, `de`, `fr`, `it` siblings are `satisfies typeof zhCN`, so a new string means one key in all eight files. Default = `navigator.languages`, override in 更多 → 语言 (`localStorage['rkp.locale']`). Never call `t()` at module top level; binary-provided text (`status.description`, error messages, the risk statement's `zh`/`en`) and `dev/` fixtures stay untranslated.
+- Native module descriptions use `rust-i18n` with independent per-crate `locales/<locale>.json` catalogs, compiled in; never import Vue catalogs or enable runtime catalog loading. Read the canonical locale from `<dataRoot>/ui-language` (missing/invalid → `zh-CN`) and pass it explicitly. Keep `one/other` day selection small (en/de/it: 1; fr: 0/1; zh/ja/ko invariant); native catalogs must have matching keys/placeholders. Each binary's `update-description` only rewrites its own module.prop, preserving other fields and permissions. Issuer refresh reads local config/status, writes no status snapshot and propagates write failures (exit 7) without changing the existing status exit-0 contract. Deployer refresh needs no config/init (write failures exit 1).
 
 Secrets from the WebUI (design §19.2): `ksu.exec` pipes the command to the root shell's stdin, so only external commands' argv are visible. `shared/lib/sync.ts` hex-encodes the secret and writes it with builtins (`umask 077; mkdir -p <inbox>; echo <hex> > <inbox>/<kind>.hex`), then `rkp-mini-sync secret set <kind> --from-file … --hex` consumes and deletes it.
 

@@ -1,0 +1,20 @@
+{
+  "description.expired": "❌ RKP expired %{date}",
+  "description.expiring": "✅ RKP %{date} (%{days}, renew soon)",
+  "description.valid": "✅ RKP %{date} (%{days})",
+  "description.invalid": "❌ invalid keybox: %{reason}",
+  "description.blocked": "❌ not issued (%{hint})",
+  "description.unissued": "❌ not issued",
+  "description.parse_failed": "parse failed",
+  "day.one": "%{n} day",
+  "day.other": "%{n} days",
+  "hint.android_arm64_required": "arm64 required",
+  "hint.root_required": "root required",
+  "hint.qualcomm_required": "not Qualcomm",
+  "hint.soc_unknown": "unknown SoC",
+  "hint.soc_conflicting": "conflicting SoC",
+  "hint.keymint_library_missing": "keymaster library missing",
+  "hint.smcinvoke_missing": "smcinvoke missing",
+  "hint.fingerprint_missing": "fingerprint missing",
+  "hint.other": "prerequisites not met"
+}

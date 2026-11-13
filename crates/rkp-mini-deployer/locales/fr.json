@@ -1,0 +1,4 @@
+{
+  "_version": 1,
+  "module_intro": "Récepteur de keybox distant (désactivé par défaut, géré via WebUI) : déploie vers OMK/TEESimulator après déchiffrement et validation age ; l'utilisation sur un autre appareil relève du clonage de keybox"
+}

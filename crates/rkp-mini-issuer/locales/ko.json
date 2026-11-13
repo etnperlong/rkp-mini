@@ -1,0 +1,20 @@
+{
+  "description.expired": "❌ RKP 만료됨 %{date}",
+  "description.expiring": "✅ RKP %{date} (%{days}, 곧 갱신 필요)",
+  "description.valid": "✅ RKP %{date} (%{days})",
+  "description.invalid": "❌ keybox 유효하지 않음: %{reason}",
+  "description.blocked": "❌ 미발급 (%{hint})",
+  "description.unissued": "❌ 미발급",
+  "description.parse_failed": "파싱 실패",
+  "day.one": "%{n}일",
+  "day.other": "%{n}일",
+  "hint.android_arm64_required": "arm64 필요",
+  "hint.root_required": "root 필요",
+  "hint.qualcomm_required": "Qualcomm 아님",
+  "hint.soc_unknown": "SoC 알 수 없음",
+  "hint.soc_conflicting": "SoC 충돌",
+  "hint.keymint_library_missing": "keymaster 라이브러리 없음",
+  "hint.smcinvoke_missing": "smcinvoke 없음",
+  "hint.fingerprint_missing": "fingerprint 없음",
+  "hint.other": "사전 요구 사항 미충족"
+}

@@ -171,6 +171,11 @@ The **Action** button on either module card runs one round of that module's loop
 the same log the WebUI shows (更多 → 日志 → 后台日志). It is not a forced issuance: with
 `auto_issue_days = 0` the issuer round skips issuing; use 立即签发 for that.
 
+Native module descriptions use independently embedded `rust-i18n` catalogs in eight languages.
+Each binary's `update-description` command renders using `<dataRoot>/ui-language` (missing or invalid
+means Simplified Chinese). The issuer checks local status without issuing a keybox or writing status
+snapshots; the deployer refreshes its introduction without initializing or enabling sync.
+
 Identity changes on the receiver follow `[deploy].identity_change_policy`: `scheduled`
 (default) deploys a new keybox automatically only within `rotation_lead_days` (default 4) of the old
 leaf's expiry and when the new leaf outlives it; otherwise it is held as `pending`. OMK's

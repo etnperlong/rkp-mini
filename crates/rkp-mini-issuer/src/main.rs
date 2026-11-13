@@ -11,6 +11,8 @@ mod util;
 use cli::Command;
 use error::to_app_error;
 
+rust_i18n::i18n!("locales", fallback = "zh-CN");
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = match cli::parse(&args) {
@@ -98,6 +100,7 @@ fn dispatch(cmd: Command) -> anyhow::Result<i32> {
         }
         Command::TaWorker { dir } => Ok(rkp::keymint::worker_main(&dir)),
         Command::Status(a) => status::run(&a),
+        Command::UpdateDescription { config } => status::run_update_description(&config),
         Command::Issue(a) => rkp::issue(&a),
         Command::Remove(a) => remove::run(&a),
     }

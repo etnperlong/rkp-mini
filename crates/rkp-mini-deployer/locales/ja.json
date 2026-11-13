@@ -1,0 +1,4 @@
+{
+  "_version": 1,
+  "module_intro": "リモート keybox 受信側（既定で無効、WebUI で管理）：age で復号・検証してから OMK/TEESimulator に展開します。別の端末での使用は keybox のクローン行為です"
+}

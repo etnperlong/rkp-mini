@@ -1,0 +1,4 @@
+{
+  "_version": 1,
+  "module_intro": "遠端 keybox 接收端（預設關閉，WebUI 管理）：age 解密驗證後部署到 OMK/TEESimulator；跨裝置使用屬於 keybox 複製"
+}

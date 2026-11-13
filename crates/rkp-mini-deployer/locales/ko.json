@@ -1,0 +1,4 @@
+{
+  "_version": 1,
+  "module_intro": "원격 keybox 수신기(기본 꺼짐, WebUI 관리): age 복호화·검증 후 OMK/TEESimulator에 배포합니다. 다른 기기에서의 사용은 keybox 복제입니다"
+}

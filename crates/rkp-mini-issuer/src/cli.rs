@@ -19,6 +19,8 @@ USAGE:
   rkp-mini-issuer config init|show [--config PATH]
   rkp-mini-issuer config set auto_issue_days N [--json] [--config PATH]
                   (N = 0..=365; 0 = off; used by the module's auto-loop.sh)
+  rkp-mini-issuer update-description [--config PATH]
+                  (rewrite module.prop description from the current keybox)
   rkp-mini-issuer --version
   rkp-mini-issuer --help
 ";
@@ -66,6 +68,7 @@ pub enum Command {
     ConfigInit { config: Option<PathBuf> },
     ConfigShow { config: Option<PathBuf> },
     ConfigSet(ConfigSetArgs),
+    UpdateDescription { config: Option<PathBuf> },
     TaWorker { dir: PathBuf },
     Version,
     Help,
@@ -176,6 +179,16 @@ pub fn parse(args: &[String]) -> Result<Command> {
                 other => bail!("unknown config subcommand: {other}"),
             }
         }
+        "update-description" => {
+            let mut config = None;
+            while let Some(arg) = it.next() {
+                match arg.as_str() {
+                    "--config" => config = Some(PathBuf::from(take_value("--config", &mut it)?)),
+                    other => bail!("unknown update-description flag: {other}"),
+                }
+            }
+            Ok(Command::UpdateDescription { config })
+        }
         "__ta-worker" => {
             let dir = it
                 .next()
@@ -222,5 +235,23 @@ mod tests {
     fn remove_rejects_unknown_flags() {
         assert!(parse(&args(&["remove", "--nope"])).is_err());
         assert!(parse(&args(&["remove", "--yes", "--config"])).is_err());
+    }
+
+    #[test]
+    fn update_description_takes_config_only() {
+        match parse(&args(&["update-description"])).unwrap() {
+            Command::UpdateDescription { config } => assert!(config.is_none()),
+            other => panic!("expected update-description, got {other:?}"),
+        }
+        match parse(&args(&["update-description", "--config", "/x"])).unwrap() {
+            Command::UpdateDescription { config } => {
+                assert_eq!(config, Some(PathBuf::from("/x")))
+            }
+            other => panic!("expected update-description, got {other:?}"),
+        }
+        // Plain command: no JSON envelope and no truncating flags.
+        assert!(parse(&args(&["update-description", "--json"])).is_err());
+        assert!(parse(&args(&["update-description", "--quiet"])).is_err());
+        assert!(parse(&args(&["update-description", "--config"])).is_err());
     }
 }

@@ -1,0 +1,4 @@
+{
+  "_version": 1,
+  "module_intro": "Remote-Keybox-Empfänger (standardmäßig deaktiviert, über WebUI verwaltet): stellt nach age-Entschlüsselung und -Prüfung in OMK/TEESimulator bereit; die Nutzung auf anderen Geräten ist Keybox-Klonen"
+}

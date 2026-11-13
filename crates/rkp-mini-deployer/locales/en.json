@@ -1,0 +1,4 @@
+{
+  "_version": 1,
+  "module_intro": "Remote keybox receiver (disabled by default, managed by WebUI): deploys to OMK/TEESimulator after age decryption and validation; using it across devices is keybox cloning"
+}

@@ -1,0 +1,20 @@
+{
+  "description.expired": "❌ RKP 已過期 %{date}",
+  "description.expiring": "✅ RKP %{date}（%{days}，請盡快續簽）",
+  "description.valid": "✅ RKP %{date}（%{days}）",
+  "description.invalid": "❌ keybox 無效：%{reason}",
+  "description.blocked": "❌ 未簽發（%{hint}）",
+  "description.unissued": "❌ 未簽發",
+  "description.parse_failed": "解析失敗",
+  "day.one": "%{n}天",
+  "day.other": "%{n}天",
+  "hint.android_arm64_required": "需 arm64",
+  "hint.root_required": "需 root",
+  "hint.qualcomm_required": "非高通",
+  "hint.soc_unknown": "SoC 未知",
+  "hint.soc_conflicting": "SoC 衝突",
+  "hint.keymint_library_missing": "缺 keymaster 庫",
+  "hint.smcinvoke_missing": "缺 smcinvoke",
+  "hint.fingerprint_missing": "缺指紋",
+  "hint.other": "前置條件未滿足"
+}

@@ -4,7 +4,7 @@
 // WebView's back key must keep closing the page (design §2.3).
 // All sync commands go through shared/lib/sync.ts, local deployment through
 // lib/deploy.ts and the combined run through lib/run.ts; secrets only through
-// SecretSheet, and no keybox body or secret is ever rendered.
+// SecretDialog, and no keybox body or secret is ever rendered.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   MiuixButton,
@@ -32,7 +32,7 @@ import DeploySheet from './components/DeploySheet.vue'
 import RunResultSheet from './components/RunResultSheet.vue'
 import LogsSheet from '../../shared/components/LogsSheet.vue'
 import RiskSheet from '../../shared/components/RiskSheet.vue'
-import SecretSheet from '../../shared/components/SecretSheet.vue'
+import SecretDialog from '../../shared/components/SecretDialog.vue'
 import { bridgeAvailable } from '../../shared/lib/ksu'
 import { nowUnix } from '../../shared/lib/format'
 import { initTheme } from '../../shared/lib/theme'
@@ -147,6 +147,8 @@ const runner = useSyncRunner(async (result) => {
 
 /** Op started from this page (null after a reload mid-task): only for button labels. */
 const startedOp = ref<SyncOp | null>(null)
+/** The running check was started by saving a password (decrypt test wording). */
+const checkAfterSecret = ref(false)
 
 async function collectRunSteps(): Promise<void> {
   try {
@@ -200,18 +202,20 @@ async function handleTask(result: SyncTaskResult): Promise<void> {
     return
   }
   const env = result.envelope
+  const afterSecret = checkAfterSecret.value
   if (!env) {
     void showSnackbar({ message: `任务结束（exit ${result.code}），但没有收到 JSON 结果` })
     return
   }
   if (showTofuFrom(env)) return
   if (!env.ok) {
-    void showSnackbar({ message: syncErrorText(env.error) })
+    void showSnackbar({ message: `${afterSecret ? '密码检查失败：' : ''}${syncErrorText(env.error)}` })
     return
   }
   if (result.op === 'check') {
     const data = env.data as RemoteCheck
-    void showSnackbar({ message: `云端检查：${RECEIVER_CHECK_LABEL[data.outcome] ?? data.outcome}` })
+    const label = RECEIVER_CHECK_LABEL[data.outcome] ?? data.outcome
+    void showSnackbar({ message: afterSecret ? `解密成功，${label}` : `云端检查：${label}` })
     return
   }
   const data = env.data as FetchResult
@@ -226,8 +230,10 @@ async function handleTask(result: SyncTaskResult): Promise<void> {
   })
 }
 
-async function startTask(op: SyncOp): Promise<void> {
+/** `afterSecret`: a saved password triggered this check, so its result reads as a decrypt test. */
+async function startTask(op: SyncOp, afterSecret = false): Promise<void> {
   startedOp.value = op
+  checkAfterSecret.value = afterSecret
   try {
     await runner.start(syncTaskArgs(op))
   } catch (e) {
@@ -237,6 +243,7 @@ async function startTask(op: SyncOp): Promise<void> {
 
 async function startFetch(acceptFirst?: string): Promise<void> {
   startedOp.value = 'fetch'
+  checkAfterSecret.value = false
   try {
     await runner.start(syncTaskArgs('fetch', acceptFirst))
   } catch (e) {
@@ -259,6 +266,12 @@ function openImport(): void {
 function openSecret(kind: SecretKind): void {
   secretKind.value = kind
   secretOpen.value = true
+}
+
+/** A receiver password is only known to be right once the remote decrypts: check right away. */
+async function onSecretSaved(): Promise<void> {
+  await load()
+  if (canRunTask.value) await startTask('check', true)
 }
 
 function onImported(_result: ImportResult): void {
@@ -393,7 +406,7 @@ onBeforeUnmount(() => clearInterval(clock))
       <DeployedDetailSheet v-model="detailOpen" :status="status" :now="now" />
       <RunResultSheet v-model="runOpen" :steps="runSteps" />
       <RiskSheet v-model="riskOpen" @enabled="load" />
-      <SecretSheet v-model="secretOpen" :kind="secretKind" :title="secretTitle" :hint="secretHint" @saved="load" />
+      <SecretDialog v-model="secretOpen" :kind="secretKind" :title="secretTitle" :hint="secretHint" @saved="onSecretSaved" />
     </template>
     <LogsSheet v-model="logsOpen" />
   </div>

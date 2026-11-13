@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Plain text field for non-secret values (paths, labels, numbers, pasted
-// links). Secrets must keep using components/sync/SecretInput.vue.
+// links). Secrets must keep using shared/components/SecretInput.vue.
 const value = defineModel<string>({ required: true })
 
 withDefaults(

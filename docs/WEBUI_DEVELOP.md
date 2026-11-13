@@ -430,8 +430,13 @@ IssueSettingsSheet（“签发设置”）：自动签发开关 + 提前天数�
 `MiuixCard` 开启按压反馈时会在 pointerdown 里 `setPointerCapture`，之后的 click 全部落到卡片本身：卡片内的按钮
 必须 `@pointerdown.stop`，否则点不到且会触发卡片点击。
 SenderSyncSheet：自动推送（`auto_push` 开关 + 最小剩余有效期）、云端存储（含 Gist token / WebDAV 凭据入口）、
-加密（“密码”，不提 age、不显示是否已设置）、其他（标签）、保存、危险区（红色；删除云端文件 / 重置加密密码 /
-清除本地数据 / 完全重置同步设置，均先 MiuixDialog 确认）。密钥缺失或权限错误只在状态卡警告条提示。
+加密（“密码”，不提 age、不显示是否已设置）、其他（标签）、保存、危险区（红色；删除云端文件 / 清除本地数据 /
+完全重置同步设置均先 MiuixDialog 确认；重置加密密码直接打开 SenderRotateDialog，说明后果并输入两次新密码）。
+密钥缺失或权限错误只在状态卡警告条提示。
+
+密钥输入一律是对话框（`shared/components/SecretDialog.vue`，不再用底部弹层），输入框只有占位文字。发送端的密码由自己设定，
+输入两次并提示强度；接收端只输入一次，保存后若已导入同步流，立即经 runner 运行 `check`（`check-remote`）做解密检查：
+成功提示“解密成功，<云端检查结果>”，失败提示“密码检查失败：<错误>”。Gist token / WebDAV 密码两端都只输入一次。
 
 数据与后台任务（`useIssueRunner`、`useSyncRunner`、状态读取）都留在 `App.vue`，切换 Tab 不重新读取。
 日志统一在 LogsSheet（“更多 → 日志”，每次打开重新读取）：签发日志 `logs/issue-*.log`、后台日志 `logs/auto.log`

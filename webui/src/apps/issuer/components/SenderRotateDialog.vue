@@ -1,19 +1,11 @@
 <script setup lang="ts">
-// Rotate the stream's age passphrase (design §19.5). The new passphrase never
-// becomes a command argument: prepareRotation() writes it to the 0600 inbox and
-// the detached `rotate` task reads it. If the task cannot start, the staged
-// file is removed again. Typed values are cleared on open, on submit and on close.
+// Rotate the stream's age passphrase (design §19.5) in one dialog: it states the
+// consequences, takes the new passphrase twice and then shows the task. The new
+// passphrase never becomes a command argument: prepareRotation() writes it to the
+// 0600 inbox and the detached `rotate` task reads it. If the task cannot start, the
+// staged file is removed again. Typed values are cleared on open, on submit and on close.
 import { computed, ref, watch } from 'vue'
-import {
-  MiuixBottomSheet,
-  MiuixButton,
-  MiuixIcon,
-  MiuixIconButton,
-  MiuixProgressIndicator,
-  MiuixText,
-  showSnackbar,
-} from 'miuix-vue'
-import { Close } from 'miuix-vue/icons'
+import { MiuixButton, MiuixDialog, MiuixProgressIndicator, MiuixText, showSnackbar } from 'miuix-vue'
 import SecretInput from '../../../shared/components/SecretInput.vue'
 import { CommandError } from '../../../shared/lib/command'
 import {
@@ -123,25 +115,23 @@ function retry(): void {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="重置加密密码">
-    <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
-        <MiuixIcon :icon="Close" />
-      </MiuixIconButton>
-    </template>
-
-    <div class="sheet-body">
-      <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-        用新密码重新加密当前 keybox 并上传。旧密码立即失效，接收端必须改成新密码才能继续拉取。
-      </MiuixText>
-
-      <div class="sheet-group">
-        <SecretInput v-model="first" label="新密码" :disabled="busy || launched" />
-        <SecretInput v-model="second" label="再次输入" :disabled="busy || launched" />
-      </div>
-      <MiuixText v-if="short" type="footnote1" color="var(--app-warning)">
-        密码较短：建议 6 个以上随机单词或 20+ 随机字符。
-      </MiuixText>
+  <MiuixDialog
+    v-model="open"
+    title="重置加密密码"
+    summary="用新密码重新加密当前 keybox 并上传。旧密码立即失效，接收端必须改成新密码才能继续拉取。"
+    :close-on-click-modal="!busy && !r.busy.value"
+  >
+    <form class="dialog" @submit.prevent="begin">
+      <template v-if="!launched">
+        <SecretInput v-model="first" placeholder="新密码" :disabled="busy" />
+        <SecretInput v-model="second" placeholder="再次输入" :disabled="busy" />
+        <MiuixText v-if="short" type="footnote1" color="var(--app-warning)">
+          密码较短：建议 6 个以上随机单词或 20+ 随机字符。
+        </MiuixText>
+        <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
+          新密码经 root shell 写入 0600 临时文件，由 rkp-mini-sync 读取并立即删除；不会出现在命令行参数、URL 或日志中。
+        </MiuixText>
+      </template>
 
       <MiuixText v-if="error" type="footnote1" color="var(--m-color-error)">{{ error }}</MiuixText>
 
@@ -162,22 +152,42 @@ function retry(): void {
         </MiuixText>
       </div>
 
-      <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-        新密码经 root shell 写入 0600 临时文件，由 rkp-mini-sync 读取并立即删除；不会出现在命令行参数、URL 或日志中。
-      </MiuixText>
-
-      <MiuixButton v-if="!launched" type="primary" :disabled="busy || problem !== null" @click="begin">
-        {{ busy ? '提交中…' : '开始重置' }}
-      </MiuixButton>
-      <template v-else>
-        <MiuixButton v-if="failed" :disabled="r.busy.value" @click="retry">重新输入</MiuixButton>
-        <MiuixButton type="primary" :disabled="r.busy.value" @click="open = false">完成</MiuixButton>
-      </template>
-    </div>
-  </MiuixBottomSheet>
+      <div class="dialog-actions">
+        <template v-if="!launched">
+          <MiuixButton :disabled="busy" @click="open = false">取消</MiuixButton>
+          <MiuixButton class="danger-btn" type="primary" :disabled="busy || problem !== null" @click="begin">
+            {{ busy ? '提交中…' : '重置密码' }}
+          </MiuixButton>
+        </template>
+        <template v-else>
+          <MiuixButton v-if="failed" :disabled="r.busy.value" @click="retry">重新输入</MiuixButton>
+          <MiuixButton type="primary" :disabled="r.busy.value" @click="open = false">完成</MiuixButton>
+        </template>
+      </div>
+    </form>
+  </MiuixDialog>
 </template>
 
 <style scoped>
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.dialog :deep(.secret) {
+  padding: 0;
+}
+.dialog-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.danger-btn.m-button--primary:not(.m-button--disabled) {
+  background: var(--m-color-error);
+  color: #fff;
+}
 .progress {
   display: flex;
   align-items: center;

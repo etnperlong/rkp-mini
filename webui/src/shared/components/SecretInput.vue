@@ -3,16 +3,18 @@
 // would display the value; this keeps the browser from showing, autofilling
 // or spell-checking it. The value lives only in the parent's ref.
 const value = defineModel<string>({ required: true })
-defineProps<{ label: string; disabled?: boolean }>()
+defineProps<{ label?: string; placeholder?: string; disabled?: boolean }>()
 </script>
 
 <template>
   <label class="secret">
-    <span class="secret__label">{{ label }}</span>
+    <span v-if="label" class="secret__label">{{ label }}</span>
     <input
       v-model="value"
       class="secret__field"
       type="password"
+      :placeholder="placeholder"
+      :aria-label="label ?? placeholder"
       autocomplete="off"
       autocapitalize="off"
       autocorrect="off"

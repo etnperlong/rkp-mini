@@ -46,7 +46,7 @@ const saving = ref(false)
 const pending = ref<'forget' | 'reset' | null>(null)
 const actionError = ref<string | null>(null)
 /** Danger action awaiting its confirmation dialog. */
-const danger = ref<'delete' | 'rotate' | 'forget' | 'reset' | null>(null)
+const danger = ref<'delete' | 'forget' | 'reset' | null>(null)
 
 const draft = reactive({
   provider: 'gist' as 'gist' | 'webdav',
@@ -81,17 +81,12 @@ const dialogOpen = computed({
   },
 })
 
-const DIALOG: Record<'delete' | 'rotate' | 'forget' | 'reset', { title: string; summary: string; ok: string }> = {
+const DIALOG: Record<'delete' | 'forget' | 'reset', { title: string; summary: string; ok: string }> = {
   delete: {
     title: '删除云端文件？',
     summary:
       '删除不等于撤销，已拉取过的接收端仍保留 keybox。Gist 会整个删除，下次推送会新建 Gist，接收端需重新导入链接。',
     ok: '删除云端文件',
-  },
-  rotate: {
-    title: '重置加密密码？',
-    summary: '用新密码重新加密当前 keybox 并上传；旧密码立即失效，接收端必须改成新密码才能继续拉取。',
-    ok: '继续',
   },
   forget: {
     title: '清除本地同步数据？',
@@ -212,11 +207,6 @@ async function runDanger(): Promise<void> {
     danger.value = null
     open.value = false
     emit('delete')
-    return
-  }
-  if (action === 'rotate') {
-    danger.value = null
-    emit('rotate')
     return
   }
 
@@ -345,7 +335,7 @@ async function runDanger(): Promise<void> {
             title-color="var(--m-color-error)"
             clickable
             :disabled="locked"
-            @click="danger = 'rotate'"
+            @click="emit('rotate')"
           />
           <MiuixBasicComponent
             title="清除本地数据"

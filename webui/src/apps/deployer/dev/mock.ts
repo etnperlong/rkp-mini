@@ -14,6 +14,7 @@
 //   each optionally `:disabled`; `none`; `fail` (detection error). Default omk,tricky_store.
 // Cached remote check (&remote=): none | in_sync | ahead | behind | diverged | missing | error
 //   (`none` = never checked; its `check` task reports in_sync).
+// Wrong password (&decrypt=fail): `check` tasks fail with decrypt/decrypt_failed.
 //
 // Sample import links (also accepted as their JSON):
 //   rkpsync://v1/import?p=eyJ2IjoxLCJwcm92aWRlciI6Imdpc3QiLCJ1cmwiOiJodHRwczovL2dpc3QuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2V2YW5zL2FiYzEyMy9yYXcvcmtwLXN5bmMuYWdlIiwiZ2lzdF9pZCI6ImFiYzEyMyIsImZpbGVuYW1lIjoicmtwLXN5bmMuYWdlIiwic3RyZWFtX2lkIjoic3RfZGVtb19yZWNlaXZlciIsImxhYmVsIjoicGhvbmUtYSIsImZvcm1hdCI6ImFnZS1hcm1vciJ9
@@ -155,6 +156,7 @@ const runMode = params.get('run') ?? 'ok'
 const modulesMode = params.get('modules') ?? 'omk,tricky_store'
 /** Cached `check-remote` record: none | in_sync | ahead | behind | diverged | missing | error. */
 const remoteMode = params.get('remote') ?? 'none'
+const decryptFails = params.get('decrypt') === 'fail'
 
 const BUILTIN_TARGETS: BuiltinTargetInfo[] = [
   {
@@ -1390,7 +1392,9 @@ function launch(taskArgs: string[]): void {
         files.op === 'fetch'
           ? doFetch(taskArgs[1])
           : files.op === 'check'
-            ? okOutcome(runRemoteCheck())
+            ? decryptFails
+              ? errOutcome('decrypt', 'decrypt_failed', 'mock: age decryption failed')
+              : okOutcome(runRemoteCheck())
             : errOutcome('config', 'usage', `unknown sync task \`${files.op}\``)
       const exec = toExec(outcome)
       files.json = exec.stdout

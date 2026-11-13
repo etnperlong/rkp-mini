@@ -25,11 +25,11 @@ import MoreTab from './components/MoreTab.vue'
 import LogsSheet from './components/LogsSheet.vue'
 import SenderSyncSheet from './components/SenderSyncSheet.vue'
 import SenderShareSheet from './components/SenderShareSheet.vue'
-import SenderRotateSheet from './components/SenderRotateSheet.vue'
+import SenderRotateDialog from './components/SenderRotateDialog.vue'
 import SyncStatusCard from './components/SyncStatusCard.vue'
 import SyncDetailSheet from './components/SyncDetailSheet.vue'
 import RiskSheet from '../../shared/components/RiskSheet.vue'
-import SecretSheet from '../../shared/components/SecretSheet.vue'
+import SecretDialog from '../../shared/components/SecretDialog.vue'
 import { bridgeAvailable } from '../../shared/lib/ksu'
 import { CommandError } from '../../shared/lib/command'
 import { blockerLabel, readCachedStatus, readStatus, type StatusData } from './lib/rkp'
@@ -92,7 +92,7 @@ const rotateOpen = ref(false)
 const secretOpen = ref(false)
 const secretKind = ref<SecretKind>('age')
 
-const SECRET_SHEET: Record<SecretKind, { title: string; hint: string }> = {
+const SECRET_DIALOG: Record<SecretKind, { title: string; hint: string }> = {
   age: {
     title: '设置密码',
     hint: '每个同步流使用独立的强密码（建议 6 个以上随机单词或 20+ 随机字符）；接收端需要用它解密云端储存的 Keybox。',
@@ -410,13 +410,13 @@ onBeforeUnmount(() => clearInterval(clock))
         @changed="loadSyncStatus()"
       />
       <SenderShareSheet v-model="shareOpen" />
-      <SenderRotateSheet v-model="rotateOpen" :runner="syncRunner" />
+      <SenderRotateDialog v-model="rotateOpen" :runner="syncRunner" />
       <RiskSheet v-model="syncRiskOpen" @enabled="loadSyncStatus()" />
-      <SecretSheet
+      <SecretDialog
         v-model="secretOpen"
         :kind="secretKind"
-        :title="SECRET_SHEET[secretKind].title"
-        :hint="SECRET_SHEET[secretKind].hint"
+        :title="SECRET_DIALOG[secretKind].title"
+        :hint="SECRET_DIALOG[secretKind].hint"
         @saved="loadSyncStatus()"
       />
     </template>

@@ -117,7 +117,7 @@ pub fn build(secret: &SecretKey, chain: &[CertInfo], device_id: &str) -> Result<
     </Keybox>\n\
 </AndroidAttestation>\n",
         device_id = util::xml_escape(device_id),
-        private = &*private_pem,
+        private = *private_pem,
         n = chain.len(),
         certs = certs_xml,
     );

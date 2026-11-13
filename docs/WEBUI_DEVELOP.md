@@ -455,6 +455,8 @@ MiuixTopAppBar(title="RKP-Mini · 部署端")
 更多  MoreTab：外观、日志（共享 LogsSheet：后台日志 logs/sync.log + 调试日志）、只读配置、关于
 ```
 
+两端“更多 → 外观”的主题和语言均用 `MiuixDropdownPreference` 下拉选择。主题保留跟随系统 / 浅色 / 深色，沿用 `localStorage['rkp.theme']` 持久化。
+
 DeploySettingsSheet：自动部署（`auto_deploy` + 最短剩余有效期 + 身份变化策略 + 轮换提前天数）、部署目标（增删；只能添加已安装模块；
 TEESimulator 可指定 `/data/adb/teesim` 下的 `.xml` 文件名，默认 `keybox.xml`，改名 = remove-target + add-target --path）、
 云端存储（同步链接 → ImportSheet、WebDAV 密码、代理）、加密（“密码”）、其他（标签）、保存、危险区（移除已部署的 keybox =

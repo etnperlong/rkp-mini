@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   MiuixBasicComponent,
   MiuixCard,
   MiuixIcon,
-  MiuixRadioButtonPreference,
+  MiuixDropdownPreference,
   MiuixSmallTitle,
   MiuixText,
   useTheme,
@@ -28,6 +28,11 @@ const THEMES: { mode: ThemeMode; title: MessageKey }[] = [
   { mode: 'light', title: 'issuer.more.themeLight' },
   { mode: 'dark', title: 'issuer.more.themeDark' },
 ]
+const themeItems = computed(() => THEMES.map((th) => t(th.title)))
+const themeIndex = computed({
+  get: () => THEMES.findIndex((th) => th.mode === mode.value),
+  set: (i: number) => saveTheme(THEMES[i].mode),
+})
 
 const config = ref<string | null>(null)
 const configError = ref<string | null>(null)
@@ -71,13 +76,7 @@ watch(
 <template>
   <MiuixSmallTitle :text="t('issuer.more.appearance')" />
   <MiuixCard>
-    <MiuixRadioButtonPreference
-      v-for="th in THEMES"
-      :key="th.mode"
-      :title="t(th.title)"
-      :model-value="mode === th.mode"
-      @select="saveTheme(th.mode)"
-    />
+    <MiuixDropdownPreference v-model="themeIndex" :title="t('issuer.more.theme')" :items="themeItems" />
     <LanguagePicker />
   </MiuixCard>
 

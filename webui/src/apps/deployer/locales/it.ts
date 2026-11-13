@@ -342,6 +342,7 @@ export default {
   },
   more: {
     appearance: 'Aspetto',
+    theme: 'Tema',
     themeSystem: 'Segui il sistema',
     themeLight: 'Chiaro',
     themeDark: 'Scuro',

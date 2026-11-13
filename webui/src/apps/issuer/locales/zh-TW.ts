@@ -3,6 +3,7 @@ import type zhCN from './zh-CN'
 export default {
   more: {
     appearance: '外觀',
+    theme: '主題',
     themeSystem: '跟隨系統',
     themeLight: '淺色',
     themeDark: '深色',

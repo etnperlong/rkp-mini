@@ -344,6 +344,7 @@ export default {
   },
   more: {
     appearance: 'Appearance',
+    theme: 'Theme',
     themeSystem: 'Follow system',
     themeLight: 'Light',
     themeDark: 'Dark',

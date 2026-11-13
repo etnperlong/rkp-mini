@@ -3,6 +3,7 @@ import type zhCN from './zh-CN'
 export default {
   more: {
     appearance: '화면 모드',
+    theme: '테마',
     themeSystem: '시스템 설정',
     themeLight: '라이트',
     themeDark: '다크',

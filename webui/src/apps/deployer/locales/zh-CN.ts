@@ -342,6 +342,7 @@ export default {
   },
   more: {
     appearance: '外观',
+    theme: '主题',
     themeSystem: '跟随系统',
     themeLight: '浅色',
     themeDark: '深色',

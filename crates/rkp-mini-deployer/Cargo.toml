@@ -16,7 +16,7 @@ anyhow = "1"
 base64 = "0.22"
 der = "0.7"
 libc = "0.2"
-p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
+p256 = { version = "0.14", features = ["ecdsa", "pem", "pkcs8"] }
 rust-i18n = "4"
 sec1 = "0.7"
 serde = { version = "1", features = ["derive"] }

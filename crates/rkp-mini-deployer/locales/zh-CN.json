@@ -1,4 +1,15 @@
 {
   "_version": 1,
-  "module_intro": "远程 keybox 接收端（默认关闭，WebUI 管理）：age 解密校验后部署到 OMK/TEESimulator；跨设备使用属于 keybox 克隆"
+  "module_intro": "远程 keybox 接收端（默认关闭，WebUI 管理）：age 解密校验后部署到 OMK/TEESimulator；跨设备使用属于 keybox 克隆",
+  "action.busy": "另一轮自动任务正在运行，请稍后再试。",
+  "action.start": "正在运行一轮自动任务（检查 -> 获取 -> 部署）。本轮输出也会写入 %{log}",
+  "action.done": "完成。",
+  "action.round_start": "本轮开始",
+  "action.auto_exit": "自动任务退出码=%{code}",
+  "action.preflight_exit": "预检退出码=%{code}",
+  "action.fetch_exit": "获取退出码=%{code}",
+  "action.deploy_exit": "部署退出码=%{code}",
+  "action.round_end": "本轮结束",
+  "action.loop_exit": "同步已停用或尚未就绪；循环退出",
+  "action.round_skipped": "本轮跳过：另一轮正在运行"
 }

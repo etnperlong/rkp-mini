@@ -170,6 +170,11 @@ The **Action** button on either module card runs one round of that module's loop
 `apply --auto --if-staged`). The round's lines appear in the Action console and are appended to
 the same log the WebUI shows (更多 → 日志 → 后台日志). It is not a forced issuance: with
 `auto_issue_days = 0` the issuer round skips issuing; use 立即签发 for that.
+Action's prompts and step summaries follow the language last synchronized from the WebUI, using
+the owning binary's embedded catalog. Shared loop log messages use the same language; JSON results,
+machine codes, exit behavior and raw binary diagnostics remain unchanged. Before the first language
+synchronization, or if the saved language is invalid, these prompts default to Simplified Chinese.
+
 The module card description follows the language selected in WebUI → More → Appearance → Language.
 Opening the WebUI or changing its language saves the resolved language for subsequent native status
 updates, including background issuance; refresh the KernelSU module list to see the new description.

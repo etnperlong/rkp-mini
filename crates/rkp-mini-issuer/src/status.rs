@@ -134,7 +134,7 @@ fn keybox_lib() -> &'static str {
 }
 
 /// Canonical locale codes the WebUI persists in `<dataDir>/ui-language`.
-const LOCALES: [&str; 8] = ["zh-CN", "zh-TW", "en", "ja", "ko", "de", "fr", "it"];
+pub(crate) const LOCALES: [&str; 8] = ["zh-CN", "zh-TW", "en", "ja", "ko", "de", "fr", "it"];
 /// Native default when the persisted locale is missing or invalid.
 const DEFAULT_LOCALE: &str = "zh-CN";
 
@@ -180,6 +180,11 @@ fn load_locale(path: &Path) -> &'static str {
         .ok()
         .and_then(|raw| LOCALES.iter().copied().find(|l| raw.trim() == *l))
         .unwrap_or(DEFAULT_LOCALE)
+}
+
+/// Locale the WebUI last saved in the fixed data dir (used by Action text too).
+pub(crate) fn current_locale() -> &'static str {
+    load_locale(&lang_file())
 }
 
 /// Locale-explicit renderer; `now` and the locale are injected so tests are
@@ -570,6 +575,18 @@ mod tests {
         assert_eq!(
             keys,
             [
+                "action.busy",
+                "action.done",
+                "action.issue_disabled",
+                "action.issue_exit",
+                "action.issue_locked",
+                "action.loop_exit",
+                "action.push_exit",
+                "action.push_skipped",
+                "action.round_end",
+                "action.round_skipped",
+                "action.round_start",
+                "action.start",
                 "day.one",
                 "day.other",
                 "description.blocked",

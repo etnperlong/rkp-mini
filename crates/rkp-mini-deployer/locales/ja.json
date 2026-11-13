@@ -1,4 +1,15 @@
 {
   "_version": 1,
-  "module_intro": "リモート keybox 受信側（既定で無効、WebUI で管理）：age で復号・検証してから OMK/TEESimulator に展開します。別の端末での使用は keybox のクローン行為です"
+  "module_intro": "リモート keybox 受信側（既定で無効、WebUI で管理）：age で復号・検証してから OMK/TEESimulator に展開します。別の端末での使用は keybox のクローン行為です",
+  "action.busy": "別の自動タスクが実行中です。しばらくしてから再度お試しください。",
+  "action.start": "自動タスクを1回実行します（確認 -> 取得 -> 展開）。この出力は %{log} にも記録されます",
+  "action.done": "完了。",
+  "action.round_start": "ラウンド開始",
+  "action.auto_exit": "自動タスク終了コード=%{code}",
+  "action.preflight_exit": "事前確認の終了コード=%{code}",
+  "action.fetch_exit": "取得の終了コード=%{code}",
+  "action.deploy_exit": "展開の終了コード=%{code}",
+  "action.round_end": "ラウンド終了",
+  "action.loop_exit": "同期が無効または未準備のため、ループを終了します",
+  "action.round_skipped": "ラウンドをスキップ: 別のラウンドが実行中です"
 }

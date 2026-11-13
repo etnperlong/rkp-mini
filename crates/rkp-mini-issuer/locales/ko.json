@@ -16,5 +16,17 @@
   "hint.keymint_library_missing": "keymaster 라이브러리 없음",
   "hint.smcinvoke_missing": "smcinvoke 없음",
   "hint.fingerprint_missing": "fingerprint 없음",
-  "hint.other": "사전 요구 사항 미충족"
+  "hint.other": "사전 요구 사항 미충족",
+  "action.busy": "다른 자동 작업 라운드가 실행 중입니다. 잠시 후 다시 시도하세요.",
+  "action.start": "자동 작업 라운드를 한 번 실행합니다(자동 발급 + 자동 푸시). 이 라운드의 출력은 %{log}에도 기록됩니다",
+  "action.done": "완료했습니다. 다음 예약 라운드는 약 12시간 후에 실행됩니다.",
+  "action.round_start": "라운드 시작(auto_issue_days=%{days})",
+  "action.issue_exit": "발급 종료 코드=%{code}",
+  "action.issue_locked": "발급 건너뜀: 잠금 상태(발급 작업 실행 중)",
+  "action.issue_disabled": "발급 건너뜀: auto_issue_days = 0",
+  "action.push_exit": "푸시 종료 코드=%{code}",
+  "action.push_skipped": "푸시 건너뜀: check-auto 종료 코드=%{code}",
+  "action.round_end": "라운드 종료",
+  "action.loop_exit": "자동 발급이 꺼져 있고 동기화도 꺼짐/준비 안 됨, 루프 종료",
+  "action.round_skipped": "라운드 건너뜀: 다른 라운드가 실행 중"
 }

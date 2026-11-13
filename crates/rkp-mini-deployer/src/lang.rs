@@ -9,7 +9,7 @@ use std::path::Path;
 /// Receiver data root: where the WebUI persists `ui-language`.
 pub const DATA_ROOT: &str = "/data/adb/rkp_sync";
 /// Canonical codes shared with the WebUI. Anything else means Chinese.
-const LOCALES: [&str; 8] = ["zh-CN", "zh-TW", "en", "ja", "ko", "de", "fr", "it"];
+pub const LOCALES: [&str; 8] = ["zh-CN", "zh-TW", "en", "ja", "ko", "de", "fr", "it"];
 const DEFAULT_LOCALE: &str = "zh-CN";
 
 /// Locale persisted by the WebUI under `root`; missing or invalid → zh-CN.
@@ -46,7 +46,20 @@ mod tests {
     #[test]
     fn all_eight_catalogs_have_the_same_keys() {
         assert_eq!(LOCALES.len(), 8);
-        let expected = BTreeSet::from(["module_intro".to_string()]);
+        let expected = BTreeSet::from([
+            "module_intro".to_string(),
+            "action.busy".to_string(),
+            "action.start".to_string(),
+            "action.done".to_string(),
+            "action.round_start".to_string(),
+            "action.auto_exit".to_string(),
+            "action.preflight_exit".to_string(),
+            "action.fetch_exit".to_string(),
+            "action.deploy_exit".to_string(),
+            "action.round_end".to_string(),
+            "action.loop_exit".to_string(),
+            "action.round_skipped".to_string(),
+        ]);
         for locale in LOCALES {
             let keys: BTreeSet<String> = catalog(locale)
                 .as_object()

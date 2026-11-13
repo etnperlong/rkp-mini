@@ -16,5 +16,17 @@
   "hint.keymint_library_missing": "libreria keymaster mancante",
   "hint.smcinvoke_missing": "smcinvoke mancante",
   "hint.fingerprint_missing": "impronta mancante",
-  "hint.other": "prerequisiti non soddisfatti"
+  "hint.other": "prerequisiti non soddisfatti",
+  "action.busy": "Un'altra serie di attività automatiche è in corso. Riprova più tardi.",
+  "action.start": "Esecuzione di una serie di attività automatiche (emissione auto + push auto). L'output viene registrato anche in %{log}",
+  "action.done": "Fatto. La prossima serie pianificata è prevista tra circa 12 ore.",
+  "action.round_start": "inizio serie (auto_issue_days=%{days})",
+  "action.issue_exit": "codice di uscita emissione=%{code}",
+  "action.issue_locked": "emissione saltata: lock attivo (un'emissione è in corso)",
+  "action.issue_disabled": "emissione saltata: auto_issue_days = 0",
+  "action.push_exit": "codice di uscita push=%{code}",
+  "action.push_skipped": "push saltato: codice di uscita check-auto=%{code}",
+  "action.round_end": "fine serie",
+  "action.loop_exit": "emissione automatica disattivata e sincronizzazione spenta/non pronta; il ciclo termina",
+  "action.round_skipped": "serie saltata: un'altra serie è in corso"
 }

@@ -1,4 +1,15 @@
 {
   "_version": 1,
-  "module_intro": "Remote-Keybox-Empfänger (standardmäßig deaktiviert, über WebUI verwaltet): stellt nach age-Entschlüsselung und -Prüfung in OMK/TEESimulator bereit; die Nutzung auf anderen Geräten ist Keybox-Klonen"
+  "module_intro": "Remote-Keybox-Empfänger (standardmäßig deaktiviert, über WebUI verwaltet): stellt nach age-Entschlüsselung und -Prüfung in OMK/TEESimulator bereit; die Nutzung auf anderen Geräten ist Keybox-Klonen",
+  "action.busy": "Eine andere automatische Runde läuft. Bitte später erneut versuchen.",
+  "action.start": "Eine automatische Runde wird ausgeführt (Prüfen -> Abrufen -> Bereitstellen). Die Ausgabe wird auch in %{log} protokolliert",
+  "action.done": "Fertig.",
+  "action.round_start": "Rundenbeginn",
+  "action.auto_exit": "Automatik-Exit=%{code}",
+  "action.preflight_exit": "Vorprüfungs-Exit=%{code}",
+  "action.fetch_exit": "Abruf-Exit=%{code}",
+  "action.deploy_exit": "Bereitstellungs-Exit=%{code}",
+  "action.round_end": "Rundenende",
+  "action.loop_exit": "Sync deaktiviert oder nicht bereit; Schleife wird beendet",
+  "action.round_skipped": "Runde übersprungen: eine andere Runde läuft"
 }

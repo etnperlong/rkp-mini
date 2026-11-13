@@ -1,4 +1,15 @@
 {
   "_version": 1,
-  "module_intro": "Remote keybox receiver (disabled by default, managed by WebUI): deploys to OMK/TEESimulator after age decryption and validation; using it across devices is keybox cloning"
+  "module_intro": "Remote keybox receiver (disabled by default, managed by WebUI): deploys to OMK/TEESimulator after age decryption and validation; using it across devices is keybox cloning",
+  "action.busy": "Another automatic task round is running. Please try again later.",
+  "action.start": "Running one automatic task round (check -> fetch -> deploy). Round output is also logged to %{log}",
+  "action.done": "Done.",
+  "action.round_start": "round start",
+  "action.auto_exit": "auto exit=%{code}",
+  "action.preflight_exit": "auto preflight exit=%{code}",
+  "action.fetch_exit": "auto fetch exit=%{code}",
+  "action.deploy_exit": "auto deploy exit=%{code}",
+  "action.round_end": "round end",
+  "action.loop_exit": "sync disabled or not ready; loop exits",
+  "action.round_skipped": "round skipped: another round is running"
 }

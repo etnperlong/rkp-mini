@@ -6,6 +6,7 @@
 
 rust_i18n::i18n!("locales", fallback = "zh-CN");
 
+mod action;
 mod cli;
 mod commands;
 mod deploy;
@@ -60,6 +61,10 @@ fn dispatch(ctx: &Ctx, cmd: Command, wrong_role: bool) -> anyhow::Result<Output>
     }
     match cmd {
         Command::Help => Ok(Output::ok(serde_json::Value::Null, cli::HELP.trim_end())),
+        Command::ActionMessage { key, args } => {
+            let text = action::render(&key, &args)?;
+            Ok(Output::ok(serde_json::Value::Null, text))
+        }
         Command::Version => Ok(Output::ok(
             serde_json::json!({ "version": cli::VERSION }),
             format!("rkp-mini-deployer {}", cli::VERSION),

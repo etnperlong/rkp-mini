@@ -20,6 +20,11 @@
 #
 # The RKP_MINI_* overrides exist only for the host test harness; production
 # always uses the fixed paths below.
+#
+# Human text (busy/banner/footer/round lines) comes from
+# `rkp-mini-issuer __action-message KEY [VALUE]`: an allowlisted key plus
+# literal paths/counts/exit codes, rendered in the WebUI's saved locale. Raw
+# command output, sidecar files and every exit code below are unchanged.
 MODDIR=${RKP_MINI_MODDIR:-${0%/*}}
 DATA=${RKP_MINI_DATA:-/data/misc/keystore/rkp-mini}
 TICK=${RKP_MINI_TICK:-1800}
@@ -45,14 +50,21 @@ rotate() {
   fi
 }
 
+# Render an Action message key; never eval or re-parse the arguments.
+message() {
+  "$ISSUER" __action-message "$@"
+}
+
 log() {
-  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $*" >>"$LOG"
+  text=$(message "$@") || return 1
+  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $text" >>"$LOG"
   rotate
 }
 
 # Round output goes to stdout; the caller sends it to the log (and console).
 say() {
-  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $*"
+  text=$(message "$@") || return 1
+  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $text"
 }
 
 # Last 16 KiB of a file, ending on a newline.
@@ -84,7 +96,7 @@ take_round() {
 
 round() {
   n=$(auto_issue_days)
-  say "round start (auto_issue_days=${n:-0})"
+  say round_start "${n:-0}"
   if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
     if mkdir "$TMP/issue.lock" 2>/dev/null; then
       rm -f "$AUTO.code"
@@ -94,36 +106,39 @@ round() {
       code=$?
       printf '%s\n' "$code" >"$AUTO.code"
       rmdir "$TMP/issue.lock" 2>/dev/null
-      say "issue exit=$code"
+      say issue_exit "$code"
       show "$AUTO.json"
       show "$AUTO.err"
     else
-      say "issue skipped: lock held (an issuance is running)"
+      say issue_locked
     fi
   else
-    say "issue skipped: auto_issue_days = 0"
+    say issue_disabled
   fi
   if why=$("$SYNC" --role sender --config "$CONFIG" check-auto 2>&1 >/dev/null); then
     "$SYNC" --role sender --config "$CONFIG" --json push --auto 2>&1
-    say "push exit=$?"
+    code=$?
+    say push_exit "$code"
   else
-    say "push skipped: check-auto exit=$?"
+    code=$?
+    say push_skipped "$code"
     [ -z "$why" ] || printf '%s\n' "$why"
   fi
   echo $(( $(date +%s) + INTERVAL + $(jitter) )) >"$NEXT"
-  say "round end"
+  say round_end
 }
 
 if [ "${1:-}" = once ]; then
   if ! take_round; then
-    echo "另一轮自动任务正在运行，请稍后再试。"
+    message busy
     exit 9
   fi
   trap 'rm -f "$ROUND"' EXIT
-  echo "手动执行一轮自动任务（自动签发 + 自动推送），日志同时写入 $LOG"
+  # A banner that cannot be rendered stops here, before any real round.
+  message start "$LOG" || exit
   round 2>&1 | tee -a "$LOG"
   rotate
-  echo "完成。下一轮定时任务约 12 小时后执行。"
+  message done
   exit 0
 fi
 
@@ -140,7 +155,7 @@ while :; do
   n=$(auto_issue_days)
   if [ "${n:-0}" -le 0 ] 2>/dev/null && \
     ! "$SYNC" --role sender --config "$CONFIG" check-auto >/dev/null 2>&1; then
-    log "auto-issue off and sync off/not ready; loop exits"
+    log loop_exit
     exit 0
   fi
 
@@ -152,7 +167,7 @@ while :; do
       rm -f "$ROUND"
       rotate
     else
-      log "round skipped: another round is running"
+      log round_skipped
     fi
   fi
 

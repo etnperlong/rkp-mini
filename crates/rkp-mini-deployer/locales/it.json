@@ -1,4 +1,15 @@
 {
   "_version": 1,
-  "module_intro": "Ricevitore keybox remoto (disattivato per impostazione predefinita, gestito da WebUI): distribuisce su OMK/TEESimulator dopo decifratura e verifica age; l'uso su altri dispositivi è clonazione della keybox"
+  "module_intro": "Ricevitore keybox remoto (disattivato per impostazione predefinita, gestito da WebUI): distribuisce su OMK/TEESimulator dopo decifratura e verifica age; l'uso su altri dispositivi è clonazione della keybox",
+  "action.busy": "Un'altra esecuzione automatica è in corso. Riprova più tardi.",
+  "action.start": "Esecuzione di un ciclo automatico (verifica -> recupero -> distribuzione). L'output viene registrato anche in %{log}",
+  "action.done": "Fatto.",
+  "action.round_start": "inizio ciclo",
+  "action.auto_exit": "uscita auto=%{code}",
+  "action.preflight_exit": "uscita precontrollo=%{code}",
+  "action.fetch_exit": "uscita recupero=%{code}",
+  "action.deploy_exit": "uscita distribuzione=%{code}",
+  "action.round_end": "fine ciclo",
+  "action.loop_exit": "sync disattivato o non pronto; il ciclo termina",
+  "action.round_skipped": "ciclo saltato: un altro ciclo è in corso"
 }

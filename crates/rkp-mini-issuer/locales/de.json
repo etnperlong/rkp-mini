@@ -16,5 +16,17 @@
   "hint.keymint_library_missing": "keymaster-Bibliothek fehlt",
   "hint.smcinvoke_missing": "smcinvoke fehlt",
   "hint.fingerprint_missing": "Fingerprint fehlt",
-  "hint.other": "Voraussetzungen nicht erfüllt"
+  "hint.other": "Voraussetzungen nicht erfüllt",
+  "action.busy": "Ein anderer automatischer Aufgabenlauf läuft. Bitte später erneut versuchen.",
+  "action.start": "Ein automatischer Aufgabenlauf wird ausgeführt (Auto-Ausstellung + Auto-Push). Die Ausgabe wird auch in %{log} protokolliert",
+  "action.done": "Fertig. Der nächste geplante Lauf steht in etwa 12 Stunden an.",
+  "action.round_start": "Lauf startet (auto_issue_days=%{days})",
+  "action.issue_exit": "Ausstellung Exit-Code=%{code}",
+  "action.issue_locked": "Ausstellung übersprungen: Sperre aktiv (eine Ausstellung läuft)",
+  "action.issue_disabled": "Ausstellung übersprungen: auto_issue_days = 0",
+  "action.push_exit": "Push Exit-Code=%{code}",
+  "action.push_skipped": "Push übersprungen: check-auto Exit-Code=%{code}",
+  "action.round_end": "Lauf beendet",
+  "action.loop_exit": "Auto-Ausstellung aus und Sync aus/nicht bereit; Schleife endet",
+  "action.round_skipped": "Lauf übersprungen: ein anderer Lauf ist aktiv"
 }

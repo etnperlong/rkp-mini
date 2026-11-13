@@ -21,6 +21,7 @@ ROUND=$DATA/tmp/sync-round.pid
 RESULT=$DATA/tmp/sync-auto
 INTERVAL=28800
 SYNC="$MODDIR/bin/rkp-mini-sync"
+DEPLOY="$MODDIR/bin/rkp-mini-deployer"
 
 umask 077
 mkdir -p "$DATA/logs" "$DATA/tmp"
@@ -32,14 +33,22 @@ rotate() {
   fi
 }
 
+# Action text lives in the deployer catalogs and follows the WebUI locale.
+# A formatter failure is left visible; there is no untranslated fallback.
+message() {
+  "$DEPLOY" __action-message "$@"
+}
+
 log() {
-  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $*" >>"$LOG"
+  _rkp_line=$(message "$@" 2>>"$LOG") || return 1
+  printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$_rkp_line" >>"$LOG"
   rotate
 }
 
 # Round output goes to stdout; the caller sends it to the log (and console).
 say() {
-  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $*"
+  _rkp_line=$(message "$@") || return 1
+  printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$_rkp_line"
 }
 
 # Last 16 KiB of a step file (bounded, same window the WebUI snapshot uses),
@@ -55,7 +64,14 @@ show() {
 show_step() {
   # $1 prefix, $2 step name; absent sidecars mean the step did not run.
   [ -f "$1.code" ] || return 0
-  say "auto $2 exit=$(cat "$1.code")"
+  case "$2" in
+    preflight) _rkp_key=preflight_exit ;;
+    fetch) _rkp_key=fetch_exit ;;
+    deploy) _rkp_key=deploy_exit ;;
+    *) return 0 ;;
+  esac
+  _rkp_code=$(cat "$1.code")
+  say "$_rkp_key" "$_rkp_code"
   show "$1.json"
   show "$1.err"
 }
@@ -74,25 +90,27 @@ take_round() {
 }
 
 round() {
-  say "round start"
+  say round_start
   sh "$MODDIR/run.sh" auto 2>&1
-  say "auto exit=$?"
+  _rkp_auto=$?
+  say auto_exit "$_rkp_auto"
   show_step "$RESULT.preflight" preflight
   show_step "$RESULT.fetch" fetch
   show_step "$RESULT.deploy" deploy
-  say "round end"
+  say round_end
 }
 
 if [ "${1:-}" = once ]; then
   if ! take_round; then
-    echo "另一轮自动任务正在运行，请稍后再试。"
+    message busy || :
     exit 9
   fi
   trap 'rm -f "$ROUND"' EXIT
-  echo "手动执行一轮自动任务（检查 → 拉取 → 部署），日志同时写入 $LOG"
+  # A banner that cannot be rendered stops the run before any real step.
+  message start "$LOG" || exit 1
   round 2>&1 | tee -a "$LOG"
   rotate
-  echo "完成。"
+  message done
   exit 0
 fi
 
@@ -107,7 +125,7 @@ sleep $(( 60 + $(jitter) / 10 ))
 
 while :; do
   if ! "$SYNC" --role receiver --config "$CONFIG" check-auto >/dev/null 2>>"$LOG"; then
-    log "sync disabled or not ready; loop exits"
+    log loop_exit
     exit 0
   fi
   if take_round; then
@@ -115,7 +133,7 @@ while :; do
     rm -f "$ROUND"
     rotate
   else
-    log "round skipped: another round is running"
+    log round_skipped
   fi
   sleep $(( INTERVAL + $(jitter) ))
 done

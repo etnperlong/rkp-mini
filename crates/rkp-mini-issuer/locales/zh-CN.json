@@ -16,5 +16,17 @@
   "hint.keymint_library_missing": "缺 keymaster 库",
   "hint.smcinvoke_missing": "smcinvoke 缺失",
   "hint.fingerprint_missing": "缺指纹",
-  "hint.other": "前置未满足"
+  "hint.other": "前置未满足",
+  "action.busy": "另一个自动任务轮次正在运行，请稍后再试。",
+  "action.start": "正在运行一轮自动任务（自动签发 + 自动推送）。本轮输出也会写入 %{log}",
+  "action.done": "完成。下一轮计划约 12 小时后运行。",
+  "action.round_start": "轮次开始（auto_issue_days=%{days}）",
+  "action.issue_exit": "签发退出码=%{code}",
+  "action.issue_locked": "跳过签发：锁被占用（已有签发任务在运行）",
+  "action.issue_disabled": "跳过签发：auto_issue_days = 0",
+  "action.push_exit": "推送退出码=%{code}",
+  "action.push_skipped": "跳过推送：check-auto 退出码=%{code}",
+  "action.round_end": "轮次结束",
+  "action.loop_exit": "自动签发已关闭且同步关闭/未就绪，循环退出",
+  "action.round_skipped": "跳过轮次：另一个轮次正在运行"
 }

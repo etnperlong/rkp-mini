@@ -16,5 +16,17 @@
   "hint.keymint_library_missing": "keymaster library missing",
   "hint.smcinvoke_missing": "smcinvoke missing",
   "hint.fingerprint_missing": "fingerprint missing",
-  "hint.other": "prerequisites not met"
+  "hint.other": "prerequisites not met",
+  "action.busy": "Another automatic task round is running. Please try again later.",
+  "action.start": "Running one automatic task round (auto-issue + auto-push). Round output is also logged to %{log}",
+  "action.done": "Done. The next scheduled round is due in about 12 hours.",
+  "action.round_start": "round start (auto_issue_days=%{days})",
+  "action.issue_exit": "issue exit=%{code}",
+  "action.issue_locked": "issue skipped: lock held (an issuance is running)",
+  "action.issue_disabled": "issue skipped: auto_issue_days = 0",
+  "action.push_exit": "push exit=%{code}",
+  "action.push_skipped": "push skipped: check-auto exit=%{code}",
+  "action.round_end": "round end",
+  "action.loop_exit": "auto-issue off and sync off/not ready; loop exits",
+  "action.round_skipped": "round skipped: another round is running"
 }

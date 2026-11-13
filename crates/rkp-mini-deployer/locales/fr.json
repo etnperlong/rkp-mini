@@ -1,4 +1,15 @@
 {
   "_version": 1,
-  "module_intro": "Récepteur de keybox distant (désactivé par défaut, géré via WebUI) : déploie vers OMK/TEESimulator après déchiffrement et validation age ; l'utilisation sur un autre appareil relève du clonage de keybox"
+  "module_intro": "Récepteur de keybox distant (désactivé par défaut, géré via WebUI) : déploie vers OMK/TEESimulator après déchiffrement et validation age ; l'utilisation sur un autre appareil relève du clonage de keybox",
+  "action.busy": "Une autre passe automatique est en cours. Réessayez plus tard.",
+  "action.start": "Exécution d'une passe automatique (vérification -> récupération -> déploiement). La sortie est aussi journalisée dans %{log}",
+  "action.done": "Terminé.",
+  "action.round_start": "début de passe",
+  "action.auto_exit": "sortie auto=%{code}",
+  "action.preflight_exit": "sortie précontrôle=%{code}",
+  "action.fetch_exit": "sortie récupération=%{code}",
+  "action.deploy_exit": "sortie déploiement=%{code}",
+  "action.round_end": "fin de passe",
+  "action.loop_exit": "sync désactivé ou non prêt ; la boucle se termine",
+  "action.round_skipped": "passe ignorée : une autre passe est en cours"
 }

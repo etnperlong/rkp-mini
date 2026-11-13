@@ -1,3 +1,4 @@
+mod action;
 mod cli;
 mod config;
 mod error;
@@ -99,6 +100,10 @@ fn dispatch(cmd: Command) -> anyhow::Result<i32> {
             Ok(0)
         }
         Command::TaWorker { dir } => Ok(rkp::keymint::worker_main(&dir)),
+        Command::ActionMessage { key, args } => {
+            println!("{}", action::render(&key, &args)?);
+            Ok(0)
+        }
         Command::Status(a) => status::run(&a),
         Command::UpdateDescription { config } => status::run_update_description(&config),
         Command::Issue(a) => rkp::issue(&a),

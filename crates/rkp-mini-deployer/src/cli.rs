@@ -70,6 +70,10 @@ pub enum Command {
         yes: bool,
     },
     UpdateDescription,
+    ActionMessage {
+        key: String,
+        args: Vec<String>,
+    },
 }
 
 fn take_value(flag: &str, it: &mut impl Iterator<Item = String>) -> Result<String> {
@@ -105,6 +109,15 @@ pub fn parse(args: &[String]) -> Result<(Global, Command)> {
     let Some(cmd) = it.next() else {
         return Ok((g, Command::Help));
     };
+    // Internal, for the module script: allowlisted key + literal args only.
+    if cmd == "__action-message" {
+        let key = it
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("__action-message requires a message key"))?;
+        let args: Vec<String> = it.collect();
+        crate::action::validate(&key, &args)?;
+        return Ok((g, Command::ActionMessage { key, args }));
+    }
     let mut flags = Flags::new(it.collect());
     let command = match cmd.as_str() {
         "-h" | "--help" | "help" => Command::Help,
@@ -203,6 +216,26 @@ mod tests {
         let (g, c) = p(&["update-description", "--json"]).unwrap();
         assert!(g.json);
         assert!(matches!(c, Command::UpdateDescription));
+    }
+
+    #[test]
+    fn action_message_is_allowlisted_and_verbatim() {
+        let (g, c) = p(&["__action-message", "start", "/data/adb/x.log"]).unwrap();
+        assert!(!g.json);
+        match c {
+            Command::ActionMessage { key, args } => {
+                assert_eq!(key, "start");
+                assert_eq!(args, vec!["/data/adb/x.log"]);
+            }
+            other => panic!("{other:?}"),
+        }
+        let (g, c) = p(&["__action-message", "action.busy", "--json"]).unwrap();
+        assert!(g.json);
+        assert!(matches!(c, Command::ActionMessage { .. }));
+        assert!(p(&["__action-message", "nope"]).is_err());
+        assert!(p(&["__action-message", "start"]).is_err());
+        assert!(p(&["__action-message", "busy", "extra"]).is_err());
+        assert!(p(&["__action-message"]).is_err());
     }
 
     #[test]

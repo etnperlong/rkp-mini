@@ -1,4 +1,15 @@
 {
   "_version": 1,
-  "module_intro": "遠端 keybox 接收端（預設關閉，WebUI 管理）：age 解密驗證後部署到 OMK/TEESimulator；跨裝置使用屬於 keybox 複製"
+  "module_intro": "遠端 keybox 接收端（預設關閉，WebUI 管理）：age 解密驗證後部署到 OMK/TEESimulator；跨裝置使用屬於 keybox 複製",
+  "action.busy": "另一輪自動任務正在執行，請稍後再試。",
+  "action.start": "正在執行一輪自動任務（檢查 -> 取得 -> 部署）。本輪輸出也會寫入 %{log}",
+  "action.done": "完成。",
+  "action.round_start": "本輪開始",
+  "action.auto_exit": "自動任務結束碼=%{code}",
+  "action.preflight_exit": "預檢結束碼=%{code}",
+  "action.fetch_exit": "取得結束碼=%{code}",
+  "action.deploy_exit": "部署結束碼=%{code}",
+  "action.round_end": "本輪結束",
+  "action.loop_exit": "同步已停用或尚未就緒；迴圈結束",
+  "action.round_skipped": "本輪略過：另一輪正在執行"
 }

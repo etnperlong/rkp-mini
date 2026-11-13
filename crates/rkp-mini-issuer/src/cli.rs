@@ -70,6 +70,7 @@ pub enum Command {
     ConfigSet(ConfigSetArgs),
     UpdateDescription { config: Option<PathBuf> },
     TaWorker { dir: PathBuf },
+    ActionMessage { key: String, args: Vec<String> },
     Version,
     Help,
 }
@@ -197,6 +198,18 @@ pub fn parse(args: &[String]) -> Result<Command> {
                 dir: PathBuf::from(dir),
             })
         }
+        // Internal, for the module scripts: allowlisted key + literal args only.
+        "__action-message" => {
+            let key = it
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("__action-message requires a message key"))?;
+            let rest: Vec<String> = it.collect();
+            if let Some(flag) = rest.iter().find(|a| a.starts_with("--")) {
+                bail!("unknown __action-message flag: {flag}");
+            }
+            crate::action::validate(&key, &rest)?;
+            Ok(Command::ActionMessage { key, args: rest })
+        }
         other => bail!("unknown command: {other}"),
     }
 }
@@ -235,6 +248,23 @@ mod tests {
     fn remove_rejects_unknown_flags() {
         assert!(parse(&args(&["remove", "--nope"])).is_err());
         assert!(parse(&args(&["remove", "--yes", "--config"])).is_err());
+    }
+
+    #[test]
+    fn action_message_takes_allowlisted_key_and_literal_args() {
+        match parse(&args(&["__action-message", "round_start", "3"])).unwrap() {
+            Command::ActionMessage { key, args: rest } => {
+                assert_eq!(key, "round_start");
+                assert_eq!(rest, ["3"]);
+            }
+            other => panic!("expected action-message, got {other:?}"),
+        }
+        // Missing key, wrong arity and flags are usage errors (exit 2 upstream).
+        assert!(parse(&args(&["__action-message"])).is_err());
+        assert!(parse(&args(&["__action-message", "busy", "x"])).is_err());
+        assert!(parse(&args(&["__action-message", "nope"])).is_err());
+        assert!(parse(&args(&["__action-message", "busy", "--json"])).is_err());
+        assert!(parse(&args(&["__action-message", "start", "--log=x"])).is_err());
     }
 
     #[test]

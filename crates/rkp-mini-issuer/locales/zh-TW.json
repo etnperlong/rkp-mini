@@ -16,5 +16,17 @@
   "hint.keymint_library_missing": "缺 keymaster 庫",
   "hint.smcinvoke_missing": "缺 smcinvoke",
   "hint.fingerprint_missing": "缺指紋",
-  "hint.other": "前置條件未滿足"
+  "hint.other": "前置條件未滿足",
+  "action.busy": "另一個自動任務輪次正在執行，請稍後再試。",
+  "action.start": "正在執行一輪自動任務（自動簽發 + 自動推送）。本輪輸出也會寫入 %{log}",
+  "action.done": "完成。下一輪預計約 12 小時後執行。",
+  "action.round_start": "輪次開始（auto_issue_days=%{days}）",
+  "action.issue_exit": "簽發結束代碼=%{code}",
+  "action.issue_locked": "略過簽發：鎖已被占用（已有簽發任務在執行）",
+  "action.issue_disabled": "略過簽發：auto_issue_days = 0",
+  "action.push_exit": "推送結束代碼=%{code}",
+  "action.push_skipped": "略過推送：check-auto 結束代碼=%{code}",
+  "action.round_end": "輪次結束",
+  "action.loop_exit": "自動簽發已關閉且同步關閉/未就緒，迴圈結束",
+  "action.round_skipped": "略過輪次：另一個輪次正在執行"
 }

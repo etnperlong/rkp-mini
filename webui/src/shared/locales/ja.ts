@@ -4,6 +4,7 @@ export default {
   language: {
     title: '言語',
     system: 'システムに合わせる',
+    syncFailed: 'モジュールの説明を更新できませんでした',
   },
   common: {
     close: '閉じる',

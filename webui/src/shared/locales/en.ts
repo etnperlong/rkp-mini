@@ -4,6 +4,7 @@ export default {
   language: {
     title: 'Language',
     system: 'Follow system',
+    syncFailed: 'Failed to refresh the module description',
   },
   common: {
     close: 'Close',

@@ -32,6 +32,7 @@ import RiskSheet from '../../shared/components/RiskSheet.vue'
 import SecretDialog from '../../shared/components/SecretDialog.vue'
 import { bridgeAvailable } from '../../shared/lib/ksu'
 import { CommandError } from '../../shared/lib/command'
+import { localeSyncSettled } from '../../shared/lib/moduleLocale'
 import { blockerLabel, readCachedStatus, readStatus, type StatusData } from './lib/rkp'
 import { useIssueRunner } from './lib/issueRunner'
 import {
@@ -268,6 +269,7 @@ const canIssue = computed(
 onMounted(async () => {
   clock = window.setInterval(() => (now.value = nowUnix()), 60_000)
   if (!available) return
+  await localeSyncSettled()
   await Promise.all([runner.check(), syncRunner.check(), loadSyncStatus()])
   if (runner.busy.value) await loadCachedStatus()
   else if (!status.value && !statusLoading.value) await loadStatus(false)

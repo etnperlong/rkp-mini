@@ -12,6 +12,8 @@
 //   ?remote=  none | in_sync | behind | ahead | diverged | missing | error
 //                                            (cached remote_check; none = null)
 //   ?autopush= on | off                                      (default on)
+//   ?locale=  ok | fail   (module description refresh; `runner=running` models
+//                          the busy issuer skipping it while the locale is saved)
 // rkp-mini-sync commands are answered by ./mockSyncSender.ts.
 import type { ExecResult } from '../../../shared/lib/ksu'
 import type { StatusData } from '../lib/rkp'
@@ -29,6 +31,11 @@ import issueFailure from './fixtures/issue-failure.json'
 const params = new URLSearchParams(location.search)
 let scenario = params.get('mock') ?? 'ready'
 const outcome = params.get('outcome') ?? 'success'
+const localeMode = params.get('locale') ?? 'ok'
+/** Observations for the module-language bridge; names are part of the dev harness. */
+const MODULE_LOCALE_KEY = 'rkp.mock.moduleLocale'
+const MODULE_SYNC_KEY = 'rkp.mock.moduleSync'
+const MODULE_COMMANDS_KEY = 'rkp.mock.moduleCommands'
 
 const STATUS: Record<string, StatusData> = {
   ready: ready as StatusData,
@@ -214,6 +221,36 @@ function sanitized(command: string): string {
   return command.replace(/(echo )[0-9a-f]+( >)/g, '$1<redacted>$2').replace(/[0-9a-f]{32,}/g, '<redacted>')
 }
 
+/** Model the native file + the last refresh invocation for browser assertions. */
+function recordModuleSync(
+  command: string,
+  action: 'persist' | 'refresh',
+  ok: boolean,
+  code = ok ? 0 : 1,
+  skipped?: string,
+): void {
+  const entry = {
+    command: sanitized(command),
+    action,
+    locale: localStorage.getItem(MODULE_LOCALE_KEY)?.trim() ?? '',
+    ok,
+    code,
+    at: nowUnix(),
+    ...(skipped ? { skipped } : {}),
+    // What a successful refresh would have written to module.prop (fixture data,
+    // not a translated catalog).
+    ...(action === 'refresh' && ok && !skipped ? { description: liveStatus().description } : {}),
+  }
+  try {
+    localStorage.setItem(MODULE_SYNC_KEY, JSON.stringify(entry))
+    const prev = JSON.parse(localStorage.getItem(MODULE_COMMANDS_KEY) ?? '[]') as unknown
+    const list = Array.isArray(prev) ? prev.filter((x): x is string => typeof x === 'string') : []
+    localStorage.setItem(MODULE_COMMANDS_KEY, JSON.stringify([...list.slice(-9), entry.command]))
+  } catch {
+    /* preview only */
+  }
+}
+
 /** Commands owned by the remote-sync mock: sync binary, runner, loop, inbox, log. */
 const SYNC_COMMAND = /\/bin\/rkp-mini-sync|runner\/sync\.sh|sync-task\.|auto-loop\.sh|sync\/inbox|logs\/auto\.log/
 const SEP = '<<<RKP-SEP>>>'
@@ -224,6 +261,31 @@ export async function mockExec(command: string): Promise<ExecResult> {
 
   // Sync commands first: their paths share the module's `bin/` and `logs/`.
   if (SYNC_COMMAND.test(command)) return mockSync(command)
+
+  // Module-language bridge (shared/lib/moduleLocale.ts): write the locale file,
+  // then refresh module.prop unless an issuance holds the lock.
+  if (command.includes('/ui-language.tmp') && command.includes('/ui-language')) {
+    const locale = /printf '%s\\n' '([^']+)'/.exec(command)?.[1] ?? ''
+    try {
+      localStorage.setItem(MODULE_LOCALE_KEY, locale)
+    } catch {
+      /* preview only */
+    }
+    recordModuleSync(command, 'persist', true)
+    return ok('')
+  }
+  if (command.includes(' update-description')) {
+    if (files.lock !== null) {
+      recordModuleSync(command, 'refresh', true, 0, 'issue.lock')
+      return ok('')
+    }
+    if (localeMode === 'fail') {
+      recordModuleSync(command, 'refresh', false, 7)
+      return fail(7, 'mock: update-description failed\n')
+    }
+    recordModuleSync(command, 'refresh', true)
+    return ok('')
+  }
 
   // Auto-issue is the issuer's own setting (C1) and state (C6), mocked here.
   if (command.includes(' config set auto_issue_days ')) {

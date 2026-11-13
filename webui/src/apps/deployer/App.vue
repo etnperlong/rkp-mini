@@ -35,6 +35,7 @@ import RiskSheet from '../../shared/components/RiskSheet.vue'
 import SecretDialog from '../../shared/components/SecretDialog.vue'
 import { bridgeAvailable } from '../../shared/lib/ksu'
 import { nowUnix } from '../../shared/lib/format'
+import { localeSyncSettled } from '../../shared/lib/moduleLocale'
 import { t, type MessageKey } from '../../shared/lib/i18n'
 import { initTheme } from '../../shared/lib/theme'
 import { errorMessage, isTofuFacts, receiverCheckLabel } from './lib/display'
@@ -302,6 +303,7 @@ function onTofuRetry(): void {
 onMounted(async () => {
   clock = window.setInterval(() => (now.value = nowUnix()), 60_000)
   if (!available) return
+  await localeSyncSettled()
   await runner.check()
   await load()
   await collectRunSteps()

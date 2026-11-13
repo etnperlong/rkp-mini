@@ -4,6 +4,7 @@ export default {
   language: {
     title: '語言',
     system: '跟隨系統',
+    syncFailed: '模組說明重新整理失敗',
   },
   common: {
     close: '關閉',

@@ -4,6 +4,7 @@ export default {
   language: {
     title: 'Lingua',
     system: 'Segui il sistema',
+    syncFailed: 'Impossibile aggiornare la descrizione del modulo',
   },
   common: {
     close: 'Chiudi',

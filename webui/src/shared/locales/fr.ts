@@ -4,6 +4,7 @@ export default {
   language: {
     title: 'Langue',
     system: 'Selon le système',
+    syncFailed: "Impossible d'actualiser la description du module",
   },
   common: {
     close: 'Fermer',

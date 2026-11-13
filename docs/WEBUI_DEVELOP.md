@@ -541,9 +541,10 @@ TEESimulator 可指定 `/data/adb/teesim` 下的 `.xml` 文件名，默认 `keyb
   源语言没有该键时返回 `undefined`，调用方显示原始 code；`MessageKey` 用于常量表；`currentLocale()` 供 `Intl` 使用（`formatAgo` 用 `Intl.RelativeTimeFormat`）。
 - 约定：非源语言文件写 `satisfies typeof zhCN`，缺键/多键都会 `vue-tsc` 失败。不在模块顶层调用 `t()`（切换语言要即时生效）；整句一个键、用命名参数，不拼接翻译片段；
   计数参数一律叫 `{n}` 并以 `t(key, count)` 调用，`en/de/fr/it` 可写 `单数 | 复数` 两种形式（法语 0 与 1 取单数）。消息中的 `{ } @ $ |` 是语法字符，字面量写 `{'|'}`。
+- 模块卡片描述跟随 WebUI 所选语言：页面启动及切换语言时，把实际启用的八种语言之一原子写入各自数据根的 `ui-language`（0600），而不是尝试从原生进程读取 `localStorage`。选“跟随系统”时记录当前解析结果；关闭页面后系统语言再变化，要下次打开 WebUI 才同步。签发端所有状态描述生成读取该文件，缺失或无效时沿用 `zh-CN`；签发中只更新语言文件，不并发刷新描述，由签发完成的正常写入或页面后续刷新更新。部署端只翻译现有静态介绍，不新增动态状态。KernelSU 模块列表可能需要刷新才能看到变化。原生同步失败不回退或阻止 Vue 语言切换；手动切换时显示错误，启动时记入调试日志。
 - 原生描述使用 `rust-i18n`，语言包分别位于 `crates/rkp-mini-{issuer,deployer}/locales/<locale>.json`，编译时嵌入，不启用运行时语言包加载。Vue 与 Rust 不互相导入、转换或复制语言包，只共享上述语言代码。原生调用显式传入 locale，不修改全局语言；剩余天数只用轻量 `one/other` 选择（英语/德语/意大利语 1 用 one，法语 0/1 用 one，中文/日语/韩语不变）。新增原生文案只改所属 crate 的八个 JSON，并验证键与占位符一致，不要求改 Vue 语言包。
 - 描述刷新由所属二进制的 `update-description` 负责：签发端读取签发配置并重新检查本地状态，只写描述、不写状态快照，写入失败退出 7；原有 `status --update-description` 仍保持状态命令退出 0 的契约。部署端不读取同步配置、不要求初始化或风险批准，只更新静态介绍，写入失败退出 1。两端都原子更新自身 `module.prop` 并保留其余字段与权限。WebUI 不拼装或翻译模块描述，也不直接写 `module.prop`。
-- 不翻译：二进制输出的文本（`status.description`、`error.message`）、`dev/` 下的 mock 与 fixture、调试日志。风险说明只来自 `rkp-mini-sync risk`（`zh`/`en` 两种）：
+- `status.description` 由签发端原生层本地化，WebUI 不二次翻译；`error.message`、`dev/` 下的 mock/fixture 和原始调试日志不翻译。风险说明只来自 `rkp-mini-sync risk`（`zh`/`en` 两种）：
   中文界面显示 `zh` 并附 `en`，其他语言界面只显示 `en`，不在 WebUI 里另行翻译。
 - 新增文案：先加到对应 `zh-CN.ts`，再给其余 7 个语言文件补同一个键，`bun run build` 通过即键名一致。
 

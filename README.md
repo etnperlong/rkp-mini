@@ -170,11 +170,17 @@ The **Action** button on either module card runs one round of that module's loop
 `apply --auto --if-staged`). The round's lines appear in the Action console and are appended to
 the same log the WebUI shows (更多 → 日志 → 后台日志). It is not a forced issuance: with
 `auto_issue_days = 0` the issuer round skips issuing; use 立即签发 for that.
-
-Native module descriptions use independently embedded `rust-i18n` catalogs in eight languages.
-Each binary's `update-description` command renders using `<dataRoot>/ui-language` (missing or invalid
-means Simplified Chinese). The issuer checks local status without issuing a keybox or writing status
-snapshots; the deployer refreshes its introduction without initializing or enabling sync.
+The module card description follows the language selected in WebUI → More → Appearance → Language.
+Opening the WebUI or changing its language saves the resolved language for subsequent native status
+updates, including background issuance; refresh the KernelSU module list to see the new description.
+The deployer translates its existing introduction, not a new live status summary. With “System” selected,
+system-language changes are picked up the next time the WebUI opens. Before the first synchronization,
+the module description remains Chinese; raw diagnostic details retain their original language.
+Descriptions are rendered by the owning binary from its embedded `rust-i18n` catalog, independently
+of the WebUI's `vue-i18n` messages. The WebUI shares only the active language code and calls the owning
+binary's `update-description` command. The issuer refresh checks local status without issuing a keybox;
+the deployer refreshes its introduction without initializing or enabling sync. If native synchronization
+fails, the WebUI keeps the selected language and reports the error on a manual language change.
 
 Identity changes on the receiver follow `[deploy].identity_change_policy`: `scheduled`
 (default) deploys a new keybox automatically only within `rotation_lead_days` (default 4) of the old

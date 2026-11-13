@@ -15,6 +15,8 @@
 // Cached remote check (&remote=): none | in_sync | ahead | behind | diverged | missing | error
 //   (`none` = never checked; its `check` task reports in_sync).
 // Wrong password (&decrypt=fail): `check` tasks fail with decrypt/decrypt_failed.
+// Module description refresh (&locale=fail): the locale file is still written,
+//   but `rkp-mini-deployer update-description` exits non-zero.
 //
 // Sample import links (also accepted as their JSON):
 //   rkpsync://v1/import?p=eyJ2IjoxLCJwcm92aWRlciI6Imdpc3QiLCJ1cmwiOiJodHRwczovL2dpc3QuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2V2YW5zL2FiYzEyMy9yYXcvcmtwLXN5bmMuYWdlIiwiZ2lzdF9pZCI6ImFiYzEyMyIsImZpbGVuYW1lIjoicmtwLXN5bmMuYWdlIiwic3RyZWFtX2lkIjoic3RfZGVtb19yZWNlaXZlciIsImxhYmVsIjoicGhvbmUtYSIsImZvcm1hdCI6ImFnZS1hcm1vciJ9
@@ -157,6 +159,11 @@ const modulesMode = params.get('modules') ?? 'omk,tricky_store'
 /** Cached `check-remote` record: none | in_sync | ahead | behind | diverged | missing | error. */
 const remoteMode = params.get('remote') ?? 'none'
 const decryptFails = params.get('decrypt') === 'fail'
+const localeMode = params.get('locale') ?? 'ok'
+/** Observations for the module-language bridge; names are part of the dev harness. */
+const MODULE_LOCALE_KEY = 'rkp.mock.moduleLocale'
+const MODULE_SYNC_KEY = 'rkp.mock.moduleSync'
+const MODULE_COMMANDS_KEY = 'rkp.mock.moduleCommands'
 
 const BUILTIN_TARGETS: BuiltinTargetInfo[] = [
   {
@@ -1470,9 +1477,50 @@ function safeCommand(command: string): string {
   return command.replace(/(echo\s+)[0-9a-f]+/g, '$1<hex>')
 }
 
+/** Model the native ui-language file and the last refresh call (no catalog copy here). */
+function recordModuleSync(command: string, action: 'persist' | 'refresh', ok: boolean): void {
+  const entry = {
+    command: safeCommand(command),
+    action,
+    locale: localStorage.getItem(MODULE_LOCALE_KEY)?.trim() ?? '',
+    ok,
+    code: ok ? 0 : 1,
+    at: nowUnix(),
+  }
+  try {
+    localStorage.setItem(MODULE_SYNC_KEY, JSON.stringify(entry))
+    const prev = JSON.parse(localStorage.getItem(MODULE_COMMANDS_KEY) ?? '[]') as unknown
+    const list = Array.isArray(prev) ? prev.filter((x): x is string => typeof x === 'string') : []
+    localStorage.setItem(MODULE_COMMANDS_KEY, JSON.stringify([...list.slice(-9), entry.command]))
+  } catch {
+    /* preview only */
+  }
+}
+
 export async function mockExec(command: string): Promise<ExecResult> {
   await new Promise((resolve) => setTimeout(resolve, 120))
   console.debug('[mock receiver]', safeCommand(command))
+
+  // Module-language bridge (shared/lib/moduleLocale.ts): locale file first,
+  // then the config-independent description refresh.
+  if (command.includes('/ui-language.tmp') && command.includes('/ui-language')) {
+    const locale = /printf '%s\\n' '([^']+)'/.exec(command)?.[1] ?? ''
+    try {
+      localStorage.setItem(MODULE_LOCALE_KEY, locale)
+    } catch {
+      /* preview only */
+    }
+    recordModuleSync(command, 'persist', true)
+    return { errno: 0, stdout: '', stderr: '' }
+  }
+  if (command.includes(' update-description')) {
+    if (localeMode === 'fail') {
+      recordModuleSync(command, 'refresh', false)
+      return { errno: 1, stdout: '', stderr: 'mock: update-description failed\n' }
+    }
+    recordModuleSync(command, 'refresh', true)
+    return { errno: 0, stdout: '', stderr: '' }
+  }
 
   if (command.includes('runner/sync.sh')) {
     const at = command.indexOf("sync.sh'")

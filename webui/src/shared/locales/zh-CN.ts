@@ -3,6 +3,7 @@ export default {
   language: {
     title: '语言',
     system: '跟随系统',
+    syncFailed: '模块说明刷新失败',
   },
   common: {
     close: '关闭',

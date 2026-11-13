@@ -4,6 +4,7 @@ export default {
   language: {
     title: '언어',
     system: '시스템 설정 따르기',
+    syncFailed: '모듈 설명을 새로 고치지 못했습니다',
   },
   common: {
     close: '닫기',

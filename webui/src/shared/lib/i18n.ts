@@ -104,12 +104,18 @@ async function load(locale: Locale): Promise<void> {
   loaded.add(locale)
 }
 
-async function apply(pref: LocalePref): Promise<void> {
+let applySeq = 0
+
+async function apply(pref: LocalePref): Promise<boolean> {
+  const seq = ++applySeq
   const locale = pref === 'system' ? systemLocale() : pref
   await load(locale)
+  // A newer selection loaded first: it owns the UI and the stored value.
+  if (seq !== applySeq) return false
   i18n.global.locale.value = locale
   localePref.value = pref
   document.documentElement.lang = locale
+  return true
 }
 
 /**
@@ -132,13 +138,17 @@ export async function setupI18n(app: string, loaders: LocaleLoaders): Promise<ty
   return i18n
 }
 
-/** Switch language at runtime and persist the choice. */
-export async function saveLocale(pref: LocalePref): Promise<void> {
-  await apply(pref)
+/**
+ * Switch language at runtime and persist the choice.
+ * `false` when a newer selection superseded this one before it applied.
+ */
+export async function saveLocale(pref: LocalePref): Promise<boolean> {
+  if (!(await apply(pref))) return false
   try {
     if (pref === 'system') localStorage.removeItem(KEY)
     else localStorage.setItem(KEY, pref)
   } catch {
     // Non-persistent fallback is acceptable.
   }
+  return true
 }

@@ -12,19 +12,21 @@ import {
 } from 'miuix-vue'
 import { ChevronForward } from 'miuix-vue/icons'
 import FoldBlock from '../../../shared/components/FoldBlock.vue'
+import LanguagePicker from '../../../shared/components/LanguagePicker.vue'
 import { CONFIG, DATA, readConfig, readModuleProp, readVersion } from '../lib/rkp'
 import { CommandError } from '../../../shared/lib/command'
 import { saveTheme } from '../../../shared/lib/theme'
+import { t, type MessageKey } from '../../../shared/lib/i18n'
 
 /** Reloads every time the tab becomes active. */
 const props = defineProps<{ active: boolean }>()
 const emit = defineEmits<{ logs: [] }>()
 
 const { mode } = useTheme()
-const THEMES: { mode: ThemeMode; title: string }[] = [
-  { mode: 'system', title: '跟随系统' },
-  { mode: 'light', title: '浅色' },
-  { mode: 'dark', title: '深色' },
+const THEMES: { mode: ThemeMode; title: MessageKey }[] = [
+  { mode: 'system', title: 'issuer.more.themeSystem' },
+  { mode: 'light', title: 'issuer.more.themeLight' },
+  { mode: 'dark', title: 'issuer.more.themeDark' },
 ]
 
 const config = ref<string | null>(null)
@@ -33,7 +35,11 @@ const binVersion = ref('…')
 const moduleVersion = ref('…')
 
 function message(e: unknown): string {
-  return e instanceof CommandError ? `${e.message}${e.detail ? `：${e.detail}` : ''}` : String(e)
+  return e instanceof CommandError
+    ? e.detail
+      ? t('shared.common.withDetail', { message: e.message, detail: e.detail })
+      : e.message
+    : String(e)
 }
 
 async function load(): Promise<void> {
@@ -46,9 +52,11 @@ async function load(): Promise<void> {
     config.value = null
     configError.value = message(cfg.reason)
   }
-  binVersion.value = ver.status === 'fulfilled' ? ver.value : `读取失败：${message(ver.reason)}`
+  binVersion.value = ver.status === 'fulfilled' ? ver.value : t('issuer.more.readFailed', { error: message(ver.reason) })
   moduleVersion.value =
-    prop.status === 'fulfilled' ? `${prop.value.version}（${prop.value.versionCode}）` : `读取失败：${message(prop.reason)}`
+    prop.status === 'fulfilled'
+      ? t('issuer.more.moduleVersionValue', { version: prop.value.version, code: prop.value.versionCode })
+      : t('issuer.more.readFailed', { error: message(prop.reason) })
 }
 
 watch(
@@ -61,40 +69,50 @@ watch(
 </script>
 
 <template>
-  <MiuixSmallTitle text="外观" />
+  <MiuixSmallTitle :text="t('issuer.more.appearance')" />
   <MiuixCard>
     <MiuixRadioButtonPreference
-      v-for="t in THEMES"
-      :key="t.mode"
-      :title="t.title"
-      :model-value="mode === t.mode"
-      @select="saveTheme(t.mode)"
+      v-for="th in THEMES"
+      :key="th.mode"
+      :title="t(th.title)"
+      :model-value="mode === th.mode"
+      @select="saveTheme(th.mode)"
     />
+    <LanguagePicker />
   </MiuixCard>
 
-  <MiuixSmallTitle text="日志" />
+  <MiuixSmallTitle :text="t('issuer.more.logs')" />
   <MiuixCard>
-    <MiuixBasicComponent title="查看日志" summary="签发日志、后台日志、调试日志" clickable @click="emit('logs')">
+    <MiuixBasicComponent
+      :title="t('issuer.more.viewLogs')"
+      :summary="t('issuer.more.viewLogsSummary')"
+      clickable
+      @click="emit('logs')"
+    >
       <template #end>
         <MiuixIcon :icon="ChevronForward" :size="18" color="var(--m-color-on-surface-variant-actions)" />
       </template>
     </MiuixBasicComponent>
   </MiuixCard>
 
-  <MiuixSmallTitle text="配置（只读）" />
+  <MiuixSmallTitle :text="t('issuer.more.configReadOnly')" />
   <MiuixCard>
     <FoldBlock v-if="config !== null" title="config.toml" :summary="CONFIG" :text="config" />
-    <MiuixBasicComponent v-else :title="configError ? '未读取到配置' : '正在读取…'" :summary="configError ?? CONFIG" />
+    <MiuixBasicComponent
+      v-else
+      :title="configError ? t('issuer.more.configUnreadable') : t('shared.common.loading')"
+      :summary="configError ?? CONFIG"
+    />
   </MiuixCard>
   <MiuixText class="footnote" type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-    WebUI 不提供配置编辑。如需修改，请以 root 编辑上述文件后在“状态”页刷新。
+    {{ t('issuer.more.configNote') }}
   </MiuixText>
 
-  <MiuixSmallTitle text="关于" />
+  <MiuixSmallTitle :text="t('issuer.more.about')" />
   <MiuixCard>
-    <MiuixBasicComponent title="模块版本" :summary="moduleVersion" />
-    <MiuixBasicComponent title="二进制版本" :summary="binVersion" />
-    <MiuixBasicComponent title="数据目录" :summary="DATA" />
+    <MiuixBasicComponent :title="t('issuer.more.moduleVersion')" :summary="moduleVersion" />
+    <MiuixBasicComponent :title="t('issuer.more.binaryVersion')" :summary="binVersion" />
+    <MiuixBasicComponent :title="t('issuer.more.dataDir')" :summary="DATA" />
   </MiuixCard>
 </template>
 

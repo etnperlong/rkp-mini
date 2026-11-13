@@ -7,6 +7,7 @@ import { computed } from 'vue'
 import { MiuixCard, MiuixProgressIndicator, MiuixText } from 'miuix-vue'
 import SvgIcon from '../../../shared/components/SvgIcon.vue'
 import { ICON_CHECK_CIRCLE, ICON_WARNING } from '../../../shared/lib/icons'
+import { t } from '../../../shared/lib/i18n'
 import type { SyncConfig, SyncStatus } from '../../../shared/lib/sync'
 
 const props = defineProps<{
@@ -30,36 +31,36 @@ interface Box {
 /** Why automatic fetch is off, or null when it runs. */
 const autoFetchOff = computed<string | null>(() => {
   const s = props.status
-  if (!s) return props.error ? '读取同步状态失败' : '读取中…'
-  if (!s.stream_id) return '未导入同步链接'
-  if (!s.enabled) return '同步未启用'
-  if (!s.risk_ack_current) return '需重新确认风险'
-  if (s.password_mode !== 'secret-file') return '密码模式为 prompt'
-  if (!s.sync_state?.verified_at) return '尚未验证远端版本'
-  if (!s.loop_running) return '后台进程未运行'
+  if (!s) return props.error ? t('deployer.common.readStatusFailed') : t('shared.common.reading')
+  if (!s.stream_id) return t('deployer.autoStatus.unimported')
+  if (!s.enabled) return t('deployer.common.syncDisabled')
+  if (!s.risk_ack_current) return t('deployer.common.riskStale')
+  if (s.password_mode !== 'secret-file') return t('deployer.autoStatus.promptMode')
+  if (!s.sync_state?.verified_at) return t('deployer.autoStatus.unverified')
+  if (!s.loop_running) return t('deployer.common.loopOff')
   return null
 })
 
 /** Why automatic deploy is off, or null when it runs. */
 const autoDeployOff = computed<string | null>(() => {
   if (autoFetchOff.value) return autoFetchOff.value
-  if (!props.config) return '读取配置中…'
-  if (props.config.auto_deploy === false) return '已在设置中关闭'
+  if (!props.config) return t('deployer.autoStatus.readingConfig')
+  if (props.config.auto_deploy === false) return t('deployer.common.autoDeployOff')
   return null
 })
 
 const boxes = computed<Box[]>(() => [
   {
-    title: '自动拉取',
+    title: t('deployer.autoStatus.autoFetch'),
     on: autoFetchOff.value === null,
-    hint: autoFetchOff.value ?? '约每 8 小时检查一次',
+    hint: autoFetchOff.value ?? t('deployer.autoStatus.checkEvery'),
     pending: props.loading && !props.status,
     tab: 1,
   },
   {
-    title: '自动部署',
+    title: t('deployer.common.autoDeploy'),
     on: autoDeployOff.value === null,
-    hint: autoDeployOff.value ?? '拉取后自动写入目标',
+    hint: autoDeployOff.value ?? t('deployer.autoStatus.deployAfterFetch'),
     pending: props.loading && !props.status,
     tab: 1,
   },
@@ -87,7 +88,7 @@ const boxes = computed<Box[]>(() => [
             :color="b.on ? 'var(--app-ok)' : 'var(--app-warning)'"
           />
         </div>
-        <MiuixText type="body2" weight="medium">{{ b.pending ? '读取中' : b.on ? '已启用' : '未启用' }}</MiuixText>
+        <MiuixText type="body2" weight="medium">{{ b.pending ? t('deployer.autoStatus.readingShort') : b.on ? t('deployer.common.enabled') : t('deployer.autoStatus.disabled') }}</MiuixText>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ b.hint }}</MiuixText>
       </div>
     </MiuixCard>

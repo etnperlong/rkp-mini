@@ -5,7 +5,8 @@
 import { computed } from 'vue'
 import { MiuixBasicComponent, MiuixBottomSheet, MiuixIcon, MiuixIconButton, MiuixSmallTitle, MiuixText } from 'miuix-vue'
 import { Close } from 'miuix-vue/icons'
-import { TARGET_LABEL, type SyncStatus, type TargetState } from '../../../shared/lib/sync'
+import { targetLabel, type SyncStatus, type TargetState } from '../../../shared/lib/sync'
+import { t } from '../../../shared/lib/i18n'
 import { deployCodeLabel, leafLabel, pendingTitle, shortHash, stamp } from '../lib/display'
 
 const open = defineModel<boolean>({ required: true })
@@ -35,74 +36,74 @@ const targets = computed(() => {
 })
 
 function targetSummary(path: string, reloadStatus: string | null, deployed: boolean): string {
-  if (!deployed) return `${path}（尚未部署）`
-  return `${path}（reload ${reloadStatus ?? '—'}）`
+  if (!deployed) return t('deployer.deployedDetail.notDeployed', { path })
+  return t('deployer.deployedDetail.reload', { path, status: reloadStatus ?? '—' })
 }
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="部署详情">
+  <MiuixBottomSheet v-model="open" :title="t('deployer.deployedDetail.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
 
     <div class="sheet-body">
       <MiuixText v-if="!deployState" type="body2" color="var(--m-color-on-surface-variant-summary)">
-        还没有部署记录。
+        {{ t('deployer.deployedDetail.empty') }}
       </MiuixText>
 
       <template v-else>
-        <MiuixSmallTitle text="已部署 keybox" />
+        <MiuixSmallTitle :text="t('deployer.common.deployedKeybox')" />
         <div class="sheet-group">
-          <MiuixBasicComponent title="版本" :summary="`第 ${deployState.deployed_seq ?? '—'} 版`" />
-          <MiuixBasicComponent title="内容哈希" :summary="shortHash(deployState.deployed_keybox_sha256)" />
-          <MiuixBasicComponent title="设备 ID" :summary="status?.sync_state?.device_id ?? '—'" />
-          <MiuixBasicComponent title="到期" :summary="leafLabel(deployState.deployed_leaf_not_after, now)" />
-          <MiuixBasicComponent title="部署时间" :summary="stamp(deployState.deployed_at)" />
+          <MiuixBasicComponent :title="t('deployer.common.version')" :summary="t('deployer.common.versionSeq', { seq: deployState.deployed_seq ?? '—' })" />
+          <MiuixBasicComponent :title="t('deployer.common.contentHash')" :summary="shortHash(deployState.deployed_keybox_sha256)" />
+          <MiuixBasicComponent :title="t('deployer.common.deviceId')" :summary="status?.sync_state?.device_id ?? '—'" />
+          <MiuixBasicComponent :title="t('deployer.deployedDetail.due')" :summary="leafLabel(deployState.deployed_leaf_not_after, now)" />
+          <MiuixBasicComponent :title="t('deployer.deployedDetail.deployedAt')" :summary="stamp(deployState.deployed_at)" />
         </div>
 
-        <MiuixSmallTitle text="部署目标" />
+        <MiuixSmallTitle :text="t('deployer.common.deployTargets')" />
         <div class="sheet-group">
           <MiuixBasicComponent
-            v-for="t in targets"
-            :key="t.id"
-            :title="TARGET_LABEL[t.id] ?? t.id"
-            :summary="targetSummary(t.path, t.reloadStatus, t.deployed)"
-            :summary-color="t.lastError ? 'var(--m-color-error)' : undefined"
+            v-for="tg in targets"
+            :key="tg.id"
+            :title="targetLabel(tg.id)"
+            :summary="targetSummary(tg.path, tg.reloadStatus, tg.deployed)"
+            :summary-color="tg.lastError ? 'var(--m-color-error)' : undefined"
           />
         </div>
 
         <template v-if="staged">
-          <MiuixSmallTitle text="已暂存的版本" />
+          <MiuixSmallTitle :text="t('deployer.deployedDetail.staged')" />
           <div class="sheet-group">
-            <MiuixBasicComponent title="版本" :summary="`第 ${staged.seq} 版`" />
-            <MiuixBasicComponent title="内容哈希" :summary="shortHash(staged.keybox_sha256)" />
-            <MiuixBasicComponent title="到期" :summary="leafLabel(staged.leaf_not_after, now)" />
-            <MiuixBasicComponent title="暂存时间" :summary="stamp(staged.staged_at)" />
+            <MiuixBasicComponent :title="t('deployer.common.version')" :summary="t('deployer.common.versionSeq', { seq: staged.seq })" />
+            <MiuixBasicComponent :title="t('deployer.common.contentHash')" :summary="shortHash(staged.keybox_sha256)" />
+            <MiuixBasicComponent :title="t('deployer.deployedDetail.due')" :summary="leafLabel(staged.leaf_not_after, now)" />
+            <MiuixBasicComponent :title="t('deployer.deployedDetail.stagedAt')" :summary="stamp(staged.staged_at)" />
           </div>
         </template>
 
         <template v-if="pending">
-          <MiuixSmallTitle text="等待确认" />
+          <MiuixSmallTitle :text="t('deployer.deployedDetail.pending')" />
           <div class="sheet-group">
-            <MiuixBasicComponent title="版本" :summary="`第 ${pending.seq} 版`" />
-            <MiuixBasicComponent title="原因" :summary="pendingTitle(pending.reason)" />
-            <MiuixBasicComponent title="到期" :summary="leafLabel(pending.leaf_not_after, now)" />
-            <MiuixBasicComponent title="时间" :summary="stamp(pending.at)" />
+            <MiuixBasicComponent :title="t('deployer.common.version')" :summary="t('deployer.common.versionSeq', { seq: pending.seq })" />
+            <MiuixBasicComponent :title="t('deployer.deployedDetail.reason')" :summary="pendingTitle(pending.reason)" />
+            <MiuixBasicComponent :title="t('deployer.deployedDetail.due')" :summary="leafLabel(pending.leaf_not_after, now)" />
+            <MiuixBasicComponent :title="t('deployer.deployedDetail.time')" :summary="stamp(pending.at)" />
           </div>
         </template>
 
-        <MiuixText v-if="targets.some((t) => t.lastError)" type="footnote1" color="var(--m-color-error)">
-          最近一次部署失败：
-          <template v-for="t in targets.filter((x) => x.lastError)" :key="t.id">
-            {{ TARGET_LABEL[t.id] ?? t.id }} {{ deployCodeLabel(t.lastError?.code ?? '') }}；
+        <MiuixText v-if="targets.some((x) => x.lastError)" type="footnote1" color="var(--m-color-error)">
+          {{ t('deployer.deployedDetail.lastFailed') }}
+          <template v-for="tg in targets.filter((x) => x.lastError)" :key="tg.id">
+            {{ t('deployer.deployedDetail.lastFailedItem', { target: targetLabel(tg.id), reason: deployCodeLabel(tg.lastError?.code ?? '') }) }}
           </template>
         </MiuixText>
 
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          只显示本机部署状态与哈希前缀；keybox 内容、密码和云端凭据不会出现在这里。
+          {{ t('deployer.deployedDetail.footnote') }}
         </MiuixText>
       </template>
     </div>

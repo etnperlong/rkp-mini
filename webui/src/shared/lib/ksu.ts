@@ -1,4 +1,5 @@
 import { exec as ksuExec } from 'kernelsu'
+import { t } from './i18n'
 
 export interface ExecResult {
   errno: number
@@ -41,7 +42,10 @@ export async function exec(command: string, timeoutMs = TIMEOUT_MS): Promise<Exe
   // Executor form rather than Promise.withResolvers: the build targets
   // es2020 and older manager WebViews lack withResolvers.
   const timeout = new Promise<never>((_, reject) => {
-    timer = window.setTimeout(() => reject(new Error(`命令超时（${timeoutMs / 1000}s）`)), timeoutMs)
+    timer = window.setTimeout(
+      () => reject(new Error(t('shared.command.timeout', { seconds: timeoutMs / 1000 }))),
+      timeoutMs,
+    )
   })
   try {
     return await Promise.race([dispatch(command), timeout])

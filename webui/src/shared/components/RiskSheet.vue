@@ -17,6 +17,7 @@ import {
 import { Close } from 'miuix-vue/icons'
 import { CommandError } from '../lib/command'
 import { enableSync, readRisk, startLoop, type RiskStatement } from '../lib/sync'
+import { currentLocale, t } from '../lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
 const emit = defineEmits<{ enabled: [] }>()
@@ -58,7 +59,7 @@ async function accept(): Promise<void> {
     await startLoop()
     open.value = false
     emit('enabled')
-    void showSnackbar({ message: '已启用远程同步' })
+    void showSnackbar({ message: t('shared.risk.enabled') })
   } catch (e) {
     error.value = message(e)
   } finally {
@@ -68,37 +69,39 @@ async function accept(): Promise<void> {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="启用远程同步">
+  <MiuixBottomSheet v-model="open" :title="t('shared.risk.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
 
     <div class="sheet-body">
       <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-        远程同步会把 keybox（含私钥）加密后放到你自己的存储并部署到其他设备。请逐条阅读并确认：
+        {{ t('shared.risk.intro') }}
       </MiuixText>
 
       <div v-if="loading" class="center"><MiuixProgressIndicator /></div>
 
       <div v-else-if="statement" class="sheet-group">
+        <!-- The statement text comes only from `rkp-mini-sync risk` (zh + en), never from the
+             locale files: Chinese UIs show zh with en below, every other UI shows en. -->
         <MiuixCheckboxPreference
           v-for="(item, i) in statement.items"
           :key="item.id"
           v-model="checked[i]"
-          :title="item.zh"
-          :summary="item.en"
+          :title="currentLocale().startsWith('zh') ? item.zh : item.en"
+          :summary="currentLocale().startsWith('zh') ? item.en : undefined"
         />
       </div>
 
       <MiuixText v-if="statement?.passphrase_path" type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-        age 密码将保存在 {{ statement.passphrase_path }}（0600）以支持自动运行。风险说明版本 v{{ statement.version }}。
+        {{ t('shared.risk.passphraseNote', { path: statement.passphrase_path, version: statement.version }) }}
       </MiuixText>
       <MiuixText v-if="error" type="footnote1" color="var(--m-color-error)">{{ error }}</MiuixText>
 
       <MiuixButton type="primary" :disabled="!allChecked || busy" @click="accept">
-        {{ busy ? '启用中…' : '我已逐条了解，启用' }}
+        {{ busy ? t('shared.risk.enabling') : t('shared.risk.accept') }}
       </MiuixButton>
     </div>
   </MiuixBottomSheet>

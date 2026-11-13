@@ -30,6 +30,7 @@ import {
   type SyncConfig,
   type SyncStatus,
 } from '../../../shared/lib/sync'
+import { t, type MessageKey } from '../../../shared/lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{
@@ -81,38 +82,39 @@ const dialogOpen = computed({
   },
 })
 
-const DIALOG: Record<'delete' | 'forget' | 'reset', { title: string; summary: string; ok: string }> = {
+const DIALOG: Record<'delete' | 'forget' | 'reset', { title: MessageKey; summary: MessageKey; ok: MessageKey }> = {
   delete: {
-    title: '删除云端文件？',
-    summary:
-      '删除不等于撤销，已拉取过的接收端仍保留 keybox。Gist 会整个删除，下次推送会新建 Gist，接收端需重新导入链接。',
-    ok: '删除云端文件',
+    title: 'issuer.senderSyncSheet.deleteTitle',
+    summary: 'issuer.senderSyncSheet.deleteSummary',
+    ok: 'issuer.senderSyncSheet.deleteOk',
   },
   forget: {
-    title: '清除本地同步数据？',
-    summary: '将删除本地同步状态与已保存的密码 / token / WebDAV 密码。云端文件不会被删除，已部署的 keybox 也不受影响。',
-    ok: '确认清除',
+    title: 'issuer.senderSyncSheet.forgetTitle',
+    summary: 'issuer.senderSyncSheet.forgetSummary',
+    ok: 'issuer.senderSyncSheet.forgetOk',
   },
   reset: {
-    title: '完全重置同步设置？',
-    summary:
-      '在清除本地数据之外，还会删除整个 [sync] 配置表，页面回到未初始化。云端文件与已部署的 keybox 不删除；之后需要重新选择存储方式。',
-    ok: '确认重置',
+    title: 'issuer.senderSyncSheet.resetTitle',
+    summary: 'issuer.senderSyncSheet.resetSummary',
+    ok: 'issuer.senderSyncSheet.resetOk',
   },
 }
 
 const dialog = computed(() => (danger.value ? DIALOG[danger.value] : DIALOG.forget))
 
 /** WebDAV deletes only the one file; say so instead of the Gist wording. */
-const dialogSummary = computed(() => {
-  if (danger.value === 'delete' && draft.provider !== 'gist') {
-    return '删除不等于撤销，已拉取过的接收端仍保留 keybox。只删除该 WebDAV 文件，下次推送会重新创建。'
-  }
-  return dialog.value.summary
-})
+const dialogSummary = computed(() =>
+  danger.value === 'delete' && draft.provider !== 'gist'
+    ? t('issuer.senderSyncSheet.deleteSummaryWebdav')
+    : t(dialog.value.summary),
+)
 
 function message(e: unknown): string {
-  return e instanceof CommandError ? `${e.message}${e.detail ? `：${e.detail}` : ''}` : String(e)
+  return e instanceof CommandError
+    ? e.detail
+      ? t('shared.common.withDetail', { message: e.message, detail: e.detail })
+      : e.message
+    : String(e)
 }
 
 async function load(): Promise<void> {
@@ -158,7 +160,7 @@ async function save(): Promise<void> {
 
   const minDays = parseDays(draft.min_validity_days)
   if (minDays === null) {
-    actionError.value = '最小剩余有效期必须是非负整数'
+    actionError.value = t('issuer.senderSyncSheet.daysInvalid')
     return
   }
 
@@ -178,7 +180,7 @@ async function save(): Promise<void> {
   }
 
   if (!updates.length) {
-    void showSnackbar({ message: '没有需要保存的更改' })
+    void showSnackbar({ message: t('issuer.senderSyncSheet.noChanges') })
     return
   }
 
@@ -188,7 +190,7 @@ async function save(): Promise<void> {
     for (const [key, value] of updates) await setConfig(key, value)
     // The loop is what actually pushes; starting it is idempotent (pid lock).
     if (turningOn) await startLoop()
-    void showSnackbar({ message: '设置已保存' })
+    void showSnackbar({ message: t('issuer.senderSyncSheet.saved') })
     emit('changed')
     await load()
   } catch (e) {
@@ -215,7 +217,9 @@ async function runDanger(): Promise<void> {
     await forgetSync(false, action === 'reset')
     danger.value = null
     open.value = false
-    void showSnackbar({ message: action === 'reset' ? '已完全重置同步设置' : '本地同步数据已清除（云端文件未删除）' })
+    void showSnackbar({
+      message: action === 'reset' ? t('issuer.senderSyncSheet.resetDone') : t('issuer.senderSyncSheet.forgotten'),
+    })
     emit('changed')
   } catch (e) {
     actionError.value = message(e)
@@ -226,128 +230,161 @@ async function runDanger(): Promise<void> {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="远程同步设置">
+  <MiuixBottomSheet v-model="open" :title="t('issuer.senderSyncSheet.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
 
     <div class="sheet-body">
       <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-        这里只修改 [sync] 表中的非敏感字段；密钥经 root shell 写入 0600 文件后由 rkp-mini-sync 接管，页面不会读回。
+        {{ t('issuer.senderSyncSheet.intro') }}
       </MiuixText>
 
-      <MiuixText v-if="loading" type="body2" color="var(--m-color-on-surface-variant-summary)">正在读取配置…</MiuixText>
-      <MiuixText v-else-if="loadError" type="body2" color="var(--m-color-error)">读取配置失败：{{ loadError }}</MiuixText>
+      <MiuixText v-if="loading" type="body2" color="var(--m-color-on-surface-variant-summary)">
+        {{ t('issuer.senderSyncSheet.loadingConfig') }}
+      </MiuixText>
+      <MiuixText v-else-if="loadError" type="body2" color="var(--m-color-error)">
+        {{ t('issuer.senderSyncSheet.loadFailed', { error: loadError }) }}
+      </MiuixText>
 
       <template v-else-if="cfg">
-        <MiuixSmallTitle text="自动推送" />
+        <MiuixSmallTitle :text="t('issuer.senderSyncSheet.autoPush')" />
         <div class="sheet-group">
           <MiuixSwitchPreference
             v-model="draft.auto_push"
-            title="自动推送"
+            :title="t('issuer.senderSyncSheet.autoPush')"
             :summary="
               syncEnabled
-                ? '每轮自动签发后，检查通过就推送新 keybox；手动推送不受影响'
-                : '同步启用后才能开启自动推送'
+                ? t('issuer.senderSyncSheet.autoPushOn')
+                : t('issuer.senderSyncSheet.autoPushNeedsSync')
             "
             :disabled="locked || !syncEnabled"
           />
           <MiuixInput
             v-model="draft.min_validity_days"
-            label="最小剩余有效期（天）"
+            :label="t('issuer.senderSyncSheet.minDays')"
             single-line
             :disabled="locked"
           />
         </div>
 
-        <MiuixSmallTitle text="云端存储" />
+        <MiuixSmallTitle :text="t('issuer.senderSyncSheet.cloud')" />
         <div class="sheet-group">
           <MiuixDropdownPreference
             v-model="providerIndex"
-            title="存储方式"
-            :summary="draft.provider === 'gist' ? 'GitHub Gist（密文，需 token）' : 'WebDAV（自定义路径，需应用密码）'"
+            :title="t('issuer.senderSyncSheet.provider')"
+            :summary="
+              draft.provider === 'gist'
+                ? t('issuer.senderSyncSheet.providerGist')
+                : t('issuer.senderSyncSheet.providerWebdav')
+            "
             :items="PROVIDERS"
             :disabled="locked"
           />
           <template v-if="draft.provider === 'gist'">
-            <MiuixInput v-model="draft.gist_id" label="Gist ID（可留空，首次推送创建）" single-line :disabled="locked" />
-            <MiuixInput v-model="draft.gist_filename" label="文件名" single-line :disabled="locked" />
+            <MiuixInput
+              v-model="draft.gist_id"
+              :label="t('issuer.senderSyncSheet.gistId')"
+              single-line
+              :disabled="locked"
+            />
+            <MiuixInput
+              v-model="draft.gist_filename"
+              :label="t('issuer.senderSyncSheet.filename')"
+              single-line
+              :disabled="locked"
+            />
             <MiuixBasicComponent
               title="Gist token"
-              summary="用于创建和更新 Gist，只勾选 gist 权限"
+              :summary="t('issuer.senderSyncSheet.gistTokenSummary')"
               clickable
               :disabled="locked"
               @click="emit('secret', 'gist-token')"
             />
           </template>
           <template v-else>
-            <MiuixInput v-model="draft.webdav_endpoint" label="Endpoint（https://…/dav/）" single-line :disabled="locked" />
-            <MiuixInput v-model="draft.webdav_path" label="路径（/rkp/rkp-sync.age）" single-line :disabled="locked" />
-            <MiuixInput v-model="draft.webdav_user" label="用户名（可留空）" single-line :disabled="locked" />
+            <MiuixInput
+              v-model="draft.webdav_endpoint"
+              :label="t('issuer.senderSyncSheet.endpoint')"
+              single-line
+              :disabled="locked"
+            />
+            <MiuixInput
+              v-model="draft.webdav_path"
+              :label="t('issuer.senderSyncSheet.webdavPath')"
+              single-line
+              :disabled="locked"
+            />
+            <MiuixInput
+              v-model="draft.webdav_user"
+              :label="t('issuer.senderSyncSheet.webdavUser')"
+              single-line
+              :disabled="locked"
+            />
             <MiuixBasicComponent
-              title="WebDAV 密码"
-              summary="建议使用可单独撤销的应用密码"
+              :title="t('issuer.senderSyncSheet.webdavPassword')"
+              :summary="t('issuer.senderSyncSheet.webdavPasswordSummary')"
               clickable
               :disabled="locked"
               @click="emit('secret', 'webdav-password')"
             />
           </template>
-          <MiuixInput v-model="draft.proxy" label="代理（可留空）" single-line :disabled="locked" />
+          <MiuixInput v-model="draft.proxy" :label="t('issuer.senderSyncSheet.proxy')" single-line :disabled="locked" />
         </div>
 
-        <MiuixSmallTitle text="加密" />
+        <MiuixSmallTitle :text="t('issuer.senderSyncSheet.encryption')" />
         <div class="sheet-group">
           <MiuixBasicComponent
-            title="密码"
-            summary="在接收端需要输入密码用来解密云端储存的 Keybox"
+            :title="t('issuer.senderSyncSheet.password')"
+            :summary="t('issuer.senderSyncSheet.passwordSummary')"
             clickable
             :disabled="locked"
             @click="emit('secret', 'age')"
           />
         </div>
 
-        <MiuixSmallTitle text="其他" />
+        <MiuixSmallTitle :text="t('issuer.senderSyncSheet.other')" />
         <div class="sheet-group">
-          <MiuixInput v-model="draft.label" label="标签（仅用于分享展示）" single-line :disabled="locked" />
+          <MiuixInput v-model="draft.label" :label="t('issuer.senderSyncSheet.label')" single-line :disabled="locked" />
         </div>
 
         <MiuixButton type="primary" :disabled="locked" @click="save">
-          {{ saving ? '保存中…' : '保存设置' }}
+          {{ saving ? t('shared.common.saving') : t('issuer.senderSyncSheet.save') }}
         </MiuixButton>
 
         <MiuixText v-if="actionError" type="footnote1" color="var(--m-color-error)">{{ actionError }}</MiuixText>
 
-        <MiuixSmallTitle text="危险区" color="var(--m-color-error)" />
+        <MiuixSmallTitle :text="t('issuer.senderSyncSheet.danger')" color="var(--m-color-error)" />
         <div class="sheet-group danger-group">
           <MiuixBasicComponent
-            title="删除云端文件"
-            summary="删除前会先用本机密码解密核对同步流"
+            :title="t('issuer.senderSyncSheet.deleteItem')"
+            :summary="t('issuer.senderSyncSheet.deleteItemSummary')"
             title-color="var(--m-color-error)"
             clickable
             :disabled="locked"
             @click="danger = 'delete'"
           />
           <MiuixBasicComponent
-            title="重置加密密码"
-            summary="用新密码重新加密并上传，接收端需要同时更新"
+            :title="t('issuer.senderSyncSheet.rotateItem')"
+            :summary="t('issuer.senderSyncSheet.rotateItemSummary')"
             title-color="var(--m-color-error)"
             clickable
             :disabled="locked"
             @click="emit('rotate')"
           />
           <MiuixBasicComponent
-            title="清除本地数据"
-            summary="删除本地同步状态与密钥文件；云端文件与已部署 keybox 不删除"
+            :title="t('issuer.senderSyncSheet.forgetItem')"
+            :summary="t('issuer.senderSyncSheet.forgetItemSummary')"
             title-color="var(--m-color-error)"
             clickable
             :disabled="locked"
             @click="danger = 'forget'"
           />
           <MiuixBasicComponent
-            title="完全重置同步设置"
-            summary="清除本地数据并删除 [sync] 配置，回到未初始化"
+            :title="t('issuer.senderSyncSheet.resetItem')"
+            :summary="t('issuer.senderSyncSheet.resetItemSummary')"
             title-color="var(--m-color-error)"
             clickable
             :disabled="locked"
@@ -357,11 +394,11 @@ async function runDanger(): Promise<void> {
       </template>
     </div>
 
-    <MiuixDialog v-model="dialogOpen" :title="dialog.title" :summary="dialogSummary">
+    <MiuixDialog v-model="dialogOpen" :title="t(dialog.title)" :summary="dialogSummary">
       <div class="dialog-actions">
-        <MiuixButton @click="dialogOpen = false">取消</MiuixButton>
+        <MiuixButton @click="dialogOpen = false">{{ t('shared.common.cancel') }}</MiuixButton>
         <MiuixButton class="danger-btn" type="primary" :disabled="pending !== null || busy" @click="runDanger">
-          {{ pending ? '处理中…' : dialog.ok }}
+          {{ pending ? t('issuer.senderSyncSheet.processing') : t(dialog.ok) }}
         </MiuixButton>
       </div>
     </MiuixDialog>

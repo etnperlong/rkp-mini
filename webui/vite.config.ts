@@ -62,6 +62,12 @@ export default defineConfig(({ mode }) => {
   const appDir = fileURLToPath(new URL(`./src/apps/${app}`, import.meta.url))
   return {
     plugins: [vue(), csp(), appMode(app)],
+    // vue-i18n bundler flags: Composition API only, no devtools in production.
+    define: {
+      __VUE_I18N_FULL_INSTALL__: false,
+      __VUE_I18N_LEGACY_API__: false,
+      __INTLIFY_PROD_DEVTOOLS__: false,
+    },
     base: './', // KernelSU loads webroot via relative paths
     publicDir: false,
     resolve: {

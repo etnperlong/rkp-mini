@@ -1,4 +1,5 @@
 import { showSnackbar } from 'miuix-vue'
+import { t } from './i18n'
 
 function legacyCopy(text: string): boolean {
   const ta = document.createElement('textarea')
@@ -18,7 +19,7 @@ function legacyCopy(text: string): boolean {
 }
 
 /** Copy to clipboard (async API, then execCommand fallback) and report via snackbar. */
-export async function copyText(text: string, label = '内容'): Promise<void> {
+export async function copyText(text: string, label = t('shared.clipboard.defaultLabel')): Promise<void> {
   let copied = false
   try {
     await navigator.clipboard.writeText(text)
@@ -26,5 +27,5 @@ export async function copyText(text: string, label = '内容'): Promise<void> {
   } catch {
     copied = legacyCopy(text)
   }
-  void showSnackbar({ message: copied ? `已复制${label}` : `复制失败，请长按文本手动复制` })
+  void showSnackbar({ message: copied ? t('shared.clipboard.copied', { label }) : t('shared.clipboard.failed') })
 }

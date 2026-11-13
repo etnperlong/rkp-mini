@@ -5,7 +5,8 @@ import { computed } from 'vue'
 import { MiuixBasicComponent, MiuixBottomSheet, MiuixIcon, MiuixIconButton, MiuixSmallTitle, MiuixText } from 'miuix-vue'
 import { Close } from 'miuix-vue/icons'
 import { daysLeft, formatDateTime } from '../../../shared/lib/format'
-import { CHECK_OUTCOME_LABEL, syncErrorText, type SyncStatus } from '../../../shared/lib/sync'
+import { checkOutcomeLabel, syncErrorText, type SyncStatus } from '../../../shared/lib/sync'
+import { t } from '../../../shared/lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ status: SyncStatus | null; now: number }>()
@@ -22,71 +23,99 @@ function shortSha(value: string | null | undefined): string {
 function expiry(at: number | null | undefined): string {
   if (at == null) return '—'
   const d = daysLeft(at, props.now)
-  return `${formatDateTime(at)}（${d < 0 ? `已过期 ${-d} 天` : `剩余 ${d} 天`}）`
+  return d < 0
+    ? t('issuer.syncDetailSheet.expiredAgo', { date: formatDateTime(at), n: -d }, -d)
+    : t('issuer.syncDetailSheet.remainDays', { date: formatDateTime(at), n: d }, d)
 }
 
 const checkedAt = computed(() => {
   const c = check.value
-  if (!c) return '尚未检查'
-  return `${CHECK_OUTCOME_LABEL[c.outcome] ?? c.outcome} · ${formatDateTime(c.at)}`
+  if (!c) return t('issuer.syncDetailSheet.notChecked')
+  return t('issuer.syncDetailSheet.checkedAt', {
+    label: checkOutcomeLabel(c.outcome) ?? c.outcome,
+    time: formatDateTime(c.at),
+  })
 })
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="同步详情">
+  <MiuixBottomSheet v-model="open" :title="t('issuer.syncDetailSheet.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
 
     <div class="sheet-body">
       <MiuixText v-if="!status" type="body2" color="var(--m-color-on-surface-variant-summary)">
-        尚未读取到同步状态。
+        {{ t('issuer.syncDetailSheet.noStatus') }}
       </MiuixText>
 
       <template v-else>
-        <MiuixSmallTitle text="位置与同步流" />
+        <MiuixSmallTitle :text="t('issuer.syncDetailSheet.locationSection')" />
         <div class="sheet-group">
-          <MiuixBasicComponent title="位置" :summary="status.location ?? '未配置'" />
-          <MiuixBasicComponent title="同步 ID" :summary="status.stream_id" />
-          <MiuixBasicComponent title="上次推送版本" :summary="state ? `第 ${state.verified_seq} 版` : '尚未推送'" />
+          <MiuixBasicComponent
+            :title="t('issuer.syncDetailSheet.location')"
+            :summary="status.location ?? t('issuer.syncDetailSheet.unconfigured')"
+          />
+          <MiuixBasicComponent :title="t('issuer.syncDetailSheet.streamId')" :summary="status.stream_id" />
+          <MiuixBasicComponent
+            :title="t('issuer.syncDetailSheet.lastPushed')"
+            :summary="
+              state ? t('issuer.syncDetailSheet.version', state.verified_seq) : t('issuer.syncDetailSheet.notPushed')
+            "
+          />
         </div>
 
         <MiuixSmallTitle text="keybox" />
         <div class="sheet-group">
           <MiuixBasicComponent
-            title="本机 keybox"
-            :summary="local ? `${local.summary} · ${shortSha(local.keybox_sha256)}` : '尚未签发'"
+            :title="t('issuer.syncDetailSheet.localKeybox')"
+            :summary="
+              local
+                ? t('issuer.syncDetailSheet.localSummary', {
+                    summary: local.summary,
+                    sha: shortSha(local.keybox_sha256),
+                  })
+                : t('issuer.syncDetailSheet.notIssued')
+            "
           />
-          <MiuixBasicComponent title="本机设备 ID" :summary="local?.device_id ?? '—'" />
-          <MiuixBasicComponent title="本机到期" :summary="expiry(local?.leaf_not_after)" />
+          <MiuixBasicComponent :title="t('issuer.syncDetailSheet.localDeviceId')" :summary="local?.device_id ?? '—'" />
+          <MiuixBasicComponent :title="t('issuer.syncDetailSheet.localExpiry')" :summary="expiry(local?.leaf_not_after)" />
           <MiuixBasicComponent
-            title="云端 keybox"
-            :summary="remote ? `第 ${remote.seq} 版 · ${shortSha(remote.keybox_sha256)}` : '尚未检查'"
+            :title="t('issuer.syncDetailSheet.remoteKeybox')"
+            :summary="
+              remote
+                ? t(
+                    'issuer.syncDetailSheet.remoteSummary',
+                    { n: remote.seq, sha: shortSha(remote.keybox_sha256) },
+                    remote.seq,
+                  )
+                : t('issuer.syncDetailSheet.notChecked')
+            "
           />
-          <MiuixBasicComponent title="云端设备 ID" :summary="remote?.device_id ?? '—'" />
-          <MiuixBasicComponent title="云端到期" :summary="expiry(remote?.keybox_not_after)" />
-          <MiuixBasicComponent title="云端检查" :summary="checkedAt" />
+          <MiuixBasicComponent :title="t('issuer.syncDetailSheet.remoteDeviceId')" :summary="remote?.device_id ?? '—'" />
+          <MiuixBasicComponent :title="t('issuer.syncDetailSheet.remoteExpiry')" :summary="expiry(remote?.keybox_not_after)" />
+          <MiuixBasicComponent :title="t('issuer.syncDetailSheet.remoteCheck')" :summary="checkedAt" />
         </div>
 
-        <MiuixSmallTitle text="错误" />
+        <MiuixSmallTitle :text="t('issuer.syncDetailSheet.errorSection')" />
         <div class="sheet-group">
           <MiuixBasicComponent
-            title="上次错误"
-            :summary="state?.last_error ? syncErrorText(state.last_error) : '无'"
+            :title="t('issuer.syncDetailSheet.lastError')"
+            :summary="state?.last_error ? syncErrorText(state.last_error) : t('issuer.syncDetailSheet.none')"
             :summary-color="state?.last_error ? 'var(--m-color-error)' : undefined"
           />
           <MiuixBasicComponent
             v-if="check?.error"
-            title="检查错误"
+            :title="t('issuer.syncDetailSheet.checkError')"
             :summary="syncErrorText(check.error)"
             summary-color="var(--m-color-error)"
           />
         </div>
 
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          只显示本地状态与云端检查结果；密码、token 和 keybox 内容不会出现在这里。
+          {{ t('issuer.syncDetailSheet.note') }}
         </MiuixText>
       </template>
     </div>

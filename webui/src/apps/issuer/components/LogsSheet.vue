@@ -8,6 +8,7 @@ import SharedLogsSheet from '../../../shared/components/LogsSheet.vue'
 import { LOGS, listLogs, readLog } from '../lib/rkp'
 import { CommandError } from '../../../shared/lib/command'
 import { formatDateTime } from '../../../shared/lib/format'
+import { t } from '../../../shared/lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
 /** Expand the newest issue log once loaded (opened from the result sheet). */
@@ -21,7 +22,11 @@ const logText = ref('')
 const logLoading = ref(false)
 
 function message(e: unknown): string {
-  return e instanceof CommandError ? `${e.message}${e.detail ? `：${e.detail}` : ''}` : String(e)
+  return e instanceof CommandError
+    ? e.detail
+      ? t('shared.common.withDetail', { message: e.message, detail: e.detail })
+      : e.message
+    : String(e)
 }
 
 /** issue-<unix>.log → local start time. */
@@ -68,22 +73,19 @@ watch(open, (v) => {
 </script>
 
 <template>
-  <SharedLogsSheet
-    v-model="open"
-    loop-hint="自动签发与自动推送的记录（最后 200 行），只含 provider、seq、hash 与错误码，不含密码或 token。"
-  >
-    <MiuixSmallTitle text="签发日志" />
+  <SharedLogsSheet v-model="open" :loop-hint="t('issuer.logsSheet.loopHint')">
+    <MiuixSmallTitle :text="t('issuer.logsSheet.title')" />
     <div class="sheet-group">
-      <MiuixBasicComponent v-if="logsLoading" title="正在读取…">
+      <MiuixBasicComponent v-if="logsLoading" :title="t('shared.common.loading')">
         <template #end><MiuixProgressIndicator type="infinite" :size="20" /></template>
       </MiuixBasicComponent>
       <MiuixBasicComponent
         v-else-if="logsError"
-        title="读取失败"
+        :title="t('issuer.common.readFailed')"
         :summary="logsError"
         summary-color="var(--m-color-error)"
       />
-      <MiuixBasicComponent v-else-if="!logs.length" title="暂无日志" :summary="LOGS" />
+      <MiuixBasicComponent v-else-if="!logs.length" :title="t('issuer.logsSheet.noLogs')" :summary="LOGS" />
       <template v-for="name in logs" v-else :key="name">
         <MiuixBasicComponent :title="logTitle(name)" :summary="name" clickable @click="toggleLog(name)">
           <template #end>
@@ -92,11 +94,13 @@ watch(open, (v) => {
             </span>
           </template>
         </MiuixBasicComponent>
-        <pre v-if="selectedLog === name" class="log">{{ logLoading ? '读取中…' : logText || '（空）' }}</pre>
+        <pre v-if="selectedLog === name" class="log">{{
+          logLoading ? t('shared.common.reading') : logText || t('shared.common.empty')
+        }}</pre>
       </template>
     </div>
     <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-      每次签发一份，仅显示最后 200 行；保留数量由 log_retention 控制。
+      {{ t('issuer.logsSheet.note') }}
     </MiuixText>
   </SharedLogsSheet>
 </template>

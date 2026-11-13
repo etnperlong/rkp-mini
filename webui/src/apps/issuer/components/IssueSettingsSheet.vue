@@ -33,6 +33,7 @@ import {
   type AutoIssueLast,
   type StatusData,
 } from '../lib/rkp'
+import { t } from '../../../shared/lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
 /** `busy`: an issuance is running, so nothing may be deleted. */
@@ -51,7 +52,9 @@ async function remove(): Promise<void> {
     confirmRemove.value = false
     open.value = false
     emit('changed')
-    void showSnackbar({ message: r.removed.length ? '本地证书已删除' : '本地没有可删除的证书' })
+    void showSnackbar({
+      message: r.removed.length ? t('issuer.issueSettingsSheet.removed') : t('issuer.issueSettingsSheet.nothingRemoved'),
+    })
   } catch (e) {
     confirmRemove.value = false
     error.value = message(e)
@@ -70,22 +73,28 @@ const lastError = ref<string | null>(null)
 
 const loopText = computed(() => {
   const s = props.status
-  if (!s) return '读取中…'
-  return s.auto_issue?.loop_running ? '运行中' : '未运行'
+  if (!s) return t('issuer.issueSettingsSheet.reading')
+  return s.auto_issue?.loop_running ? t('issuer.issueSettingsSheet.loopRunning') : t('issuer.issueSettingsSheet.loopStopped')
 })
 
 const lastConsequence = computed(() => {
   const l = last.value
   if (!l) return null
   const env = l.envelope
-  if (!env) return { text: `异常退出（${l.code}）`, bad: true }
+  if (!env) return { text: t('issuer.rkp.exitUnknown', { code: l.code }), bad: true }
   if (env.ok) {
-    if ('skipped' in env.data) return { text: `证书仍有 ${env.data.days_left} 天，未签发`, bad: false }
-    return { text: `已签发新证书（Device ID ${env.data.device_id}）`, bad: false }
+    if ('skipped' in env.data)
+      return { text: t('issuer.issueSettingsSheet.lastSkipped', env.data.days_left), bad: false }
+    return { text: t('issuer.issueSettingsSheet.lastIssued', { id: env.data.device_id }), bad: false }
   }
   const e = env.error
-  const ta = e.ta_status === undefined ? '' : `（TA ${e.ta_status}）`
-  return { text: `签发失败：${stageLabel(e.stage)}：${e.code}${ta}`, bad: true }
+  return {
+    text:
+      e.ta_status === undefined
+        ? t('issuer.issueSettingsSheet.lastFailed', { stage: stageLabel(e.stage), code: e.code })
+        : t('issuer.issueSettingsSheet.lastFailedTa', { stage: stageLabel(e.stage), code: e.code, ta: e.ta_status }),
+    bad: true,
+  }
 })
 
 const lastAt = computed(() => {
@@ -94,7 +103,11 @@ const lastAt = computed(() => {
 })
 
 function message(e: unknown): string {
-  return e instanceof CommandError ? `${e.message}${e.detail ? `：${e.detail}` : ''}` : String(e)
+  return e instanceof CommandError
+    ? e.detail
+      ? t('shared.common.withDetail', { message: e.message, detail: e.detail })
+      : e.message
+    : String(e)
 }
 
 /** Draft mirrors the last read status; 0 days keeps the default ready for switching on. */
@@ -140,7 +153,7 @@ async function save(): Promise<void> {
   error.value = null
   const n = on.value ? Number(days.value.trim()) : 0
   if (on.value && (!Number.isInteger(n) || n < 1 || n > 365)) {
-    error.value = '天数必须是 1–365 的整数'
+    error.value = t('issuer.issueSettingsSheet.daysRange')
     return
   }
   saving.value = true
@@ -148,7 +161,7 @@ async function save(): Promise<void> {
     await setAutoIssueDays(n)
     if (n > 0 && !props.status?.auto_issue?.loop_running) await startAutoLoop()
     emit('changed')
-    void showSnackbar({ message: '自动签发设置已保存' })
+    void showSnackbar({ message: t('issuer.issueSettingsSheet.saved') })
   } catch (e) {
     error.value = message(e)
   } finally {
@@ -158,62 +171,73 @@ async function save(): Promise<void> {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="签发设置">
+  <MiuixBottomSheet v-model="open" :title="t('issuer.issueSettingsSheet.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
 
     <div class="sheet-body">
-      <MiuixSmallTitle text="自动签发" />
+      <MiuixSmallTitle :text="t('issuer.issueSettingsSheet.autoIssue')" />
       <div class="sheet-group">
         <MiuixSwitchPreference
           v-model="on"
-          title="自动签发"
-          :summary="on ? `证书剩余 ≤ ${days} 天时重新签发` : '关闭'"
+          :title="t('issuer.issueSettingsSheet.autoIssue')"
+          :summary="
+            on
+              ? t('issuer.issueSettingsSheet.switchSummaryOn', { n: days }, Number(days) || 0)
+              : t('issuer.issueSettingsSheet.off')
+          "
         />
-        <MiuixInput v-if="on" v-model="days" label="剩余天数 ≤ N 时重新签发" single-line />
+        <MiuixInput v-if="on" v-model="days" :label="t('issuer.issueSettingsSheet.daysLabel')" single-line />
       </div>
       <MiuixText v-if="tooLong" type="footnote1" color="var(--app-warning)">
-        超过 {{ AUTO_ISSUE_WARN_DAYS }} 天：本机签发的证书有效期只有约 12–14 天，每次检查都会重新签发，可能导致频繁签发。建议设为 3。
+        {{ t('issuer.issueSettingsSheet.tooLong', AUTO_ISSUE_WARN_DAYS) }}
       </MiuixText>
       <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-        后台进程每约 12 小时检查一次证书；签发成功后，如远程同步已启用会随即推送。休眠可能推迟检查。
+        {{ t('issuer.issueSettingsSheet.loopNote') }}
       </MiuixText>
 
       <div class="sheet-group">
-        <MiuixBasicComponent title="后台进程" :summary="loopText" />
+        <MiuixBasicComponent :title="t('issuer.issueSettingsSheet.loopTitle')" :summary="loopText" />
       </div>
 
-      <MiuixSmallTitle text="上次自动检查" />
+      <MiuixSmallTitle :text="t('issuer.issueSettingsSheet.lastCheck')" />
       <div class="sheet-group">
-        <MiuixBasicComponent v-if="lastLoading" title="正在读取…" />
-        <MiuixBasicComponent v-else-if="lastError" title="读取失败" :summary="lastError" summary-color="var(--m-color-error)" />
+        <MiuixBasicComponent v-if="lastLoading" :title="t('shared.common.loading')" />
+        <MiuixBasicComponent
+          v-else-if="lastError"
+          :title="t('issuer.common.readFailed')"
+          :summary="lastError"
+          summary-color="var(--m-color-error)"
+        />
         <template v-else-if="last">
-          <MiuixBasicComponent title="时间" :summary="lastAt" />
+          <MiuixBasicComponent :title="t('issuer.issueSettingsSheet.time')" :summary="lastAt" />
           <MiuixBasicComponent
             v-if="lastConsequence"
-            title="结果"
+            :title="t('issuer.issueSettingsSheet.result')"
             :summary="lastConsequence.text"
             :summary-color="lastConsequence.bad ? 'var(--m-color-error)' : undefined"
           />
-          <FoldBlock v-if="last.stderr.trim()" title="错误输出（stderr）" :text="last.stderr.trim()" />
+          <FoldBlock v-if="last.stderr.trim()" :title="t('issuer.issueSettingsSheet.stderr')" :text="last.stderr.trim()" />
         </template>
-        <MiuixBasicComponent v-else title="尚无记录" />
+        <MiuixBasicComponent v-else :title="t('issuer.issueSettingsSheet.noRecord')" />
       </div>
 
-      <MiuixButton type="primary" :disabled="saving || !status" @click="save">{{ saving ? '保存中…' : '保存' }}</MiuixButton>
+      <MiuixButton type="primary" :disabled="saving || !status" @click="save">
+        {{ saving ? t('shared.common.saving') : t('shared.common.save') }}
+      </MiuixButton>
       <MiuixText v-if="error" type="footnote1" color="var(--m-color-error)">{{ error }}</MiuixText>
 
-      <MiuixSmallTitle text="危险区" color="var(--m-color-error)" />
+      <MiuixSmallTitle :text="t('issuer.issueSettingsSheet.danger')" color="var(--m-color-error)" />
       <div class="sheet-group danger-group">
         <MiuixBasicComponent
-          title="删除本地证书"
+          :title="t('issuer.issueSettingsSheet.removeTitle')"
           :summary="
             status?.keybox.exists
-              ? '删除 keybox.xml、备份、私钥与证书链；不影响云端文件'
-              : '本地没有已签发的证书'
+              ? t('issuer.issueSettingsSheet.removeSummary')
+              : t('issuer.issueSettingsSheet.removeNothing')
           "
           title-color="var(--m-color-error)"
           clickable
@@ -225,13 +249,13 @@ async function save(): Promise<void> {
 
     <MiuixDialog
       v-model="confirmRemove"
-      title="删除本地证书？"
-      summary="将删除输出目录中的 keybox.xml、keybox.xml.prev、私钥、证书链与 meta.json，无法恢复。读取该 keybox 的模块将失去证书；已同步到云端的文件不受影响。若开启了自动签发，下一轮检查会重新签发。"
+      :title="t('issuer.issueSettingsSheet.removeDialogTitle')"
+      :summary="t('issuer.issueSettingsSheet.removeDialogSummary')"
     >
       <div class="dialog-actions">
-        <MiuixButton @click="confirmRemove = false">取消</MiuixButton>
+        <MiuixButton @click="confirmRemove = false">{{ t('shared.common.cancel') }}</MiuixButton>
         <MiuixButton class="danger-btn" type="primary" :disabled="removing || busy" @click="remove">
-          {{ removing ? '删除中…' : '确认删除' }}
+          {{ removing ? t('issuer.issueSettingsSheet.removing') : t('issuer.issueSettingsSheet.confirmRemove') }}
         </MiuixButton>
       </div>
     </MiuixDialog>

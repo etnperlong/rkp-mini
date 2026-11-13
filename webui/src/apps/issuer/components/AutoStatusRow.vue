@@ -9,6 +9,7 @@ import type { SyncStatus } from '../../../shared/lib/sync'
 import type { StatusData } from '../lib/rkp'
 import SvgIcon from '../../../shared/components/SvgIcon.vue'
 import { ICON_CHECK_CIRCLE, ICON_WARNING } from '../../../shared/lib/icons'
+import { t, type MessageKey } from '../../../shared/lib/i18n'
 
 const props = defineProps<{
   status: StatusData | null
@@ -24,7 +25,7 @@ const props = defineProps<{
 const emit = defineEmits<{ open: [tab: number] }>()
 
 interface Box {
-  title: string
+  title: MessageKey
   on: boolean
   hint: string
   pending: boolean
@@ -34,30 +35,41 @@ interface Box {
 /** Why the sync loop is not running, or null when it is. */
 const loopOff = computed(() => {
   const s = props.sync
-  if (!s) return props.syncNotInitialized ? '同步未初始化' : props.syncError ? '读取同步状态失败' : '读取中…'
-  if (!s.enabled) return '同步未启用'
-  if (!s.risk_ack_current) return '需重新确认风险'
-  if (s.auto_push === false) return '自动推送已关闭'
-  if (!s.loop_running) return '后台进程未运行'
+  if (!s)
+    return props.syncNotInitialized
+      ? t('issuer.autoStatusRow.syncNotInitialized')
+      : props.syncError
+        ? t('issuer.autoStatusRow.syncReadFailed')
+        : t('issuer.autoStatusRow.reading')
+  if (!s.enabled) return t('issuer.autoStatusRow.syncDisabled')
+  if (!s.risk_ack_current) return t('issuer.autoStatusRow.risk')
+  if (s.auto_push === false) return t('issuer.autoStatusRow.autoPushOff')
+  if (!s.loop_running) return t('issuer.autoStatusRow.loopNotRunning')
   return null
 })
 
 const boxes = computed<Box[]>(() => {
   const a = props.status?.auto_issue
-  let hint = props.statusError ? '未读取到状态' : '读取中…'
-  if (a) hint = a.days <= 0 ? '未开启' : a.loop_running ? `剩余 ≤ ${a.days} 天时` : '后台进程未运行'
+  let hint = props.statusError ? t('issuer.autoStatusRow.statusUnread') : t('issuer.autoStatusRow.reading')
+  if (a)
+    hint =
+      a.days <= 0
+        ? t('issuer.autoStatusRow.off')
+        : a.loop_running
+          ? t('issuer.autoStatusRow.withinDays', a.days)
+          : t('issuer.autoStatusRow.loopNotRunning')
   return [
     {
-      title: '自动签发',
+      title: 'issuer.autoStatusRow.issueTitle',
       on: !!a && a.days > 0 && a.loop_running,
       hint,
       pending: props.statusLoading && !props.status,
       tab: 1,
     },
     {
-      title: '自动推送',
+      title: 'issuer.autoStatusRow.pushTitle',
       on: loopOff.value === null,
-      hint: loopOff.value ?? '约每 12 小时',
+      hint: loopOff.value ?? t('issuer.autoStatusRow.aboutEvery12h'),
       pending: props.syncLoading && !props.sync,
       tab: 2,
     },
@@ -77,7 +89,7 @@ const boxes = computed<Box[]>(() => {
     >
       <div class="box__body">
         <div class="box__head">
-          <MiuixText type="body1" weight="medium">{{ b.title }}</MiuixText>
+          <MiuixText type="body1" weight="medium">{{ t(b.title) }}</MiuixText>
           <MiuixProgressIndicator v-if="b.pending" type="infinite" :size="20" />
           <SvgIcon
             v-else
@@ -86,7 +98,15 @@ const boxes = computed<Box[]>(() => {
             :color="b.on ? 'var(--app-ok)' : 'var(--app-warning)'"
           />
         </div>
-        <MiuixText type="body2" weight="medium">{{ b.pending ? '读取中' : b.on ? '已启用' : '未启用' }}</MiuixText>
+        <MiuixText type="body2" weight="medium">
+          {{
+            b.pending
+              ? t('issuer.autoStatusRow.pending')
+              : b.on
+                ? t('issuer.autoStatusRow.on')
+                : t('issuer.autoStatusRow.offState')
+          }}
+        </MiuixText>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ b.hint }}</MiuixText>
       </div>
     </MiuixCard>

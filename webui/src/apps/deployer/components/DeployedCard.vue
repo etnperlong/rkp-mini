@@ -9,7 +9,8 @@ import CardStateButton from '../../../shared/components/CardStateButton.vue'
 import SvgIcon from '../../../shared/components/SvgIcon.vue'
 import { ICON_CHECK_CIRCLE, ICON_ERROR, ICON_HELP, ICON_WARNING } from '../../../shared/lib/icons'
 import { daysLeft, formatAgo, formatDateTime, formatElapsed } from '../../../shared/lib/format'
-import { TARGET_LABEL, type SyncOp, type SyncRunner, type SyncStatus, type TargetState } from '../../../shared/lib/sync'
+import { targetLabel, type SyncOp, type SyncRunner, type SyncStatus, type TargetState } from '../../../shared/lib/sync'
+import { t, type MessageKey } from '../../../shared/lib/i18n'
 import { EXPIRING_DAYS, deployCodeLabel, pendingTitle } from '../lib/display'
 
 const props = defineProps<{
@@ -30,14 +31,14 @@ const r = props.runner
 
 type CardState = 'unimported' | 'pending' | 'failed' | 'undeployed' | 'expired' | 'expiring' | 'valid'
 
-const STATE_LABEL: Record<CardState, string> = {
-  unimported: '未导入',
-  pending: '等待确认',
-  failed: '部署异常',
-  undeployed: '未部署',
-  expired: '已过期',
-  expiring: '即将过期',
-  valid: '有效',
+const STATE_LABEL: Record<CardState, MessageKey> = {
+  unimported: 'deployer.deployedCard.stateUnimported',
+  pending: 'deployer.deployedCard.statePending',
+  failed: 'deployer.deployedCard.stateFailed',
+  undeployed: 'deployer.deployedCard.stateUndeployed',
+  expired: 'deployer.deployedCard.stateExpired',
+  expiring: 'deployer.deployedCard.stateExpiring',
+  valid: 'deployer.deployedCard.stateValid',
 }
 
 /** Tint/icon per state; the icon paths come from shared/lib/icons.ts. */
@@ -51,14 +52,14 @@ const STATE_VISUAL: Record<CardState, { color: string; icon: string }> = {
   unimported: { color: 'var(--m-color-on-surface-variant-actions)', icon: ICON_HELP },
 }
 
-const HEADLINE: Record<CardState, string> = {
-  unimported: '尚未导入同步链接',
-  pending: '等待确认后部署',
-  failed: '部署异常',
-  undeployed: '尚未部署 keybox',
-  expired: '部署的 keybox 已过期',
-  expiring: '',
-  valid: '',
+const HEADLINE: Record<CardState, MessageKey | null> = {
+  unimported: 'deployer.deployedCard.unimported',
+  pending: 'deployer.deployedCard.headlinePending',
+  failed: 'deployer.deployedCard.stateFailed',
+  undeployed: 'deployer.deployedCard.headlineUndeployed',
+  expired: 'deployer.deployedCard.headlineExpired',
+  expiring: null,
+  valid: null,
 }
 
 const deployState = computed(() => props.status?.deploy_state ?? null)
@@ -82,16 +83,26 @@ const state = computed<CardState | null>(() => {
 })
 
 const canDetail = computed(() => deployed.value.length > 0)
-const headline = computed(() => (state.value ? HEADLINE[state.value] : ''))
+const headline = computed(() => {
+  const key = state.value ? HEADLINE[state.value] : null
+  return key ? t(key) : ''
+})
 
-const BUSY_LABEL: Record<string, string> = { check: '检查中', fetch: '拉取中', run: '部署中' }
+const BUSY_LABEL: Record<string, MessageKey> = {
+  check: 'deployer.common.busyCheck',
+  fetch: 'deployer.common.busyFetch',
+  run: 'deployer.common.busyRun',
+}
 const cornerText = computed(() => {
   if (r.busy.value) {
-    const label = BUSY_LABEL[props.busyOp ?? 'run'] ?? '部署中'
-    return `${label} ${formatElapsed(r.elapsedMs.value)}${r.overdue.value ? ' · 结果未知' : ''}`
+    const label = t(BUSY_LABEL[props.busyOp ?? 'run'] ?? 'deployer.common.busyRun')
+    const elapsed = formatElapsed(r.elapsedMs.value)
+    return r.overdue.value
+      ? t('deployer.common.busyUnknown', { label, elapsed })
+      : t('deployer.common.busyTimer', { label, elapsed })
   }
-  if (props.notInitialized) return STATE_LABEL.unimported
-  return state.value ? STATE_LABEL[state.value] : '读取失败'
+  if (props.notInitialized) return t(STATE_LABEL.unimported)
+  return state.value ? t(STATE_LABEL[state.value]) : t('deployer.deployedCard.readFailed')
 })
 </script>
 
@@ -112,7 +123,7 @@ const cornerText = computed(() => {
     />
     <div class="deployed">
       <div class="deployed__head">
-        <MiuixText type="title4" weight="medium">当前证书</MiuixText>
+        <MiuixText type="title4" weight="medium">{{ t('deployer.deployedCard.title') }}</MiuixText>
         <MiuixProgressIndicator v-if="loading && !status" type="infinite" :size="18" />
         <CardStateButton
           v-else-if="status || error || notInitialized"
@@ -124,20 +135,20 @@ const cornerText = computed(() => {
       </div>
 
       <div v-if="error && !status" class="warnings">
-        <MiuixText type="body2" color="var(--m-color-error)">读取同步状态失败：{{ error }}</MiuixText>
+        <MiuixText type="body2" color="var(--m-color-error)">{{ t('deployer.common.readStatusFailedDetail', { error }) }}</MiuixText>
       </div>
 
       <template v-else-if="notInitialized">
-        <MiuixText type="title3">尚未导入同步链接</MiuixText>
+        <MiuixText type="title3">{{ t('deployer.deployedCard.unimported') }}</MiuixText>
         <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-          导入发送端分享的同步链接后，才能拉取并部署远端 keybox。
+          {{ t('deployer.deployedCard.unimportedHint') }}
         </MiuixText>
       </template>
 
       <template v-else-if="status && state">
         <div v-if="state === 'valid' || state === 'expiring'" class="hero">
           <span class="hero__days">{{ days }}</span>
-          <MiuixText type="body1">天后过期</MiuixText>
+          <MiuixText type="body1">{{ t('deployer.deployedCard.daysLeft', days ?? 0) }}</MiuixText>
         </div>
         <MiuixText
           v-else
@@ -148,40 +159,53 @@ const cornerText = computed(() => {
         </MiuixText>
 
         <MiuixText v-if="notAfter != null" type="body2" color="var(--m-color-on-surface-variant-summary)">
-          {{ days != null && days < 0 ? '过期于' : '有效期至' }} {{ formatDateTime(notAfter) }}
+          {{
+            days != null && days < 0
+              ? t('deployer.deployedCard.expiredOn', { date: formatDateTime(notAfter) })
+              : t('deployer.deployedCard.validUntil', { date: formatDateTime(notAfter) })
+          }}
         </MiuixText>
 
         <MiuixText v-if="state === 'failed' && failures[0]" type="body2" color="var(--m-color-error)">
-          {{ TARGET_LABEL[failures[0].id] ?? failures[0].id }}：{{ deployCodeLabel(failures[0].last_error?.code ?? '') }}
+          {{
+            t('deployer.deployedCard.targetFailed', {
+              target: targetLabel(failures[0].id),
+              reason: deployCodeLabel(failures[0].last_error?.code ?? ''),
+            })
+          }}
         </MiuixText>
         <MiuixText v-else-if="state === 'pending' && pending" type="body2" color="var(--app-warning)">
-          第 {{ pending.seq }} 版 · {{ pendingTitle(pending.reason) }}
+          {{ t('deployer.deployedCard.pendingVersion', { seq: pending.seq, reason: pendingTitle(pending.reason) }) }}
         </MiuixText>
         <MiuixText v-else-if="state === 'unimported'" type="body2" color="var(--m-color-on-surface-variant-summary)">
-          导入发送端分享的同步链接后，才能拉取并部署远端 keybox。
+          {{ t('deployer.deployedCard.unimportedHint') }}
         </MiuixText>
         <MiuixText v-else-if="state === 'undeployed'" type="body2" color="var(--m-color-on-surface-variant-summary)">
-          已验证的版本还没有写入任何部署目标。
+          {{ t('deployer.deployedCard.undeployedHint') }}
         </MiuixText>
 
         <div v-if="deployed.length" class="stats">
           <div class="stat">
-            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">已部署版本</MiuixText>
-            <MiuixText type="body1" weight="medium">第 {{ deployState?.deployed_seq ?? '—' }} 版</MiuixText>
+            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ t('deployer.deployedCard.deployedVersion') }}</MiuixText>
+            <MiuixText type="body1" weight="medium">{{ t('deployer.common.versionSeq', { seq: deployState?.deployed_seq ?? '—' }) }}</MiuixText>
           </div>
           <div class="stat">
-            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">部署目标</MiuixText>
+            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ t('deployer.common.deployTargets') }}</MiuixText>
             <MiuixText type="body1" weight="medium">{{ deployed.length }}/{{ targets.length }}</MiuixText>
           </div>
           <MiuixIcon class="stat__more" :icon="ChevronForward" :size="18" color="var(--m-color-on-surface-variant-actions)" />
         </div>
 
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          {{ deployState?.deployed_at ? `部署于 ${formatAgo(deployState.deployed_at, now)}` : '只显示本机部署状态' }}
+          {{
+            deployState?.deployed_at
+              ? t('deployer.deployedCard.deployedAt', { time: formatAgo(deployState.deployed_at, now) })
+              : t('deployer.deployedCard.localOnly')
+          }}
         </MiuixText>
       </template>
 
-      <MiuixText v-else type="body2" color="var(--m-color-on-surface-variant-summary)">正在读取…</MiuixText>
+      <MiuixText v-else type="body2" color="var(--m-color-on-surface-variant-summary)">{{ t('shared.common.loading') }}</MiuixText>
     </div>
   </MiuixCard>
 </template>

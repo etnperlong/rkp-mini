@@ -4,6 +4,7 @@
 // any scanner can read it from the transparent WebView. No remote images
 // (CSP `img-src 'self' data:`); the payload is the import URI only.
 import { computed } from 'vue'
+import { t } from '../../../shared/lib/i18n'
 
 const props = defineProps<{
   /** `size` rows of `size` chars. */
@@ -42,12 +43,12 @@ const modules = computed(() => {
       :viewBox="`0 0 ${dim} ${dim}`"
       shape-rendering="crispEdges"
       role="img"
-      :aria-label="label ?? '同步链接二维码'"
+      :aria-label="label ?? t('issuer.qrCode.label')"
     >
       <rect :width="dim" :height="dim" fill="#ffffff" />
       <rect v-for="(cell, i) in modules" :key="i" :x="cell.x" :y="cell.y" width="1" height="1" fill="#000000" />
     </svg>
-    <span v-else class="qr__invalid">二维码数据无效</span>
+    <span v-else class="qr__invalid">{{ t('issuer.qrCode.invalid') }}</span>
   </div>
 </template>
 

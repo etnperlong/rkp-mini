@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { MiuixIcon, MiuixProgressIndicator, MiuixText } from 'miuix-vue'
 import { Refresh } from 'miuix-vue/icons'
+import { t } from '../lib/i18n'
 
 // Top-right corner of a state card: the state label doubles as its refresh
 // control, and shows a spinner (with the busy text) while work runs.
@@ -15,7 +16,7 @@ const emit = defineEmits<{ refresh: [] }>()
     type="button"
     class="state-btn"
     :disabled="disabled || busy"
-    :aria-label="busy ? label : `${label}，点击刷新`"
+    :aria-label="busy ? label : t('shared.cardState.refreshHint', { label })"
     @pointerdown.stop
     @click.stop="emit('refresh')"
   >

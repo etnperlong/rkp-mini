@@ -1,3 +1,5 @@
+import { currentLocale, t } from './i18n'
+
 /** Current Unix time in seconds. */
 export function nowUnix(): number {
   return Math.floor(Date.now() / 1000)
@@ -30,13 +32,14 @@ export function formatElapsed(ms: number): string {
   return `${Math.floor(s / 60)}:${pad(s % 60)}`
 }
 
-/** Coarse Chinese relative time for a past Unix timestamp. */
+/** Coarse localized relative time for a past Unix timestamp. */
 export function formatAgo(unix: number, now = nowUnix()): string {
   const s = now - unix
-  if (s < 60) return '刚刚'
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`
-  if (s < 86_400) return `${Math.floor(s / 3600)} 小时前`
-  return `${Math.floor(s / 86_400)} 天前`
+  if (s < 60) return t('shared.time.justNow')
+  const rtf = new Intl.RelativeTimeFormat(currentLocale(), { numeric: 'always' })
+  if (s < 3600) return rtf.format(-Math.floor(s / 60), 'minute')
+  if (s < 86_400) return rtf.format(-Math.floor(s / 3600), 'hour')
+  return rtf.format(-Math.floor(s / 86_400), 'day')
 }
 
 /** Keep head and tail of a long identifier: `abcdef…uvwxyz`. */

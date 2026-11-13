@@ -7,6 +7,7 @@ import { MiuixButton, MiuixDialog, MiuixText, showSnackbar } from 'miuix-vue'
 import SecretInput from './SecretInput.vue'
 import { CommandError } from '../lib/command'
 import { SYNC_ROLE, setSecret, type SecretKind } from '../lib/sync'
+import { t, type MessageKey } from '../lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ kind: SecretKind; title: string; hint: string }>()
@@ -21,10 +22,10 @@ const error = ref<string | null>(null)
  * the receiver re-enters a known one and verifies it by decrypting (the page runs check-remote). */
 const choosing = computed(() => props.kind === 'age' && SYNC_ROLE === 'sender')
 
-const PLACEHOLDER: Record<SecretKind, string> = {
-  age: '密码',
-  'gist-token': 'Gist token',
-  'webdav-password': 'WebDAV 应用密码',
+const PLACEHOLDER: Record<SecretKind, MessageKey> = {
+  age: 'shared.secret.placeholder.age',
+  'gist-token': 'shared.secret.placeholder.gistToken',
+  'webdav-password': 'shared.secret.placeholder.webdavPassword',
 }
 
 function clear(): void {
@@ -38,9 +39,9 @@ watch(open, () => {
 })
 
 const problem = computed(() => {
-  if (!first.value) return '请输入'
-  if (/[\r\n]/.test(first.value)) return '不能包含换行'
-  if (choosing.value && first.value !== second.value) return '两次输入不一致'
+  if (!first.value) return t('shared.secret.required')
+  if (/[\r\n]/.test(first.value)) return t('shared.secret.newline')
+  if (choosing.value && first.value !== second.value) return t('shared.secret.mismatch')
   return null
 })
 
@@ -54,7 +55,7 @@ async function save(): Promise<void> {
     open.value = false
     emit('saved', r.weak)
     const weak = choosing.value && r.weak
-    void showSnackbar({ message: weak ? '已保存；口令较短，建议 6 个以上随机单词或 20+ 随机字符' : '已保存（0600）' })
+    void showSnackbar({ message: weak ? t('shared.secret.savedWeak') : t('shared.secret.saved') })
   } catch (e) {
     error.value = e instanceof CommandError ? `${e.message}` : String(e)
   } finally {
@@ -67,16 +68,16 @@ async function save(): Promise<void> {
 <template>
   <MiuixDialog v-model="open" :title="title" :summary="hint" :close-on-click-modal="!busy">
     <form class="dialog" @submit.prevent="save">
-      <SecretInput v-model="first" :placeholder="PLACEHOLDER[kind]" :disabled="busy" />
-      <SecretInput v-if="choosing" v-model="second" placeholder="再次输入" :disabled="busy" />
+      <SecretInput v-model="first" :placeholder="t(PLACEHOLDER[kind])" :disabled="busy" />
+      <SecretInput v-if="choosing" v-model="second" :placeholder="t('shared.secret.retype')" :disabled="busy" />
       <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-        经 KernelSU root shell 写入 0600 临时文件后由 rkp-mini-sync 保存并立即删除；不会出现在命令行参数、URL 或日志中。
+        {{ t('shared.secret.note') }}
       </MiuixText>
       <MiuixText v-if="error" type="footnote1" color="var(--m-color-error)">{{ error }}</MiuixText>
       <div class="dialog-actions">
-        <MiuixButton :disabled="busy" @click="open = false">取消</MiuixButton>
+        <MiuixButton :disabled="busy" @click="open = false">{{ t('shared.common.cancel') }}</MiuixButton>
         <MiuixButton type="primary" :disabled="busy || problem !== null" @click="save">
-          {{ busy ? '保存中…' : '保存' }}
+          {{ busy ? t('shared.common.saving') : t('shared.common.save') }}
         </MiuixButton>
       </div>
     </form>

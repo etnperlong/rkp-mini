@@ -10,6 +10,7 @@
 // orchestration stderr. A step that did not run has an empty code and an
 // empty JSON section.
 import { appConfig } from '@app-config'
+import { t, type MessageKey } from '../../../shared/lib/i18n'
 import { exec } from '../../../shared/lib/ksu'
 import { CommandError } from '../../../shared/lib/command'
 import type {
@@ -42,46 +43,46 @@ const TMP = `${appConfig.dataRoot}/tmp`
 
 async function readState(name: string): Promise<string> {
   const r = await exec(`cat '${TMP}/${name}' 2>/dev/null`)
-  if (r.errno !== 0) throw new CommandError('parse', `没有组合任务结果（缺少 ${name}）`)
+  if (r.errno !== 0) throw new CommandError('parse', t('deployer.run.missingState', { name }))
   return r.stdout
 }
 
 /** Trimmed, empty → null, otherwise an integer 0..255. */
-function sectionCode(text: string, label: string): number | null {
+function sectionCode(text: string, label: MessageKey): number | null {
   const value = text.trim()
   if (!value) return null
   if (!/^\d{1,3}$/.test(value) || Number(value) > 255) {
-    throw new CommandError('parse', `${label}退出码无效：${value.slice(0, 40)}`)
+    throw new CommandError('parse', t('deployer.run.badCode', { label: t(label), value: value.slice(0, 40) }))
   }
   return Number(value)
 }
 
 /** Trimmed, empty → null, otherwise a well-formed sync envelope. */
-function sectionEnvelope<T>(text: string, label: string): SyncEnvelope<T> | null {
+function sectionEnvelope<T>(text: string, label: MessageKey): SyncEnvelope<T> | null {
   const value = text.trim()
   if (!value) return null
   let parsed: unknown
   try {
     parsed = JSON.parse(value)
   } catch {
-    throw new CommandError('parse', `${label}输出不是 JSON`)
+    throw new CommandError('parse', t('deployer.run.notJson', { label: t(label) }))
   }
   if (typeof parsed !== 'object' || parsed === null) {
-    throw new CommandError('parse', `${label}输出不是 JSON 对象`)
+    throw new CommandError('parse', t('deployer.run.notJsonObject', { label: t(label) }))
   }
   const env = parsed as Record<string, unknown>
   if (env.ok === true) {
-    if (!('data' in env)) throw new CommandError('parse', `${label}输出缺少 data`)
+    if (!('data' in env)) throw new CommandError('parse', t('deployer.run.missingData', { label: t(label) }))
     return parsed as SyncEnvelope<T>
   }
   if (env.ok === false) {
     const err = env.error as Record<string, unknown> | null | undefined
     if (typeof err !== 'object' || err === null || typeof err.code !== 'string') {
-      throw new CommandError('parse', `${label}错误输出缺少 code`)
+      throw new CommandError('parse', t('deployer.run.missingErrorCode', { label: t(label) }))
     }
     return parsed as SyncEnvelope<T>
   }
-  throw new CommandError('parse', `${label}输出缺少 ok 字段`)
+  throw new CommandError('parse', t('deployer.run.missingOk', { label: t(label) }))
 }
 
 /** Split on separator lines; anything but eight sections is a format error. */
@@ -98,7 +99,8 @@ function splitSections(raw: string): string[] {
   }
   sections.push(current.join('\n'))
   if (sections.length !== 8) {
-    throw new CommandError('parse', `组合结果应为 8 段，实际 ${sections.length} 段`)
+    const n = sections.length
+    throw new CommandError('parse', t('deployer.run.badSectionCount', { n }, n))
   }
   return sections
 }
@@ -113,21 +115,21 @@ export async function readRunSteps(): Promise<RunSteps> {
     readState('sync-task.last.steps'),
   ])
   if (op.trim() !== 'run') {
-    throw new CommandError('parse', '最近一次任务不是组合运行，不能按组合结果展示')
+    throw new CommandError('parse', t('deployer.run.notCombined'))
   }
   const sections = splitSections(raw.replace(/\r\n/g, '\n'))
-  const overall = sectionCode(sections[0], '总体')
-  if (overall === null) throw new CommandError('parse', '组合结果缺少总退出码')
+  const overall = sectionCode(sections[0], 'deployer.run.labelOverall')
+  if (overall === null) throw new CommandError('parse', t('deployer.run.missingOverall'))
   return {
     overall,
     fetch: {
-      code: sectionCode(sections[1], '拉取'),
-      envelope: sectionEnvelope<FetchResult | TofuFacts>(sections[2], '拉取'),
+      code: sectionCode(sections[1], 'deployer.run.labelFetch'),
+      envelope: sectionEnvelope<FetchResult | TofuFacts>(sections[2], 'deployer.run.labelFetch'),
       stderr: sections[3],
     },
     deploy: {
-      code: sectionCode(sections[4], '部署'),
-      envelope: sectionEnvelope<DeployOutcome>(sections[5], '部署'),
+      code: sectionCode(sections[4], 'deployer.run.labelDeploy'),
+      envelope: sectionEnvelope<DeployOutcome>(sections[5], 'deployer.run.labelDeploy'),
       stderr: sections[6],
     },
     stderr: sections[7],
@@ -174,21 +176,21 @@ export function runDeployOutcome(steps: RunSteps): RunDeployOutcome {
 export function runOutcomeLabel(outcome: RunDeployOutcome): string {
   switch (outcome.kind) {
     case 'written':
-      return '运行完成'
+      return t('deployer.run.done')
     case 'unchanged':
-      return '运行完成，没有需要部署的新版本'
+      return t('deployer.run.unchanged')
     case 'pending':
-      return '运行完成，新版本等待确认后部署'
+      return t('deployer.run.pending')
     case 'skipped':
       return outcome.reason === 'auto_deploy_false'
-        ? '运行完成，自动部署已关闭（auto_deploy=false）'
-        : '运行完成，没有已验证的 keybox'
+        ? t('deployer.run.skippedAutoDeployOff')
+        : t('deployer.run.skippedNothingStaged')
     case 'failed':
-      return '运行失败，详情见最近一次组合结果'
+      return t('deployer.run.failed')
   }
 }
 
 /** Shown only when a keybox actually reached a target. */
 export function runRebootHint(outcome: RunDeployOutcome): string | null {
-  return outcome.kind === 'written' ? '建议重启手机以完全重新加载 keybox' : null
+  return outcome.kind === 'written' ? t('deployer.run.rebootHint') : null
 }

@@ -16,11 +16,12 @@ import {
 import { Close } from 'miuix-vue/icons'
 import CardStateButton from '../../../shared/components/CardStateButton.vue'
 import SvgIcon from '../../../shared/components/SvgIcon.vue'
-import { KEYBOX_STATE_VISUAL } from '../lib/rkp'
+import { KEYBOX_STATE_VISUAL, providerLabel } from '../lib/rkp'
 import { formatAgo, formatElapsed } from '../../../shared/lib/format'
 import { CommandError } from '../../../shared/lib/command'
+import { t, type MessageKey } from '../../../shared/lib/i18n'
 import {
-  CHECK_OUTCOME_LABEL,
+  checkOutcomeLabel,
   initSender,
   syncCodeLabel,
   syncErrorText,
@@ -52,8 +53,6 @@ const r = props.runner
 const initBusy = ref<'gist' | 'webdav' | null>(null)
 const initError = ref<string | null>(null)
 
-const PROVIDER: Record<string, string> = { gist: 'GitHub Gist', webdav: 'WebDAV', url: '公开 HTTPS' }
-
 type Tone = 'ok' | 'warning' | 'error' | 'neutral'
 /** Card tint/icon per tone; reuses the issuer status states so both cards match. */
 const TONE_VISUAL: Record<Tone, { color: string; icon: string }> = {
@@ -62,30 +61,38 @@ const TONE_VISUAL: Record<Tone, { color: string; icon: string }> = {
   error: KEYBOX_STATE_VISUAL.expired,
   neutral: KEYBOX_STATE_VISUAL.missing,
 }
-const TONE_LABEL: Record<Tone, string> = { ok: '已同步', warning: '需处理', error: '异常', neutral: '未检查' }
-const BUSY_LABEL: Record<SyncOp, string> = {
-  check: '检查中',
-  push: '推送中',
-  delete: '删除中',
-  rotate: '重置密码中',
-  fetch: '拉取中',
-  run: '同步中',
+const TONE_LABEL: Record<Tone, MessageKey> = {
+  ok: 'issuer.syncStatusCard.tone.ok',
+  warning: 'issuer.syncStatusCard.tone.warning',
+  error: 'issuer.syncStatusCard.tone.error',
+  neutral: 'issuer.syncStatusCard.tone.neutral',
+}
+const BUSY_LABEL: Record<SyncOp, MessageKey> = {
+  check: 'issuer.syncStatusCard.op.check',
+  push: 'issuer.syncStatusCard.op.sending',
+  delete: 'issuer.syncStatusCard.op.delete',
+  rotate: 'issuer.syncStatusCard.op.rotate',
+  fetch: 'issuer.syncStatusCard.op.fetch',
+  run: 'issuer.syncStatusCard.op.run',
 }
 
 /** Header text while a task runs; replaces the tone label in the same corner. */
 const busyText = computed(() => {
-  const label = props.busyOp ? BUSY_LABEL[props.busyOp] : '同步中'
-  return `${label} ${formatElapsed(r.elapsedMs.value)}${r.overdue.value ? ' · 结果未知' : ''}`
+  const label = t(props.busyOp ? BUSY_LABEL[props.busyOp] : BUSY_LABEL.run)
+  const elapsed = formatElapsed(r.elapsedMs.value)
+  return r.overdue.value
+    ? t('issuer.syncStatusCard.busyOverdue', { label, elapsed })
+    : t('issuer.syncStatusCard.busy', { label, elapsed })
 })
 
 /** Why automatic push is off, or null when it runs. */
 const autoPushOff = computed<string | null>(() => {
   const s = props.status
   if (!s) return null
-  if (!s.enabled) return '同步未启用'
-  if (!s.risk_ack_current) return '需重新确认风险'
-  if (s.auto_push === false) return '已在设置中关闭'
-  if (!s.loop_running) return '后台循环未运行'
+  if (!s.enabled) return t('issuer.syncStatusCard.syncDisabled')
+  if (!s.risk_ack_current) return t('issuer.syncStatusCard.risk')
+  if (s.auto_push === false) return t('issuer.syncStatusCard.autoPushOff')
+  if (!s.loop_running) return t('issuer.syncStatusCard.loopOff')
   return null
 })
 
@@ -99,21 +106,25 @@ const warnings = computed<string[]>(() => {
     const detail =
       check.outcome === 'error' && check.error
         ? syncErrorText(check.error)
-        : (CHECK_OUTCOME_LABEL[check.outcome] ?? check.outcome)
-    out.push(`云端检查：${detail} · ${formatAgo(check.at, props.now)}`)
+        : (checkOutcomeLabel(check.outcome) ?? check.outcome)
+    out.push(t('issuer.syncStatusCard.cloudCheck', { detail, ago: formatAgo(check.at, props.now) }))
   }
 
   const secret = (value: SecretStatus | undefined, name: string): void => {
-    if (!value?.present) out.push(`${name} 尚未设置`)
-    else if (!value.ok) out.push(`${name} 文件权限不正确`)
+    if (!value?.present) out.push(t('issuer.syncStatusCard.secretNotSet', { name }))
+    else if (!value.ok) out.push(t('issuer.syncStatusCard.secretBadPerm', { name }))
   }
-  if (s.password_mode === 'secret-file') secret(s.secrets.age, '密码')
-  if (s.provider === 'gist') secret(s.secrets.gist_token, 'Gist token')
-  else if (s.provider === 'webdav') secret(s.secrets.webdav_password, 'WebDAV 密码')
+  if (s.password_mode === 'secret-file') secret(s.secrets.age, t('issuer.syncStatusCard.secretAge'))
+  if (s.provider === 'gist') secret(s.secrets.gist_token, t('issuer.syncStatusCard.secretGist'))
+  else if (s.provider === 'webdav') secret(s.secrets.webdav_password, t('issuer.syncStatusCard.secretWebdav'))
 
-  if (!s.risk_ack_current) out.push('风险说明已更新，需要重新确认')
+  if (!s.risk_ack_current) out.push(t('issuer.syncStatusCard.riskChanged'))
   const last = s.sync_state?.last_error
-  if (last) out.push(`上次同步失败：${syncCodeLabel(last.code)} · ${formatAgo(last.at, props.now)}`)
+  if (last) {
+    out.push(
+      t('issuer.syncStatusCard.lastSyncFailed', { label: syncCodeLabel(last.code), ago: formatAgo(last.at, props.now) }),
+    )
+  }
   return out
 })
 
@@ -131,9 +142,14 @@ const rows = computed(() => {
   if (!s) return []
   const pushed = s.sync_state?.verified_at ?? null
   return [
-    { k: '存储方式', v: PROVIDER[s.provider] ?? s.provider },
-    { k: '同步时间', v: pushed ? formatAgo(pushed, props.now) : '尚未推送' },
-    { k: '自动推送', v: autoPushOff.value ? `未开启 · ${autoPushOff.value}` : '已开启' },
+    { k: t('issuer.syncStatusCard.provider'), v: providerLabel(s.provider) },
+    { k: t('issuer.syncStatusCard.syncTime'), v: pushed ? formatAgo(pushed, props.now) : t('issuer.syncStatusCard.notPushed') },
+    {
+      k: t('issuer.syncStatusCard.autoPush'),
+      v: autoPushOff.value
+        ? t('issuer.syncStatusCard.autoPushOffRow', { reason: autoPushOff.value })
+        : t('issuer.syncStatusCard.autoPushOn'),
+    },
   ]
 })
 
@@ -142,25 +158,33 @@ const lastTask = computed<{ text: string; bad: boolean } | null>(() => {
   const result = r.result.value
   if (!result) return null
   const env = result.envelope
-  if (!env) return { text: `任务异常退出（${result.code}），未产生结果`, bad: result.code !== 0 }
+  if (!env) return { text: t('issuer.syncStatusCard.exitNoResult', result.code), bad: result.code !== 0 }
   if (!env.ok) return { text: syncErrorText(env.error), bad: true }
   if (result.op === 'push') {
     const data = env.data as PushResult
     return {
-      text: data.noop ? `第 ${data.seq} 版内容未变化，未重新上传` : `已推送第 ${data.seq} 版`,
+      text: data.noop
+        ? t('issuer.syncStatusCard.pushNoop', data.seq)
+        : t('issuer.syncStatusCard.pushed', data.seq),
       bad: false,
     }
   }
-  if (result.op === 'rotate') return { text: '密码已重置，接收端需要改成新密码', bad: false }
+  if (result.op === 'rotate') return { text: t('issuer.syncStatusCard.rotated'), bad: false }
   if (result.op === 'check') {
     const data = env.data as RemoteCheck
-    return { text: `云端检查：${CHECK_OUTCOME_LABEL[data.outcome] ?? data.outcome}`, bad: false }
+    return {
+      text: t('issuer.syncStatusCard.checked', { label: checkOutcomeLabel(data.outcome) ?? data.outcome }),
+      bad: false,
+    }
   }
   if (result.op === 'delete') {
     const data = env.data as { deleted?: boolean }
-    return { text: data.deleted ? '云端文件已删除' : '云端没有可删除的文件', bad: false }
+    return {
+      text: data.deleted ? t('issuer.syncStatusCard.deleted') : t('issuer.syncStatusCard.nothingDeleted'),
+      bad: false,
+    }
   }
-  return { text: '同步任务完成', bad: false }
+  return { text: t('issuer.syncStatusCard.completed'), bad: false }
 })
 
 async function startInit(provider: 'gist' | 'webdav'): Promise<void> {
@@ -169,7 +193,7 @@ async function startInit(provider: 'gist' | 'webdav'): Promise<void> {
   initError.value = null
   try {
     await initSender(provider)
-    void showSnackbar({ message: '已初始化同步流，请设置密码后启用' })
+    void showSnackbar({ message: t('issuer.syncStatusCard.initialized') })
     emit('changed')
   } catch (e) {
     initError.value = e instanceof CommandError ? e.message : String(e)
@@ -196,12 +220,12 @@ async function startInit(provider: 'gist' | 'webdav'): Promise<void> {
     />
     <div class="sync">
       <div class="sync__head">
-        <MiuixText type="title4" weight="medium">远程同步</MiuixText>
+        <MiuixText type="title4" weight="medium">{{ t('issuer.syncStatusCard.title') }}</MiuixText>
         <MiuixProgressIndicator v-if="loading && !status" type="infinite" :size="18" />
         <!-- Corner status doubles as the refresh control: tap runs check-remote. -->
         <CardStateButton
           v-else-if="status"
-          :label="r.busy.value ? busyText : TONE_LABEL[tone]"
+          :label="r.busy.value ? busyText : t(TONE_LABEL[tone])"
           :busy="r.busy.value"
           :disabled="!canRefresh"
           @refresh="emit('refresh')"
@@ -211,24 +235,24 @@ async function startInit(provider: 'gist' | 'webdav'): Promise<void> {
       <!-- Never initialized: create the [sync] table with a provider. -->
       <template v-if="notInitialized">
         <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-          把当前 keybox 加密后上传到你自己的存储，供其他设备拉取。先选择存储方式；之后设置密码并接受风险说明才能启用。
+          {{ t('issuer.syncStatusCard.intro') }}
         </MiuixText>
         <div class="init">
           <MiuixButton type="primary" :disabled="initBusy !== null" @pointerdown.stop @click.stop="startInit('gist')">
-            {{ initBusy === 'gist' ? '初始化中…' : '使用 GitHub Gist' }}
+            {{ initBusy === 'gist' ? t('issuer.syncStatusCard.initializing') : t('issuer.syncStatusCard.useGist') }}
           </MiuixButton>
           <MiuixButton :disabled="initBusy !== null" @pointerdown.stop @click.stop="startInit('webdav')">
-            {{ initBusy === 'webdav' ? '初始化中…' : '使用 WebDAV' }}
+            {{ initBusy === 'webdav' ? t('issuer.syncStatusCard.initializing') : t('issuer.syncStatusCard.useWebdav') }}
           </MiuixButton>
         </div>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          Gist 需要只勾选 <code>gist</code> 权限的 token；WebDAV 建议使用可单独撤销的应用密码。密码不会出现在 URL 或二维码中。
+          {{ t('issuer.syncStatusCard.gistNotePrefix') }}<code>gist</code>{{ t('issuer.syncStatusCard.gistNoteSuffix') }}
         </MiuixText>
         <MiuixText v-if="initError" type="footnote1" color="var(--m-color-error)">{{ initError }}</MiuixText>
       </template>
 
       <MiuixText v-else-if="error && !status" type="body2" color="var(--m-color-error)">
-        读取同步状态失败：{{ error }}
+        {{ t('issuer.syncStatusCard.readFailed', { error }) }}
       </MiuixText>
 
       <template v-else-if="status">
@@ -245,20 +269,22 @@ async function startInit(provider: 'gist' | 'webdav'): Promise<void> {
 
         <div v-if="!r.busy.value && lastTask" class="task" @pointerdown.stop @click.stop>
           <MiuixText type="body2" :color="lastTask.bad ? 'var(--m-color-error)' : undefined">{{ lastTask.text }}</MiuixText>
-          <MiuixIconButton aria-label="不再显示" @click.stop="r.dismiss()">
+          <MiuixIconButton :aria-label="t('issuer.common.dismiss')" @click.stop="r.dismiss()">
             <MiuixIcon :icon="Close" :size="16" color="var(--m-color-on-surface-variant-actions)" />
           </MiuixIconButton>
         </div>
         <div v-else-if="r.phase.value === 'launch_failed'" class="task" @pointerdown.stop @click.stop>
-          <MiuixText type="body2" color="var(--m-color-error)">同步任务未能启动，请检查 rkp-mini-sync 是否可执行。</MiuixText>
+          <MiuixText type="body2" color="var(--m-color-error)">{{ t('issuer.syncStatusCard.launchFailed') }}</MiuixText>
         </div>
         <div v-else-if="r.phase.value === 'stale'" class="task" @pointerdown.stop @click.stop>
-          <MiuixText type="body2" color="var(--m-color-error)">存在残留的同步任务锁，上次任务可能被中断。</MiuixText>
-          <MiuixButton :disabled="r.busy.value" @click.stop="r.clearStaleLock()">清除锁</MiuixButton>
+          <MiuixText type="body2" color="var(--m-color-error)">{{ t('issuer.syncStatusCard.stale') }}</MiuixText>
+          <MiuixButton :disabled="r.busy.value" @click.stop="r.clearStaleLock()">{{ t('issuer.common.clearLock') }}</MiuixButton>
         </div>
       </template>
 
-      <MiuixText v-else type="body2" color="var(--m-color-on-surface-variant-summary)">正在读取同步状态…</MiuixText>
+      <MiuixText v-else type="body2" color="var(--m-color-on-surface-variant-summary)">
+        {{ t('issuer.syncStatusCard.reading') }}
+      </MiuixText>
     </div>
   </MiuixCard>
 </template>

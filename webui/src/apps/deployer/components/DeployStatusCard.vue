@@ -14,7 +14,7 @@ import { formatAgo, formatElapsed } from '../../../shared/lib/format'
 import {
   syncCodeLabel,
   syncErrorText,
-  TARGET_LABEL,
+  targetLabel,
   type FetchResult,
   type RemoteCheck,
   type SecretKind,
@@ -24,7 +24,8 @@ import {
   type SyncRunner,
   type SyncStatus,
 } from '../../../shared/lib/sync'
-import { RECEIVER_CHECK_LABEL, deployCodeLabel, pendingTitle, providerLabel } from '../lib/display'
+import { t, type MessageKey } from '../../../shared/lib/i18n'
+import { deployCodeLabel, pendingTitle, providerLabel, receiverCheckLabel } from '../lib/display'
 import { runOutcomeLabel, runRebootHint, type RunDeployOutcome } from '../lib/run'
 
 const props = defineProps<{
@@ -64,12 +65,24 @@ const TONE_VISUAL: Record<Tone, { color: string; icon: string }> = {
   error: { color: 'var(--m-color-error)', icon: ICON_ERROR },
   neutral: { color: 'var(--m-color-on-surface-variant-actions)', icon: ICON_HELP },
 }
-const TONE_LABEL: Record<Tone, string> = { ok: '已部署', warning: '需处理', error: '异常', neutral: '未检查' }
-const BUSY_LABEL: Record<string, string> = { check: '检查中', fetch: '拉取中', run: '部署中' }
+const TONE_LABEL: Record<Tone, MessageKey> = {
+  ok: 'deployer.statusCard.toneOk',
+  warning: 'deployer.statusCard.toneWarning',
+  error: 'deployer.statusCard.toneError',
+  neutral: 'deployer.statusCard.toneNeutral',
+}
+const BUSY_LABEL: Record<string, MessageKey> = {
+  check: 'deployer.common.busyCheck',
+  fetch: 'deployer.common.busyFetch',
+  run: 'deployer.common.busyRun',
+}
 
 const busyText = computed(() => {
-  const label = BUSY_LABEL[props.busyOp ?? 'run'] ?? '部署中'
-  return `${label} ${formatElapsed(r.elapsedMs.value)}${r.overdue.value ? ' · 结果未知' : ''}`
+  const label = t(BUSY_LABEL[props.busyOp ?? 'run'] ?? 'deployer.common.busyRun')
+  const elapsed = formatElapsed(r.elapsedMs.value)
+  return r.overdue.value
+    ? t('deployer.common.busyUnknown', { label, elapsed })
+    : t('deployer.common.busyTimer', { label, elapsed })
 })
 
 const needsImport = computed(() => props.notInitialized || (!!props.status && !props.status.stream_id))
@@ -80,10 +93,10 @@ const webdavNeeded = computed(() => props.status?.provider === 'webdav' && !!pro
 const autoDeployOff = computed<string | null>(() => {
   const s = props.status
   if (!s) return null
-  if (!s.enabled) return '同步未启用'
-  if (!s.risk_ack_current) return '需重新确认风险'
-  if (props.config?.auto_deploy === false) return '已在设置中关闭'
-  if (!s.loop_running) return '后台进程未运行'
+  if (!s.enabled) return t('deployer.common.syncDisabled')
+  if (!s.risk_ack_current) return t('deployer.common.riskStale')
+  if (props.config?.auto_deploy === false) return t('deployer.common.autoDeployOff')
+  if (!s.loop_running) return t('deployer.common.loopOff')
   return null
 })
 
@@ -92,9 +105,14 @@ const rows = computed(() => {
   if (!s) return []
   const verified = s.sync_state?.verified_at ?? null
   return [
-    { k: '存储方式', v: providerLabel(s.provider) },
-    { k: '同步时间', v: verified ? formatAgo(verified, props.now) : '尚未拉取' },
-    { k: '自动部署', v: autoDeployOff.value ? `未开启 · ${autoDeployOff.value}` : '已开启' },
+    { k: t('deployer.common.storage'), v: providerLabel(s.provider) },
+    { k: t('deployer.statusCard.syncTime'), v: verified ? formatAgo(verified, props.now) : t('deployer.statusCard.notFetched') },
+    {
+      k: t('deployer.common.autoDeploy'),
+      v: autoDeployOff.value
+        ? t('deployer.statusCard.autoDeployOff', { reason: autoDeployOff.value })
+        : t('deployer.statusCard.autoDeployOn'),
+    },
   ]
 })
 
@@ -107,8 +125,8 @@ interface WarningItem {
 
 function secretWarning(value: SecretStatus | undefined, name: string, action: WarningAction): WarningItem | null {
   if (!value) return null
-  if (!value.present) return { id: `${action}-missing`, text: `${name}尚未设置`, action }
-  if (!value.ok) return { id: `${action}-mode`, text: `${name}文件权限不正确`, action }
+  if (!value.present) return { id: `${action}-missing`, text: t('deployer.statusCard.secretMissing', { name }), action }
+  if (!value.ok) return { id: `${action}-mode`, text: t('deployer.statusCard.secretBadMode', { name }), action }
   return null
 }
 
@@ -123,17 +141,18 @@ const warnings = computed<WarningItem[]>(() => {
       const seq = check.remote?.seq
       out.push({
         id: 'remote-ahead',
-        text: `云端有新版本${seq != null ? `（第 ${seq} 版）` : ''}，可以立即部署 · ${formatAgo(check.at, props.now)}`,
+        text:
+          seq != null
+            ? t('deployer.statusCard.remoteAheadSeq', { seq, time: formatAgo(check.at, props.now) })
+            : t('deployer.statusCard.remoteAhead', { time: formatAgo(check.at, props.now) }),
         action: 'deploy',
       })
     } else {
       const detail =
-        check.outcome === 'error' && check.error
-          ? syncErrorText(check.error)
-          : (RECEIVER_CHECK_LABEL[check.outcome] ?? check.outcome)
+        check.outcome === 'error' && check.error ? syncErrorText(check.error) : receiverCheckLabel(check.outcome)
       out.push({
         id: `remote-${check.outcome}`,
-        text: `云端检查：${detail} · ${formatAgo(check.at, props.now)}`,
+        text: t('deployer.statusCard.checkDetail', { detail, time: formatAgo(check.at, props.now) }),
         action: check.outcome === 'error' ? 'check' : null,
       })
     }
@@ -143,33 +162,42 @@ const warnings = computed<WarningItem[]>(() => {
   if (pending) {
     out.push({
       id: 'pending',
-      text: `第 ${pending.seq} 版：${pendingTitle(pending.reason)}，需要核对后部署`,
+      text: t('deployer.statusCard.pendingReview', { seq: pending.seq, reason: pendingTitle(pending.reason) }),
       action: 'deploy-sheet',
     })
   }
 
   if (s.password_mode === 'secret-file') {
     for (const w of [
-      secretWarning(s.secrets.age, '密码', 'secret-age'),
-      webdavNeeded.value ? secretWarning(s.secrets.webdav_password, 'WebDAV 密码', 'secret-webdav') : null,
+      secretWarning(s.secrets.age, t('deployer.common.password'), 'secret-age'),
+      webdavNeeded.value
+        ? secretWarning(s.secrets.webdav_password, t('deployer.common.webdavPassword'), 'secret-webdav')
+        : null,
     ]) {
       if (w) out.push(w)
     }
   }
-  if (passwordModePrompt.value) out.push({ id: 'prompt', text: '密码模式为 prompt，后台自动运行无法解密', action: null })
+  if (passwordModePrompt.value) out.push({ id: 'prompt', text: t('deployer.statusCard.promptMode'), action: null })
 
-  if (!s.risk_ack_current) out.push({ id: 'risk', text: '风险说明已更新，需要重新确认', action: 'risk' })
+  if (!s.risk_ack_current) out.push({ id: 'risk', text: t('deployer.statusCard.riskStale'), action: 'risk' })
 
   const last = s.sync_state?.last_error
   if (last) {
-    out.push({ id: 'last-error', text: `上次同步失败：${syncCodeLabel(last.code)} · ${formatAgo(last.at, props.now)}`, action: null })
+    out.push({
+      id: 'last-error',
+      text: t('deployer.statusCard.lastSyncFailed', { reason: syncCodeLabel(last.code), time: formatAgo(last.at, props.now) }),
+      action: null,
+    })
   }
 
-  for (const t of s.deploy_state?.targets ?? []) {
-    if (t.last_error) {
+  for (const tg of s.deploy_state?.targets ?? []) {
+    if (tg.last_error) {
       out.push({
-        id: `target-${t.id}`,
-        text: `目标 ${TARGET_LABEL[t.id] ?? t.id} 部署失败：${deployCodeLabel(t.last_error.code)}`,
+        id: `target-${tg.id}`,
+        text: t('deployer.statusCard.targetFailed', {
+          target: targetLabel(tg.id),
+          reason: deployCodeLabel(tg.last_error.code),
+        }),
         action: null,
       })
     }
@@ -194,7 +222,7 @@ const lastTask = computed<{ text: string; bad: boolean; steps: boolean; reboot: 
   if (result.op === 'run') {
     if (result.code !== 0) {
       return {
-        text: `最近一次组合运行失败（exit ${result.code}）`,
+        text: t('deployer.statusCard.runFailedExit', { code: result.code }),
         bad: true,
         steps: true,
         reboot: null,
@@ -202,19 +230,26 @@ const lastTask = computed<{ text: string; bad: boolean; steps: boolean; reboot: 
     }
     const outcome = props.runOutcome
     return {
-      text: outcome ? runOutcomeLabel(outcome) : '运行完成',
+      text: outcome ? runOutcomeLabel(outcome) : t('deployer.run.done'),
       bad: outcome ? outcome.kind === 'failed' : false,
       steps: true,
       reboot: outcome ? runRebootHint(outcome) : null,
     }
   }
   const env = result.envelope
-  if (!env) return { text: `任务异常退出（${result.code}），未产生结果`, bad: result.code !== 0, steps: false, reboot: null }
+  if (!env) {
+    return {
+      text: t('deployer.statusCard.taskAbnormal', { code: result.code }),
+      bad: result.code !== 0,
+      steps: false,
+      reboot: null,
+    }
+  }
   if (!env.ok) return { text: syncErrorText(env.error), bad: true, steps: false, reboot: null }
   if (result.op === 'check') {
     const data = env.data as RemoteCheck
     return {
-      text: `云端检查：${RECEIVER_CHECK_LABEL[data.outcome] ?? data.outcome}`,
+      text: t('deployer.statusCard.checkLabel', { detail: receiverCheckLabel(data.outcome) }),
       bad: false,
       steps: false,
       reboot: null,
@@ -222,7 +257,9 @@ const lastTask = computed<{ text: string; bad: boolean; steps: boolean; reboot: 
   }
   const data = env.data as FetchResult
   return {
-    text: data.changed ? `已拉取第 ${data.seq} 版` : `云端没有新版本（第 ${data.seq} 版）`,
+    text: data.changed
+      ? t('deployer.statusCard.fetched', { seq: data.seq })
+      : t('deployer.statusCard.noNewVersion', { seq: data.seq }),
     bad: false,
     steps: false,
     reboot: null,
@@ -268,12 +305,12 @@ function onWarning(action: WarningAction): void {
     />
     <div class="deploy">
       <div class="deploy__head">
-        <MiuixText type="title4" weight="medium">远程部署</MiuixText>
+        <MiuixText type="title4" weight="medium">{{ t('deployer.statusCard.title') }}</MiuixText>
         <MiuixProgressIndicator v-if="loading && !status" type="infinite" :size="18" />
         <!-- Corner status doubles as the refresh control: tap runs check-remote. -->
         <CardStateButton
           v-else-if="status"
-          :label="r.busy.value ? busyText : TONE_LABEL[tone]"
+          :label="r.busy.value ? busyText : t(TONE_LABEL[tone])"
           :busy="r.busy.value"
           :disabled="!canRefresh"
           @refresh="emit('check')"
@@ -283,13 +320,13 @@ function onWarning(action: WarningAction): void {
       <!-- Never imported: the link must be imported before anything can run. -->
       <template v-if="needsImport">
         <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-          导入发送端分享的 rkpsync:// 链接后，拉取、验证并部署远端 keybox。链接不含密码。
+          {{ t('deployer.statusCard.unimportedHint') }}
         </MiuixText>
-        <MiuixButton type="primary" @pointerdown.stop @click.stop="emit('import')">导入同步链接</MiuixButton>
+        <MiuixButton type="primary" @pointerdown.stop @click.stop="emit('import')">{{ t('deployer.statusCard.importLink') }}</MiuixButton>
       </template>
 
       <MiuixText v-else-if="error && !status" type="body2" color="var(--m-color-error)">
-        读取同步状态失败：{{ error }}
+        {{ t('deployer.common.readStatusFailedDetail', { error }) }}
       </MiuixText>
 
       <template v-else-if="status">
@@ -325,20 +362,20 @@ function onWarning(action: WarningAction): void {
             <MiuixIcon :icon="ChevronForward" :size="16" color="var(--m-color-on-surface-variant-actions)" />
           </button>
           <MiuixText v-else type="body2" :color="lastTask.bad ? 'var(--m-color-error)' : undefined">{{ lastTask.text }}</MiuixText>
-          <MiuixIconButton aria-label="不再显示" @click.stop="r.dismiss()">
+          <MiuixIconButton :aria-label="t('deployer.statusCard.dismiss')" @click.stop="r.dismiss()">
             <MiuixIcon :icon="Close" :size="16" color="var(--m-color-on-surface-variant-actions)" />
           </MiuixIconButton>
         </div>
         <div v-else-if="r.phase.value === 'launch_failed'" class="task" @pointerdown.stop @click.stop>
-          <MiuixText type="body2" color="var(--m-color-error)">任务未能启动，请检查模块脚本是否可执行。</MiuixText>
+          <MiuixText type="body2" color="var(--m-color-error)">{{ t('deployer.statusCard.launchFailed') }}</MiuixText>
         </div>
         <div v-else-if="r.phase.value === 'stale'" class="task" @pointerdown.stop @click.stop>
-          <MiuixText type="body2" color="var(--m-color-error)">存在残留的任务锁，上次任务可能被中断。</MiuixText>
-          <MiuixButton :disabled="r.busy.value" @click.stop="r.clearStaleLock()">清除锁</MiuixButton>
+          <MiuixText type="body2" color="var(--m-color-error)">{{ t('deployer.statusCard.staleLock') }}</MiuixText>
+          <MiuixButton :disabled="r.busy.value" @click.stop="r.clearStaleLock()">{{ t('deployer.statusCard.clearLock') }}</MiuixButton>
         </div>
       </template>
 
-      <MiuixText v-else type="body2" color="var(--m-color-on-surface-variant-summary)">正在读取同步状态…</MiuixText>
+      <MiuixText v-else type="body2" color="var(--m-color-on-surface-variant-summary)">{{ t('deployer.statusCard.reading') }}</MiuixText>
     </div>
   </MiuixCard>
 </template>

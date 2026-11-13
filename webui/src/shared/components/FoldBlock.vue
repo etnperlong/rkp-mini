@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { MiuixBasicComponent, MiuixIcon } from 'miuix-vue'
 import { ChevronForward } from 'miuix-vue/icons'
+import { t } from '../lib/i18n'
 
 // Collapsed-by-default monospace block for long text (logs, hex, stderr).
 defineProps<{ title: string; text: string; summary?: string }>()
@@ -18,7 +19,7 @@ const open = ref(false)
         </span>
       </template>
     </MiuixBasicComponent>
-    <pre v-if="open" class="fold__body">{{ text || '（空）' }}</pre>
+    <pre v-if="open" class="fold__body">{{ text || t('shared.common.empty') }}</pre>
   </div>
 </template>
 

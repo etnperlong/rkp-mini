@@ -35,7 +35,7 @@ import { CommandError } from '../../shared/lib/command'
 import { blockerLabel, readCachedStatus, readStatus, type StatusData } from './lib/rkp'
 import { useIssueRunner } from './lib/issueRunner'
 import {
-  CHECK_OUTCOME_LABEL,
+  checkOutcomeLabel,
   readSyncStatus,
   syncErrorText,
   syncTaskArgs,
@@ -47,6 +47,7 @@ import {
 } from '../../shared/lib/sync'
 import { nowUnix } from '../../shared/lib/format'
 import { initTheme } from '../../shared/lib/theme'
+import { t, type MessageKey } from '../../shared/lib/i18n'
 
 initTheme()
 
@@ -64,7 +65,12 @@ const detailOpen = ref(false)
 
 // Bottom navigation. The active tab is plain state, never history: the WebView's
 // back key must keep closing the page (design §2.3).
-const TABS = [{ label: '状态' }, { label: '签发' }, { label: '同步' }, { label: '更多' }]
+const TABS = computed(() => [
+  { label: t('issuer.app.tabStatus') },
+  { label: t('issuer.app.tabIssue') },
+  { label: t('issuer.app.tabSync') },
+  { label: t('issuer.app.tabMore') },
+])
 const TAB_ICONS = [Info, Lock, UploadCloud, More]
 const MORE_TAB = 3
 const tab = ref(0)
@@ -92,18 +98,18 @@ const rotateOpen = ref(false)
 const secretOpen = ref(false)
 const secretKind = ref<SecretKind>('age')
 
-const SECRET_DIALOG: Record<SecretKind, { title: string; hint: string }> = {
+const SECRET_DIALOG: Record<SecretKind, { title: MessageKey; hint: MessageKey }> = {
   age: {
-    title: '设置密码',
-    hint: '每个同步流使用独立的强密码（建议 6 个以上随机单词或 20+ 随机字符）；接收端需要用它解密云端储存的 Keybox。',
+    title: 'issuer.app.secretDialog.age.title',
+    hint: 'issuer.app.secretDialog.age.hint',
   },
   'gist-token': {
-    title: '设置 Gist token',
-    hint: 'GitHub PAT，只勾选 gist 权限即可；用于创建和更新 Gist。',
+    title: 'issuer.app.secretDialog.gistToken.title',
+    hint: 'issuer.app.secretDialog.gistToken.hint',
   },
   'webdav-password': {
-    title: '设置 WebDAV 密码',
-    hint: '建议使用可单独撤销的应用密码（例如坚果云的“应用密码”）。',
+    title: 'issuer.app.secretDialog.webdavPassword.title',
+    hint: 'issuer.app.secretDialog.webdavPassword.hint',
   },
 }
 
@@ -154,7 +160,7 @@ async function loadCachedStatus(): Promise<void> {
 // `status --update-description`: issue itself never refreshes status.json.
 const runner = useIssueRunner(async (result) => {
   await loadStatus(true)
-  void showSnackbar({ message: result.code === 0 ? '签发成功，状态已刷新' : '签发失败，原有 keybox 未被替换' })
+  void showSnackbar({ message: result.code === 0 ? t('issuer.app.issueSuccess') : t('issuer.app.issueFailed') })
 })
 
 /**
@@ -189,18 +195,20 @@ async function loadSyncStatus(): Promise<void> {
 // truth, so a task started before the page opened still reports here.
 const syncRunner = useSyncRunner(async (result) => {
   await loadSyncStatus()
-  let message = '同步任务失败，详情见同步卡片'
+  let message = t('issuer.app.syncFailed')
   const env = result.envelope
   if (result.code === 0 && env !== null && env.ok) {
     const data = env.data as Record<string, unknown>
     if (result.op === 'check') {
-      message = `云端检查：${CHECK_OUTCOME_LABEL[data.outcome as CheckOutcome] ?? '完成'}`
+      message = t('issuer.app.syncCheck', {
+        outcome: checkOutcomeLabel(data.outcome as CheckOutcome) ?? t('issuer.app.syncCheckDone'),
+      })
     } else if (result.op === 'rotate') {
-      message = '密码已重置，接收端需要同时更新'
+      message = t('issuer.app.syncRotated')
     } else if (result.op === 'delete') {
-      message = data.deleted === true ? '云端文件已删除' : '云端没有可删除的文件'
+      message = data.deleted === true ? t('issuer.app.syncDeleted') : t('issuer.app.syncNothingDeleted')
     } else {
-      message = '推送完成'
+      message = t('issuer.app.syncPushed')
     }
   }
   void showSnackbar({ message })
@@ -235,7 +243,7 @@ const syncNeedsEnable = computed(() => {
 async function onRefresh(): Promise<void> {
   // Auto-issue comes from the issuer status; the push box still needs sync status.
   const [ok] = await Promise.all([loadStatus(true), loadSyncStatus()])
-  if (ok) void showSnackbar({ message: '状态已刷新，模块描述已同步' })
+  if (ok) void showSnackbar({ message: t('issuer.app.refreshed') })
 }
 
 async function onConfirmIssue(): Promise<void> {
@@ -248,8 +256,8 @@ const blockers = computed(() => status.value?.blockers ?? [])
 /** Reason the primary action is unavailable, or null when it can run. */
 const issueBlockedReason = computed(() => {
   if (runner.busy.value) return null
-  if (runner.phase.value === 'stale') return '存在残留的任务锁，请先处理'
-  if (!status.value || statusCached.value) return statusLoading.value ? null : '需要先成功读取状态'
+  if (runner.phase.value === 'stale') return t('issuer.app.staleLockBlocked')
+  if (!status.value || statusCached.value) return statusLoading.value ? null : t('issuer.app.needStatus')
   if (blockers.value.length) return blockerLabel(blockers.value[0])
   return null
 })
@@ -270,15 +278,15 @@ onBeforeUnmount(() => clearInterval(clock))
 
 <template>
   <div class="app">
-    <MiuixTopAppBar title="RKP-Mini · 签发端" />
+    <MiuixTopAppBar :title="t('issuer.app.title')" />
 
     <MiuixScrollArea v-if="!available" v-show="tab !== MORE_TAB" class="app__scroll">
       <main class="page">
         <MiuixCard>
           <div class="notice">
-            <MiuixText type="title4" weight="medium" color="var(--m-color-error)">未检测到 KernelSU 接口</MiuixText>
+            <MiuixText type="title4" weight="medium" color="var(--m-color-error)">{{ t('issuer.app.noBridgeTitle') }}</MiuixText>
             <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-              请在 KernelSU 管理器的模块页中点击本模块的“打开”进入此页面。当前环境无法执行命令。
+              {{ t('issuer.app.noBridgeBody') }}
             </MiuixText>
           </div>
         </MiuixCard>
@@ -310,7 +318,13 @@ onBeforeUnmount(() => clearInterval(clock))
             @open="tab = $event"
           />
           <template v-if="status">
-            <MiuixSmallTitle :text="blockers.length ? `环境检查 · ${blockers.length} 项未通过` : '环境检查'" />
+            <MiuixSmallTitle
+              :text="
+                blockers.length
+                  ? t('issuer.app.envCheckFailed', blockers.length)
+                  : t('issuer.app.envCheck')
+              "
+            />
             <CheckCard :status="status" />
           </template>
         </main>
@@ -332,11 +346,11 @@ onBeforeUnmount(() => clearInterval(clock))
             <MiuixText v-if="issueBlockedReason" type="footnote1" color="var(--m-color-error)" align="center">
               {{ issueBlockedReason }}
             </MiuixText>
-            <MiuixButton type="primary" :disabled="!canIssue" @click="issueOpen = true">立即签发</MiuixButton>
-            <MiuixButton @click="issueSettingsOpen = true">签发设置</MiuixButton>
+            <MiuixButton type="primary" :disabled="!canIssue" @click="issueOpen = true">{{ t('issuer.app.issueNow') }}</MiuixButton>
+            <MiuixButton @click="issueSettingsOpen = true">{{ t('issuer.app.issueSettings') }}</MiuixButton>
           </div>
           <MiuixText class="footnote" type="footnote1" color="var(--m-color-on-surface-variant-actions)" align="center">
-            签发结果取决于设备固件与 Google RKP 服务，不保证 Play Integrity 通过。
+            {{ t('issuer.app.issueFootnote') }}
           </MiuixText>
         </main>
       </MiuixScrollArea>
@@ -357,14 +371,14 @@ onBeforeUnmount(() => clearInterval(clock))
             @refresh="startSyncTask('check')"
           />
           <div v-if="syncStatus" class="actions">
-            <MiuixButton v-if="syncNeedsEnable" type="primary" @click="syncRiskOpen = true">启用</MiuixButton>
+            <MiuixButton v-if="syncNeedsEnable" type="primary" @click="syncRiskOpen = true">{{ t('issuer.app.enable') }}</MiuixButton>
             <MiuixButton v-else type="primary" :disabled="!canPushSync" @click="startSyncTask('push')">
-              立即推送
+              {{ t('issuer.app.pushNow') }}
             </MiuixButton>
             <MiuixButton :disabled="syncRunner.busy.value || !syncStatus?.enabled" @click="shareOpen = true">
-              分享
+              {{ t('issuer.app.share') }}
             </MiuixButton>
-            <MiuixButton :disabled="syncRunner.busy.value" @click="syncSheetOpen = true">同步设置</MiuixButton>
+            <MiuixButton :disabled="syncRunner.busy.value" @click="syncSheetOpen = true">{{ t('issuer.app.syncSettings') }}</MiuixButton>
           </div>
         </main>
       </MiuixScrollArea>
@@ -415,8 +429,8 @@ onBeforeUnmount(() => clearInterval(clock))
       <SecretDialog
         v-model="secretOpen"
         :kind="secretKind"
-        :title="SECRET_DIALOG[secretKind].title"
-        :hint="SECRET_DIALOG[secretKind].hint"
+        :title="t(SECRET_DIALOG[secretKind].title)"
+        :hint="t(SECRET_DIALOG[secretKind].hint)"
         @saved="loadSyncStatus()"
       />
     </template>

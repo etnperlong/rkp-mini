@@ -4,6 +4,7 @@
 // `--if-staged` flags belong to the module's unattended script, not to this
 // manual UI path.
 import { appConfig } from '@app-config'
+import { t } from '../../../shared/lib/i18n'
 import { exec } from '../../../shared/lib/ksu'
 import { CommandError, SAFE_PATH, parseLastJsonLine, resolveModuleDir } from '../../../shared/lib/command'
 import {
@@ -59,7 +60,7 @@ async function run(command: string): Promise<{ stdout: string; stderr: string; e
 /** `rkp-mini-deployer --version` prints `rkp-mini-deployer 0.1.0`; keep the version only. */
 export async function readDeployVersion(): Promise<string> {
   const r = await run(`'${DEPLOY_BIN}' --version`)
-  if (r.errno !== 0) throw new CommandError('exit', `退出码 ${r.errno}`, r.stderr.trim())
+  if (r.errno !== 0) throw new CommandError('exit', t('deployer.deploy.exitCode', { n: r.errno }), r.stderr.trim())
   return r.stdout.trim().split(/\s+/).pop() ?? ''
 }
 
@@ -70,7 +71,7 @@ export interface ModuleProp {
 
 export async function readModuleProp(): Promise<ModuleProp> {
   const r = await run(`cat '${DEPLOY_MODULE_DIR}/module.prop'`)
-  if (r.errno !== 0) throw new CommandError('exit', `读取失败（${r.errno}）`, r.stderr.trim())
+  if (r.errno !== 0) throw new CommandError('exit', t('deployer.deploy.readFailed', { n: r.errno }), r.stderr.trim())
   const get = (key: string): string => new RegExp(`^${key}=(.*)$`, 'm').exec(r.stdout)?.[1]?.trim() ?? '?'
   return { version: get('version'), versionCode: get('versionCode') }
 }
@@ -78,7 +79,7 @@ export async function readModuleProp(): Promise<ModuleProp> {
 /** Read-only config.toml text (the 更多 tab never edits it). */
 export async function readDeployConfig(): Promise<string> {
   const r = await run(`cat '${DEPLOY_CONFIG}'`)
-  if (r.errno !== 0) throw new CommandError('exit', '配置文件不存在', r.stderr.trim())
+  if (r.errno !== 0) throw new CommandError('exit', t('deployer.deploy.configMissing'), r.stderr.trim())
   return r.stdout
 }
 
@@ -104,7 +105,7 @@ export function deployApply(approval: ApplyApproval = {}): Promise<SyncCall<Depl
     ['--allow-identity-change', approval.allowIdentityChange],
   ] as const) {
     if (sha === undefined) continue
-    if (!SHA.test(sha)) throw new CommandError('exec', '非法的确认值')
+    if (!SHA.test(sha)) throw new CommandError('exec', t('shared.command.badConfirmation'))
     args += ` ${flag} ${sha}`
   }
   return callDeploy<DeployReport>(args)
@@ -150,7 +151,7 @@ export interface BuiltinTargetInfo {
 /** `targets`: builtin targets plus module detection (read-only, no config needed). */
 export async function readBuiltinTargets(): Promise<BuiltinTargetInfo[]> {
   const data = await deployData<{ builtin?: unknown }>('targets')
-  if (!Array.isArray(data.builtin)) throw new CommandError('parse', '无法解析内置目标列表')
+  if (!Array.isArray(data.builtin)) throw new CommandError('parse', t('deployer.deploy.badTargets'))
   return data.builtin as BuiltinTargetInfo[]
 }
 
@@ -162,7 +163,7 @@ export async function readBuiltinTargets(): Promise<BuiltinTargetInfo[]> {
 export function addTarget(id: BuiltinTarget, fileName?: string): Promise<unknown> {
   if (id !== 'teesim' || fileName === undefined) return deployData(`add-target ${id}`)
   if (!isTeesimFileName(fileName)) {
-    throw new CommandError('exec', '文件名必须是 /data/adb/teesim 下的 .xml 文件名')
+    throw new CommandError('exec', t('deployer.deploy.badTeesimName'))
   }
   return deployData(`add-target teesim --path ${shq(`${TEESIM_DIR}/${fileName}`)}`)
 }

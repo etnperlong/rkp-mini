@@ -35,8 +35,9 @@ import RiskSheet from '../../shared/components/RiskSheet.vue'
 import SecretDialog from '../../shared/components/SecretDialog.vue'
 import { bridgeAvailable } from '../../shared/lib/ksu'
 import { nowUnix } from '../../shared/lib/format'
+import { t, type MessageKey } from '../../shared/lib/i18n'
 import { initTheme } from '../../shared/lib/theme'
-import { RECEIVER_CHECK_LABEL, errorMessage, isTofuFacts } from './lib/display'
+import { errorMessage, isTofuFacts, receiverCheckLabel } from './lib/display'
 import { readBuiltinTargets, type BuiltinTargetInfo } from './lib/deploy'
 import { readRunSteps, runDeployOutcome, runOutcomeLabel, runRebootHint, type RunDeployOutcome, type RunSteps } from './lib/run'
 import {
@@ -75,7 +76,12 @@ let clock: number | undefined
 
 // Bottom navigation: one scroll area per tab (`v-show`) keeps each tab's
 // scroll position; the tab itself is never URL state.
-const TABS = [{ label: '状态' }, { label: '部署' }, { label: '更多' }]
+const TABS: { label: MessageKey }[] = [
+  { label: 'deployer.app.tabStatus' },
+  { label: 'deployer.app.tabDeploy' },
+  { label: 'deployer.app.tabMore' },
+]
+const tabs = computed(() => TABS.map((x) => ({ label: t(x.label) })))
 const TAB_ICONS = [Info, Download, More]
 const MORE_TAB = 2
 const tab = ref(0)
@@ -98,11 +104,11 @@ const runSteps = ref<RunSteps | null>(null)
 /** Deploy outcome of that run: drives the completion text and the reboot hint. */
 const runOutcome = ref<RunDeployOutcome | null>(null)
 
-const secretTitle = computed(() => (secretKind.value === 'age' ? '设置密码' : '设置 WebDAV 密码'))
+const secretTitle = computed(() =>
+  secretKind.value === 'age' ? t('deployer.app.secretAgeTitle') : t('deployer.app.secretWebdavTitle'),
+)
 const secretHint = computed(() =>
-  secretKind.value === 'age'
-    ? '发送端设置的密码，用来解密云端储存的 Keybox；请通过安全渠道获得，每个同步流使用独立密码。'
-    : 'WebDAV 应用密码（不是账号登录密码），与链接中的用户名配套；只保存在本机 0600 文件中。',
+  secretKind.value === 'age' ? t('deployer.app.secretAgeHint') : t('deployer.app.secretWebdavHint'),
 )
 
 async function load(): Promise<void> {
@@ -192,41 +198,45 @@ async function handleTask(result: SyncTaskResult): Promise<void> {
     if (showTofuFrom(fetchEnv)) return
     const outcome = runOutcome.value
     if (result.code !== 0) {
-      void showSnackbar({ message: '任务失败，详情见最近一次组合结果' })
+      void showSnackbar({ message: t('deployer.app.runFailed') })
     } else if (outcome) {
       const hint = runRebootHint(outcome)
-      void showSnackbar({ message: `${runOutcomeLabel(outcome)}${hint ? `，${hint}` : ''}` })
+      const label = runOutcomeLabel(outcome)
+      void showSnackbar({ message: hint ? t('deployer.app.runDoneWithHint', { label, hint }) : label })
     } else {
-      void showSnackbar({ message: '运行完成' })
+      void showSnackbar({ message: t('deployer.run.done') })
     }
     return
   }
   const env = result.envelope
   const afterSecret = checkAfterSecret.value
   if (!env) {
-    void showSnackbar({ message: `任务结束（exit ${result.code}），但没有收到 JSON 结果` })
+    void showSnackbar({ message: t('deployer.app.taskEndNoJson', { code: result.code }) })
     return
   }
   if (showTofuFrom(env)) return
   if (!env.ok) {
-    void showSnackbar({ message: `${afterSecret ? '密码检查失败：' : ''}${syncErrorText(env.error)}` })
+    const detail = syncErrorText(env.error)
+    void showSnackbar({ message: afterSecret ? t('deployer.app.passwordCheckFailed', { detail }) : detail })
     return
   }
   if (result.op === 'check') {
     const data = env.data as RemoteCheck
-    const label = RECEIVER_CHECK_LABEL[data.outcome] ?? data.outcome
-    void showSnackbar({ message: afterSecret ? `解密成功，${label}` : `云端检查：${label}` })
+    const label = receiverCheckLabel(data.outcome)
+    void showSnackbar({ message: afterSecret ? t('deployer.app.decryptOk', { label }) : t('deployer.app.cloudCheck', { label }) })
     return
   }
   const data = env.data as FetchResult
   if (tofuAccepted.value) {
     tofuAccepted.value = false
-    void showSnackbar({ message: `已拉取第 ${data.seq} 版，请确认首次部署` })
+    void showSnackbar({ message: t('deployer.app.fetchedFirstDeploy', { seq: data.seq }) })
     deployOpen.value = true
     return
   }
   void showSnackbar({
-    message: data.changed ? `已拉取第 ${data.seq} 版，等待部署` : `云端没有新版本（第 ${data.seq} 版）`,
+    message: data.changed
+      ? t('deployer.app.fetchedWaiting', { seq: data.seq })
+      : t('deployer.app.noNewVersion', { seq: data.seq }),
   })
 }
 
@@ -302,15 +312,15 @@ onBeforeUnmount(() => clearInterval(clock))
 
 <template>
   <div class="app">
-    <MiuixTopAppBar title="RKP-Mini · 部署端" />
+    <MiuixTopAppBar :title="t('deployer.app.title')" />
 
     <MiuixScrollArea v-if="!available" v-show="tab !== MORE_TAB" class="app__scroll">
       <main class="page">
         <MiuixCard>
           <div class="notice">
-            <MiuixText type="title4" weight="medium" color="var(--m-color-error)">未检测到 KernelSU 接口</MiuixText>
+            <MiuixText type="title4" weight="medium" color="var(--m-color-error)">{{ t('deployer.app.noBridgeTitle') }}</MiuixText>
             <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-              请在 KernelSU 管理器的模块页中点击 rkp_mini_deployer 模块的“打开”进入此页面。当前环境无法执行命令。
+              {{ t('deployer.app.noBridgeBody') }}
             </MiuixText>
           </div>
         </MiuixCard>
@@ -339,7 +349,7 @@ onBeforeUnmount(() => clearInterval(clock))
             :error="statusError"
             @open="tab = $event"
           />
-          <MiuixSmallTitle text="已安装模块" />
+          <MiuixSmallTitle :text="t('deployer.app.installedModules')" />
           <ModulesCard :builtins="builtins" :error="builtinError" :status="status" :loading="loading" />
         </main>
       </MiuixScrollArea>
@@ -366,12 +376,12 @@ onBeforeUnmount(() => clearInterval(clock))
             @result="runOpen = true"
           />
           <div v-if="status?.stream_id" class="actions">
-            <MiuixButton v-if="needsEnable" type="primary" @click="riskOpen = true">启用</MiuixButton>
-            <MiuixButton v-else type="primary" :disabled="!canDeploy" @click="startTask('run')">立即部署</MiuixButton>
-            <MiuixButton :disabled="runner.busy.value" @click="settingsOpen = true">部署设置</MiuixButton>
+            <MiuixButton v-if="needsEnable" type="primary" @click="riskOpen = true">{{ t('deployer.app.enable') }}</MiuixButton>
+            <MiuixButton v-else type="primary" :disabled="!canDeploy" @click="startTask('run')">{{ t('deployer.app.deployNow') }}</MiuixButton>
+            <MiuixButton :disabled="runner.busy.value" @click="settingsOpen = true">{{ t('deployer.app.settings') }}</MiuixButton>
           </div>
           <MiuixText class="footnote" type="footnote1" color="var(--m-color-on-surface-variant-actions)" align="center">
-            跨设备使用接收到的 keybox 属于 keybox 克隆/冒充，不是合法的 RKP provisioning；同步只做结构与密钥匹配校验，未验证证书签名、根信任与吊销。
+            {{ t('deployer.app.cloneFootnote') }}
           </MiuixText>
         </main>
       </MiuixScrollArea>
@@ -383,7 +393,7 @@ onBeforeUnmount(() => clearInterval(clock))
       </main>
     </MiuixScrollArea>
 
-    <MiuixNavigationBar :model-value="tab" :items="TABS" @update:model-value="tab = $event">
+    <MiuixNavigationBar :model-value="tab" :items="tabs" @update:model-value="tab = $event">
       <template #icon="{ index }">
         <MiuixIcon :icon="TAB_ICONS[index]" />
       </template>

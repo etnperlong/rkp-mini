@@ -28,9 +28,10 @@ import {
 } from '../lib/display'
 import { deployApply, readDeployPlan, reportWrote } from '../lib/deploy'
 import { nowUnix } from '../../../shared/lib/format'
+import { t } from '../../../shared/lib/i18n'
 import {
-  TARGET_LABEL,
-  WARNING_LABEL,
+  targetLabel,
+  warningLabel,
   type DeployPlan,
   type DeployReport,
   type PlanWarning,
@@ -93,18 +94,18 @@ const needsOmkAck = computed(
 const canApply = computed(() => !!plan.value && !applying.value && (!needsOmkAck.value || ackOmk.value))
 
 const actionLabel = computed(() => {
-  if (applying.value) return '部署中…'
+  if (applying.value) return t('deployer.deploySheet.applying')
   switch (gateKind.value) {
     case 'same':
-      return '写入（幂等修复）'
+      return t('deployer.deploySheet.actionSame')
     case 'first_deploy':
-      return '确认首次部署'
+      return t('deployer.deploySheet.actionFirstDeploy')
     case 'allowed':
-      return '部署新版本'
+      return t('deployer.deploySheet.actionAllowed')
     case 'blocked':
-      return '仍然部署新身份'
+      return t('deployer.deploySheet.actionBlocked')
     default:
-      return '部署'
+      return t('deployer.deploySheet.actionDefault')
   }
 })
 
@@ -115,8 +116,8 @@ const otherWarnings = computed(() =>
   (plan.value?.warnings ?? []).filter((w) => w.code !== 'omk_key_retirement' && w.code !== 'omk_incompatible'),
 )
 
-function warningLabel(w: PlanWarning): string {
-  return WARNING_LABEL[w.code] ?? w.code
+function warningText(w: PlanWarning): string {
+  return warningLabel(w.code) ?? w.code
 }
 
 /** Honest report even when only some targets failed (`ok:false` + data). */
@@ -147,10 +148,10 @@ async function apply(): Promise<void> {
       report.value = result
       void showSnackbar({
         message: reportWrote(result)
-          ? '运行完成，建议重启手机以完全重新加载 keybox'
+          ? t('deployer.deploySheet.appliedReboot')
           : result.pending
-            ? '运行完成，新版本等待确认后部署'
-            : '运行完成，没有需要部署的新版本',
+            ? t('deployer.run.pending')
+            : t('deployer.run.unchanged'),
       })
       emit('changed')
       return
@@ -174,9 +175,9 @@ async function apply(): Promise<void> {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="部署验证后的 keybox">
+  <MiuixBottomSheet v-model="open" :title="t('deployer.deploySheet.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
@@ -185,68 +186,83 @@ async function apply(): Promise<void> {
       <div v-if="loading" class="center"><MiuixProgressIndicator /></div>
 
       <template v-else-if="loadError">
-        <MiuixText type="body1" color="var(--m-color-error)">无法读取部署计划：{{ loadError }}</MiuixText>
-        <MiuixButton @click="load">重试</MiuixButton>
+        <MiuixText type="body1" color="var(--m-color-error)">{{ t('deployer.deploySheet.loadFailed', { error: loadError }) }}</MiuixText>
+        <MiuixButton @click="load">{{ t('deployer.deploySheet.retry') }}</MiuixButton>
       </template>
 
       <template v-else-if="plan">
         <div v-if="mismatch" class="banner banner--error">
           <MiuixText type="body2" color="var(--m-color-error)">
-            暂存的 keybox 在核对后发生了变化（confirmation_mismatch），本次没有写入。计划已重新读取，请重新核对后再确认。
+            {{ t('deployer.deploySheet.mismatch') }}
           </MiuixText>
         </div>
 
         <div class="gate">
           <div class="gate__head">
             <MiuixText type="title4" weight="medium">{{ gateTitle(plan) }}</MiuixText>
-            <StatusPill :tone="gateTone(plan)" :label="gateKind === 'same' ? '幂等' : gateKind === 'first_deploy' ? '首次' : gateKind === 'allowed' ? '可部署' : '需批准'" />
+            <StatusPill
+              :tone="gateTone(plan)"
+              :label="
+                gateKind === 'same'
+                  ? t('deployer.deploySheet.pillSame')
+                  : gateKind === 'first_deploy'
+                    ? t('deployer.deploySheet.pillFirstDeploy')
+                    : gateKind === 'allowed'
+                      ? t('deployer.deploySheet.pillAllowed')
+                      : t('deployer.deploySheet.pillBlocked')
+              "
+            />
           </div>
           <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">{{ gateDetail(plan) }}</MiuixText>
         </div>
 
         <div class="transition">
           <div class="transition__side">
-            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">已部署</MiuixText>
+            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ t('deployer.deploySheet.deployedSide') }}</MiuixText>
             <span class="mono selectable">{{ shortHash(plan.old_keybox_sha256) }}</span>
             <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-              {{ plan.old_keybox_sha256 ? `有效期至 ${leafLabel(plan.old_leaf_not_after, now)}` : '无（尚未部署）' }}
+              {{
+                plan.old_keybox_sha256
+                  ? t('deployer.deploySheet.validUntil', { date: leafLabel(plan.old_leaf_not_after, now) })
+                  : t('deployer.deploySheet.noneDeployed')
+              }}
             </MiuixText>
           </div>
           <span class="transition__arrow">→</span>
           <div class="transition__side">
-            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">待部署 seq {{ plan.staged.seq }}</MiuixText>
+            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ t('deployer.deploySheet.stagedSeq', { seq: plan.staged.seq }) }}</MiuixText>
             <span class="mono selectable">{{ shortHash(plan.staged.keybox_sha256) }}</span>
             <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-              有效期至 {{ leafLabel(plan.staged.leaf_not_after, now) }}
+              {{ t('deployer.deploySheet.validUntil', { date: leafLabel(plan.staged.leaf_not_after, now) }) }}
             </MiuixText>
             <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-              {{ plan.staged.device_id }} · 暂存于 {{ stamp(plan.staged.staged_at) }}
+              {{ t('deployer.deploySheet.stagedMeta', { device: plan.staged.device_id, time: stamp(plan.staged.staged_at) }) }}
             </MiuixText>
           </div>
         </div>
 
         <div v-if="omkIncompatible" class="warn warn--danger">
-          <MiuixText type="body2" weight="medium" color="var(--m-color-error)">{{ warningLabel(omkIncompatible) }}</MiuixText>
+          <MiuixText type="body2" weight="medium" color="var(--m-color-error)">{{ warningText(omkIncompatible) }}</MiuixText>
           <MiuixText type="footnote1" color="var(--m-color-error)">{{ omkIncompatible.message }}</MiuixText>
         </div>
         <div v-if="omkWarning" class="warn warn--danger">
-          <MiuixText type="body2" weight="medium" color="var(--m-color-error)">{{ warningLabel(omkWarning) }}</MiuixText>
+          <MiuixText type="body2" weight="medium" color="var(--m-color-error)">{{ warningText(omkWarning) }}</MiuixText>
           <MiuixText type="footnote1" color="var(--m-color-error)">{{ omkWarning.message }}</MiuixText>
         </div>
         <div v-for="w in otherWarnings" :key="w.code" class="warn warn--warn">
-          <MiuixText type="body2" weight="medium" color="var(--app-warning)">{{ warningLabel(w) }}</MiuixText>
+          <MiuixText type="body2" weight="medium" color="var(--app-warning)">{{ warningText(w) }}</MiuixText>
           <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ w.message }}</MiuixText>
         </div>
 
-        <MiuixText type="title4" weight="medium">目标（只来自本地配置）</MiuixText>
-        <div v-if="!plan.targets.length" class="empty">未配置部署目标；先在“部署目标”里添加。</div>
+        <MiuixText type="title4" weight="medium">{{ t('deployer.deploySheet.targetsTitle') }}</MiuixText>
+        <div v-if="!plan.targets.length" class="empty">{{ t('deployer.deploySheet.noTargets') }}</div>
         <div v-else class="targets">
-          <div v-for="t in plan.targets" :key="t.id" class="target">
+          <div v-for="tg in plan.targets" :key="tg.id" class="target">
             <div class="target__head">
-              <span class="target__name">{{ TARGET_LABEL[t.id] ?? t.id }}</span>
-              <span class="target__meta">{{ t.owner }} · {{ t.mode }} · reload {{ t.reload }}</span>
+              <span class="target__name">{{ targetLabel(tg.id) }}</span>
+              <span class="target__meta">{{ tg.owner }} · {{ tg.mode }} · reload {{ tg.reload }}</span>
             </div>
-            <span class="target__path selectable">{{ t.path }}</span>
+            <span class="target__path selectable">{{ tg.path }}</span>
           </div>
         </div>
 
@@ -254,8 +270,8 @@ async function apply(): Promise<void> {
           <div class="sheet-group">
             <MiuixCheckboxPreference
               v-model="ackOmk"
-              title="我了解 OMK 会删除绑定旧 keybox 的客户端密钥"
-              summary="retire_stale_keybox_bound_keys（默认 true）会在 keybox 变化后让受影响应用重新生成密钥。"
+              :title="t('deployer.deploySheet.omkAckTitle')"
+              :summary="t('deployer.deploySheet.omkAckSummary')"
             />
           </div>
         </template>
@@ -266,31 +282,36 @@ async function apply(): Promise<void> {
 
         <MiuixButton type="primary" :disabled="!canApply" @click="apply">{{ actionLabel }}</MiuixButton>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          批准值绑定到上面这份 staged keybox 的内容哈希；若后台循环在确认前换了版本，本次写入会被拒绝并重新显示计划。
+          {{ t('deployer.deploySheet.approvalNote') }}
         </MiuixText>
 
         <template v-if="report">
           <div class="divider"></div>
-          <MiuixText type="title4" weight="medium">部署结果</MiuixText>
+          <MiuixText type="title4" weight="medium">{{ t('deployer.deploySheet.resultTitle') }}</MiuixText>
           <div v-if="report.pending" class="banner banner--warn">
             <MiuixText type="body2" color="var(--app-warning)">
-              未部署：seq {{ report.pending.seq }} 被暂存为待确认（{{ report.pending.reason }}），没有写入任何目标。
+              {{
+                t('deployer.deploySheet.resultPending', {
+                  seq: report.pending.seq,
+                  reason: report.pending.reason,
+                })
+              }}
             </MiuixText>
           </div>
           <MiuixText v-else type="body2" :color="report.deployed ? undefined : 'var(--m-color-error)'">
-            {{ report.deployed ? '已写入' : '未写入任何目标' }} · seq {{ report.seq }} ·
+            {{ report.deployed ? t('deployer.deploySheet.written') : t('deployer.deploySheet.notWritten') }} · seq {{ report.seq }} ·
             <span class="mono">{{ shortHash(report.keybox_sha256) }}</span>
           </MiuixText>
           <div v-if="report.targets.length" class="targets">
-            <div v-for="t in report.targets" :key="t.id" class="target">
+            <div v-for="tg in report.targets" :key="tg.id" class="target">
               <div class="target__head">
-                <span class="target__name">{{ TARGET_LABEL[t.id] ?? t.id }}</span>
-                <StatusPill :tone="t.ok ? 'ok' : 'error'" :label="t.ok ? '成功' : '失败'" />
+                <span class="target__name">{{ targetLabel(tg.id) }}</span>
+                <StatusPill :tone="tg.ok ? 'ok' : 'error'" :label="tg.ok ? t('deployer.common.ok') : t('deployer.common.failed')" />
               </div>
-              <span class="target__path selectable">{{ t.path }}</span>
-              <span class="target__meta">reload {{ t.reload }}{{ t.reload_status ? ` → ${t.reload_status}` : '' }}</span>
-              <span v-if="t.error" class="target__error">
-                {{ deployCodeLabel(t.error.code) }}（{{ t.error.code }}）：{{ t.error.message }}
+              <span class="target__path selectable">{{ tg.path }}</span>
+              <span class="target__meta">reload {{ tg.reload }}{{ tg.reload_status ? ` → ${tg.reload_status}` : '' }}</span>
+              <span v-if="tg.error" class="target__error">
+                {{ t('deployer.deploySheet.targetError', { label: deployCodeLabel(tg.error.code), code: tg.error.code, message: tg.error.message }) }}
               </span>
             </div>
           </div>

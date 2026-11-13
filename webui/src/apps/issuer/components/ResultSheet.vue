@@ -16,6 +16,7 @@ import type { IssueRunner } from '../lib/issueRunner'
 import { exitLabel, failureHint, stageLabel } from '../lib/rkp'
 import { formatDateTime, formatElapsed } from '../../../shared/lib/format'
 import { copyText } from '../../../shared/lib/clipboard'
+import { t } from '../../../shared/lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ runner: IssueRunner }>()
@@ -33,15 +34,15 @@ const title = computed(() => {
   switch (phase.value) {
     case 'starting':
     case 'running':
-      return '正在签发'
+      return t('issuer.resultSheet.titleRunning')
     case 'stale':
-      return '任务状态异常'
+      return t('issuer.resultSheet.titleStale')
     case 'launch_failed':
-      return '启动失败'
+      return t('issuer.resultSheet.titleLaunchFailed')
     case 'finished':
-      return result.value?.code === 0 ? '签发成功' : '签发失败'
+      return result.value?.code === 0 ? t('issuer.resultSheet.titleSuccess') : t('issuer.resultSheet.titleFailure')
     default:
-      return '签发'
+      return t('issuer.resultSheet.title')
   }
 })
 </script>
@@ -49,7 +50,7 @@ const title = computed(() => {
 <template>
   <MiuixBottomSheet v-model="open" :title="title">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
@@ -61,38 +62,38 @@ const title = computed(() => {
           <MiuixProgressIndicator type="infinite" :size="36" color="var(--m-color-primary)" />
           <MiuixText type="title2" class="elapsed">{{ formatElapsed(r.elapsedMs.value) }}</MiuixText>
           <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)" align="center">
-            生成密钥 → 获取挑战 → TA 签名 → 证书服务 → 写入
+            {{ t('issuer.resultSheet.steps') }}
           </MiuixText>
         </div>
         <MiuixText v-if="r.overdue.value" type="body2" color="var(--app-warning)">
-          已超过 2 分钟仍未结束，结果未知。任务仍可能在网络或 TA 超时后结束，请稍后重新打开或查看日志。
+          {{ t('issuer.resultSheet.overdue') }}
         </MiuixText>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          签发在后台独立进行，无法中途取消。可以关闭此页面，重新打开后可查看结果。
+          {{ t('issuer.resultSheet.backgroundNote') }}
         </MiuixText>
         <MiuixText v-if="r.probeError.value" type="footnote1" color="var(--m-color-error)">
-          读取任务状态失败：{{ r.probeError.value }}
+          {{ t('issuer.resultSheet.probeFailed', { error: r.probeError.value }) }}
         </MiuixText>
       </template>
 
       <!-- Stale lock -->
       <template v-else-if="phase === 'stale'">
         <MiuixText type="body2">
-          检测到超过 10 分钟的任务锁且没有结果，上次签发进程可能被系统终止。确认没有签发在进行后可以清除锁。
+          {{ t('issuer.resultSheet.staleNote') }}
         </MiuixText>
         <MiuixText v-if="r.startedAt.value" type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-          锁创建于 {{ formatDateTime(r.startedAt.value) }}
+          {{ t('issuer.resultSheet.lockCreatedAt', { time: formatDateTime(r.startedAt.value) }) }}
         </MiuixText>
-        <MiuixButton type="primary" @click="r.clearStaleLock()">清除锁</MiuixButton>
-        <MiuixButton @click="emit('logs')">查看日志</MiuixButton>
+        <MiuixButton type="primary" @click="r.clearStaleLock()">{{ t('issuer.common.clearLock') }}</MiuixButton>
+        <MiuixButton @click="emit('logs')">{{ t('issuer.resultSheet.viewLogs') }}</MiuixButton>
       </template>
 
       <!-- Launch failed -->
       <template v-else-if="phase === 'launch_failed'">
         <MiuixText type="body2">
-          后台任务没有启动（未创建任务锁）。可能是 shell 缺少 setsid/nohup，或模块 webroot 不完整。可在“更多 → 日志”的调试日志中查看详情。
+          {{ t('issuer.resultSheet.launchFailedNote') }}
         </MiuixText>
-        <MiuixButton @click="r.check()">重新检查</MiuixButton>
+        <MiuixButton @click="r.check()">{{ t('issuer.resultSheet.recheck') }}</MiuixButton>
       </template>
 
       <!-- Finished -->
@@ -100,45 +101,72 @@ const title = computed(() => {
         <div class="head">
           <StatusPill :tone="result.code === 0 ? 'ok' : 'error'" :label="exitLabel(result.code)" />
           <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-            结束于 {{ formatDateTime(result.finishedAt) }} · 退出码 {{ result.code }}
+            {{ t('issuer.resultSheet.finishedAt', { time: formatDateTime(result.finishedAt), code: result.code }) }}
           </MiuixText>
         </div>
 
         <div v-if="success" class="sheet-group">
-          <MiuixBasicComponent title="叶子证书" :summary="success.leaf_subject || '（无 CN）'" />
-          <MiuixBasicComponent title="有效期至" :summary="formatDateTime(success.leaf_not_after)" />
-          <MiuixBasicComponent title="证书链" :summary="`${success.chain_certificates} 张`" />
-          <MiuixBasicComponent title="Device ID" :summary="success.device_id" clickable @click="copyText(success.device_id, ' Device ID')">
+          <MiuixBasicComponent :title="t('issuer.resultSheet.leaf')" :summary="success.leaf_subject || t('issuer.resultSheet.noCn')" />
+          <MiuixBasicComponent
+            :title="t('issuer.resultSheet.validUntil')"
+            :summary="formatDateTime(success.leaf_not_after)"
+          />
+          <MiuixBasicComponent
+            :title="t('issuer.resultSheet.chain')"
+            :summary="t('issuer.resultSheet.chainCount', success.chain_certificates)"
+          />
+          <MiuixBasicComponent
+            title="Device ID"
+            :summary="success.device_id"
+            clickable
+            @click="copyText(success.device_id, t('issuer.resultSheet.copyDeviceId'))"
+          >
             <template #end><MiuixIcon :icon="Copy" :size="20" color="var(--m-color-on-surface-variant-actions)" /></template>
           </MiuixBasicComponent>
-          <MiuixBasicComponent title="TA" :summary="`status ${success.ta_status} · 帧 ${success.frame_layout} · CSR ${success.csr_len} 字节`" />
+          <MiuixBasicComponent
+            title="TA"
+            :summary="
+              t('issuer.resultSheet.ta', {
+                status: success.ta_status,
+                frame: success.frame_layout,
+                csr: success.csr_len,
+              })
+            "
+          />
           <MiuixBasicComponent title="keybox" :summary="success.keybox" />
         </div>
 
         <template v-else-if="failure">
           <div class="sheet-group">
-            <MiuixBasicComponent title="阶段" :summary="`${stageLabel(failure.stage)}（${failure.stage}）`" />
-            <MiuixBasicComponent title="错误码" :summary="failure.code" />
-            <MiuixBasicComponent title="信息" :summary="failure.message" />
-            <MiuixBasicComponent v-if="failure.ta_status !== undefined" title="ta_status" :summary="String(failure.ta_status)" />
+            <MiuixBasicComponent
+              :title="t('issuer.resultSheet.stage')"
+              :summary="t('issuer.resultSheet.stageValue', { stage: stageLabel(failure.stage), code: failure.stage })"
+            />
+            <MiuixBasicComponent :title="t('issuer.resultSheet.errorCode')" :summary="failure.code" />
+            <MiuixBasicComponent :title="t('issuer.resultSheet.message')" :summary="failure.message" />
+            <MiuixBasicComponent
+              v-if="failure.ta_status !== undefined"
+              title="ta_status"
+              :summary="String(failure.ta_status)"
+            />
           </div>
           <MiuixText v-if="hint" type="body2" color="var(--m-color-on-surface-variant-summary)">{{ hint }}</MiuixText>
         </template>
 
         <MiuixText v-else type="body2" color="var(--m-color-on-surface-variant-summary)">
-          进程没有输出结果（可能被系统终止）。请查看下方错误输出与日志。
+          {{ t('issuer.resultSheet.noOutput') }}
         </MiuixText>
 
         <MiuixText v-if="result.code !== 0" type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          签发失败时不会替换原有 keybox。
+          {{ t('issuer.resultSheet.noReplace') }}
         </MiuixText>
 
         <div class="sheet-group">
           <FoldBlock v-if="failure?.head_hex" title="head_hex" :text="failure.head_hex" />
-          <FoldBlock title="错误输出（stderr）" :text="result.stderr.trim()" />
-          <FoldBlock title="原始输出（stdout）" :text="result.stdout.trim()" />
+          <FoldBlock :title="t('issuer.resultSheet.stderr')" :text="result.stderr.trim()" />
+          <FoldBlock :title="t('issuer.resultSheet.stdout')" :text="result.stdout.trim()" />
         </div>
-        <MiuixButton @click="emit('logs')">查看签发日志</MiuixButton>
+        <MiuixButton @click="emit('logs')">{{ t('issuer.resultSheet.viewIssueLogs') }}</MiuixButton>
       </template>
     </div>
   </MiuixBottomSheet>

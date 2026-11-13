@@ -2,6 +2,7 @@ import { appConfig } from '@app-config'
 import { exec } from '../../../shared/lib/ksu'
 import { CommandError, SAFE_PATH, parseLastJsonLine, resolveModuleDir } from '../../../shared/lib/command'
 import { daysLeft, nowUnix } from '../../../shared/lib/format'
+import { t, tCode, type MessageKey } from '../../../shared/lib/i18n'
 import { ICON_CHECK_CIRCLE, ICON_ERROR, ICON_HELP, ICON_WARNING } from '../../../shared/lib/icons'
 
 // ---- Paths ------------------------------------------------------------------
@@ -107,7 +108,7 @@ export async function readStatus(updateDescription = false): Promise<StatusData>
   const flags = updateDescription ? ' --update-description' : ''
   const r = await run(`'${BIN}' status --json${flags}`)
   if (r.errno !== 0) {
-    throw new CommandError('exit', `退出码 ${r.errno}`, (r.stderr || r.stdout).trim())
+    throw new CommandError('exit', t('issuer.rkp.exitCode', { code: r.errno }), (r.stderr || r.stdout).trim())
   }
   const env = parseLastJsonLine<Envelope<StatusData>>(r.stdout)
   if (!env.ok) throw new CommandError('exit', env.error.message, JSON.stringify(env.error))
@@ -117,24 +118,24 @@ export async function readStatus(updateDescription = false): Promise<StatusData>
 /** Last persisted status.json; read-only, safe while an issuance is running. */
 export async function readCachedStatus(): Promise<StatusData> {
   const r = await run(`cat '${STATUS_JSON}'`)
-  if (r.errno !== 0) throw new CommandError('exit', '尚无缓存的状态', r.stderr.trim())
+  if (r.errno !== 0) throw new CommandError('exit', t('issuer.rkp.noCachedStatus'), r.stderr.trim())
   try {
     return JSON.parse(r.stdout) as StatusData
   } catch {
-    throw new CommandError('parse', 'status.json 解析失败', r.stdout.slice(0, 400))
+    throw new CommandError('parse', t('issuer.rkp.parseFailed'), r.stdout.slice(0, 400))
   }
 }
 
 /** `rkp-mini-issuer --version` prints `rkp-mini-issuer 0.2.0`; keep the version only. */
 export async function readVersion(): Promise<string> {
   const r = await run(`'${BIN}' --version`)
-  if (r.errno !== 0) throw new CommandError('exit', `退出码 ${r.errno}`, r.stderr.trim())
+  if (r.errno !== 0) throw new CommandError('exit', t('issuer.rkp.exitCode', { code: r.errno }), r.stderr.trim())
   return r.stdout.trim().split(/\s+/).pop() ?? ''
 }
 
 export async function readConfig(): Promise<string> {
   const r = await run(`cat '${CONFIG}'`)
-  if (r.errno !== 0) throw new CommandError('exit', '配置文件不存在，使用内置默认值', r.stderr.trim())
+  if (r.errno !== 0) throw new CommandError('exit', t('issuer.rkp.configMissing'), r.stderr.trim())
   return r.stdout
 }
 
@@ -150,9 +151,9 @@ export async function listLogs(): Promise<string[]> {
 }
 
 export async function readLog(name: string): Promise<string> {
-  if (!LOG_NAME.test(name)) throw new CommandError('exec', `非法日志名：${name}`)
+  if (!LOG_NAME.test(name)) throw new CommandError('exec', t('issuer.rkp.badLogName', { name }))
   const r = await run(`tail -n 200 '${LOGS}/${name}'`)
-  if (r.errno !== 0) throw new CommandError('exit', `读取失败（${r.errno}）`, r.stderr.trim())
+  if (r.errno !== 0) throw new CommandError('exit', t('issuer.rkp.readFailed', { code: r.errno }), r.stderr.trim())
   return r.stdout
 }
 
@@ -162,13 +163,17 @@ const SEP = '<<<RKP-SEP>>>'
 /** C1: only key the issuer lets the page set; 0 = off, 365 = max. */
 export async function setAutoIssueDays(days: number): Promise<number> {
   if (!Number.isInteger(days) || days < 0 || days > AUTO_MAX_DAYS) {
-    throw new CommandError('exec', `天数必须是 0–${AUTO_MAX_DAYS} 的整数`)
+    throw new CommandError('exec', t('issuer.rkp.daysRangeZero', { max: AUTO_MAX_DAYS }))
   }
   const r = await run(`'${BIN}' config set auto_issue_days ${days} --json`)
-  if (r.errno !== 0 && !r.stdout.trim()) throw new CommandError('exit', `退出码 ${r.errno}`, r.stderr.trim())
+  if (r.errno !== 0 && !r.stdout.trim()) throw new CommandError('exit', t('issuer.rkp.exitCode', { code: r.errno }), r.stderr.trim())
   const env = parseLastJsonLine<Envelope<{ auto_issue_days: number }>>(r.stdout)
   if (!env.ok) {
-    throw new CommandError('exit', `${stageLabel(env.error.stage)}：${env.error.message}`, JSON.stringify(env.error))
+    throw new CommandError(
+      'exit',
+      t('issuer.rkp.stageMessage', { stage: stageLabel(env.error.stage), message: env.error.message }),
+      JSON.stringify(env.error),
+    )
   }
   return env.data.auto_issue_days
 }
@@ -176,11 +181,15 @@ export async function setAutoIssueDays(days: number): Promise<number> {
 /** Delete the issued keybox and its artifacts (`remove --yes`); refused while an issuance holds issue.lock. */
 export async function removeKeybox(): Promise<{ removed: string[]; output_dir: string }> {
   const r = await run(`'${BIN}' remove --yes --json`)
-  if (r.errno !== 0 && !r.stdout.trim()) throw new CommandError('exit', `退出码 ${r.errno}`, r.stderr.trim())
+  if (r.errno !== 0 && !r.stdout.trim()) throw new CommandError('exit', t('issuer.rkp.exitCode', { code: r.errno }), r.stderr.trim())
   const env = parseLastJsonLine<Envelope<{ removed: string[]; output_dir: string }>>(r.stdout)
   if (!env.ok) {
-    const label = env.error.code === 'issue_running' ? '签发进行中，请稍后再试' : env.error.message
-    throw new CommandError('exit', `${stageLabel(env.error.stage)}：${label}`, JSON.stringify(env.error))
+    const label = env.error.code === 'issue_running' ? t('issuer.rkp.issueRunning') : env.error.message
+    throw new CommandError(
+      'exit',
+      t('issuer.rkp.stageMessage', { stage: stageLabel(env.error.stage), message: label }),
+      JSON.stringify(env.error),
+    )
   }
   return env.data
 }
@@ -231,7 +240,7 @@ export interface ModuleProp {
 
 export async function readModuleProp(): Promise<ModuleProp> {
   const r = await run(`cat '${MODULE_DIR}/module.prop'`)
-  if (r.errno !== 0) throw new CommandError('exit', `读取失败（${r.errno}）`, r.stderr.trim())
+  if (r.errno !== 0) throw new CommandError('exit', t('issuer.rkp.readFailed', { code: r.errno }), r.stderr.trim())
   const get = (key: string) => new RegExp(`^${key}=(.*)$`, 'm').exec(r.stdout)?.[1]?.trim() ?? '?'
   return { version: get('version'), versionCode: get('versionCode') }
 }
@@ -257,12 +266,12 @@ export function keyboxState(k: KeyboxInfo, now = nowUnix()): KeyboxState {
   return 'valid'
 }
 
-export const KEYBOX_STATE_LABEL: Record<KeyboxState, string> = {
-  valid: '有效',
-  expiring: '即将过期',
-  expired: '已过期',
-  invalid: '无效',
-  missing: '未签发',
+export const KEYBOX_STATE_LABEL: Record<KeyboxState, MessageKey> = {
+  valid: 'issuer.rkp.keyboxState.valid',
+  expiring: 'issuer.rkp.keyboxState.expiring',
+  expired: 'issuer.rkp.keyboxState.expired',
+  invalid: 'issuer.rkp.keyboxState.invalid',
+  missing: 'issuer.rkp.keyboxState.missing',
 }
 
 /** Accent colour (CSS value) and icon path (shared/lib/icons.ts) per state. */
@@ -274,71 +283,53 @@ export const KEYBOX_STATE_VISUAL: Record<KeyboxState, { color: string; icon: str
   missing: { color: 'var(--m-color-on-surface-variant-actions)', icon: ICON_HELP },
 }
 
-const BLOCKER_LABEL: Record<string, string> = {
-  android_arm64_required: '需要 Android arm64 设备',
-  root_required: '需要 root 权限',
-  qualcomm_required: '仅支持高通平台',
-  soc_unknown: '无法识别 SoC 厂商',
-  soc_conflicting: 'SoC 识别结果互相矛盾',
-  keymint_library_missing: '缺少 /vendor/lib64/libkeymasterdeviceutils.so',
-  smcinvoke_missing: '缺少 /dev/smcinvoke',
-  fingerprint_missing: '读取不到系统指纹',
-}
-
 export function blockerLabel(code: string): string {
-  return BLOCKER_LABEL[code] ?? `前置条件不满足（${code}）`
-}
-
-const STAGE_LABEL: Record<string, string> = {
-  config: '配置',
-  prereq: '前置条件',
-  challenge: '获取挑战',
-  server: '证书服务',
-  ta: 'TA 签名',
-  csr: 'CSR 校验',
-  chain: '证书链',
-  write: '写入',
-  generic: '其他',
+  return tCode(`issuer.rkp.blocker.${code}`) ?? t('issuer.rkp.blockerUnknown', { code })
 }
 
 export function stageLabel(stage: string): string {
-  return STAGE_LABEL[stage] ?? stage
+  return tCode(`issuer.rkp.stage.${stage}`) ?? stage
 }
 
-const EXIT_LABEL: Record<number, string> = {
-  0: '已签发',
-  1: '未知错误',
-  2: '配置/用法错误',
-  3: '前置条件不满足',
-  4: '网络或服务端失败（HTTP）',
-  5: '设备 TA 签名或 CSR 校验失败',
-  6: '证书链校验失败',
-  7: '写入文件失败',
+const EXIT_LABEL: Record<number, MessageKey> = {
+  0: 'issuer.rkp.exit.ok',
+  1: 'issuer.rkp.exit.unknown',
+  2: 'issuer.rkp.exit.usage',
+  3: 'issuer.rkp.exit.prereq',
+  4: 'issuer.rkp.exit.http',
+  5: 'issuer.rkp.exit.ta',
+  6: 'issuer.rkp.exit.chain',
+  7: 'issuer.rkp.exit.write',
 }
 
 export function exitLabel(code: number): string {
-  return EXIT_LABEL[code] ?? `异常退出（${code}）`
+  return EXIT_LABEL[code] ? t(EXIT_LABEL[code]) : t('issuer.rkp.exitUnknown', { code })
+}
+
+/** Storage provider name for a `provider` code from a sync envelope. */
+export function providerLabel(code: string): string {
+  return tCode(`issuer.common.provider.${code}`) ?? code
 }
 
 /** Actionable explanation for known failure signatures (README go/no-go list). */
 export function failureHint(e: IssueFailure): string | null {
-  if (e.code === 'device_not_registered') return '设备未在 Google RKP 注册（HTTP 444），无法通过本模块解决。'
-  if (e.ta_status === -100) return 'TA 未实现该命令（UNIMPLEMENTED），当前固件不支持 Native V2。'
-  if (e.ta_status === -18) return 'TA 要求 MacedPublicKey（INCOMPATIBLE_KEY_FORMAT），当前固件不支持 Native V2。'
-  if (e.ta_status === -40) return '厂商命令或帧格式不匹配（INVALID_TAG）。'
-  if (e.code === 'ta_timeout') return 'TA 调用超时，可在配置中调大 ta_timeout_seconds 后重试。'
+  if (e.code === 'device_not_registered') return t('issuer.rkp.hint.deviceNotRegistered')
+  if (e.ta_status === -100) return t('issuer.rkp.hint.taUnimplemented')
+  if (e.ta_status === -18) return t('issuer.rkp.hint.taIncompatible')
+  if (e.ta_status === -40) return t('issuer.rkp.hint.taInvalidTag')
+  if (e.code === 'ta_timeout') return t('issuer.rkp.hint.taTimeout')
   switch (e.stage) {
     case 'challenge':
     case 'server':
-      return '请检查网络或 proxy 配置后重试。'
+      return t('issuer.rkp.hint.networkOrProxy')
     case 'prereq':
-      return '请查看“环境检查”中未通过的项目。'
+      return t('issuer.rkp.hint.prereq')
     case 'chain':
-      return '服务端返回的证书链未通过本地校验。'
+      return t('issuer.rkp.hint.chain')
     case 'write':
-      return '写入失败，请检查存储空间与 SELinux（dmesg | grep avc）。'
+      return t('issuer.rkp.hint.write')
     case 'config':
-      return '请检查 config.toml。'
+      return t('issuer.rkp.hint.config')
     default:
       return null
   }

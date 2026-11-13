@@ -4,7 +4,8 @@
 // deploy result. Read-only: management lives in 部署设置.
 import { computed } from 'vue'
 import { MiuixBasicComponent, MiuixCard, MiuixProgressIndicator } from 'miuix-vue'
-import { TARGET_LABEL, type SyncStatus, type TargetState } from '../../../shared/lib/sync'
+import { targetLabel, type SyncStatus, type TargetState } from '../../../shared/lib/sync'
+import { t } from '../../../shared/lib/i18n'
 import type { BuiltinTargetInfo } from '../lib/deploy'
 import { deployCodeLabel } from '../lib/display'
 
@@ -32,15 +33,18 @@ const results = computed(
 const rows = computed(() =>
   installed.value.map((b) => {
     const state = results.value.get(b.id)
-    const parts = [b.module.enabled ? '已启用' : '已停用', configured.value.has(b.id) ? '部署目标' : '未配置为部署目标']
+    const parts = [
+      b.module.enabled ? t('deployer.common.enabled') : t('deployer.modules.stopped'),
+      configured.value.has(b.id) ? t('deployer.common.deployTargets') : t('deployer.modules.notTarget'),
+    ]
     const path = state?.path ?? configured.value.get(b.id)
     if (path) parts.push(path)
-    if (state?.last_error) parts.push(`上次部署失败：${deployCodeLabel(state.last_error.code)}`)
-    else if (state?.deployed_sha256) parts.push('已部署 keybox')
-    else if (configured.value.has(b.id)) parts.push('尚未部署 keybox')
+    if (state?.last_error) parts.push(t('deployer.modules.lastFailed', { reason: deployCodeLabel(state.last_error.code) }))
+    else if (state?.deployed_sha256) parts.push(t('deployer.common.deployedKeybox'))
+    else if (configured.value.has(b.id)) parts.push(t('deployer.common.notDeployedKeybox'))
     return {
       id: b.id,
-      title: TARGET_LABEL[b.id] ?? b.id,
+      title: targetLabel(b.id),
       summary: parts.join(' · '),
       bad: !!state?.last_error,
     }
@@ -50,18 +54,18 @@ const rows = computed(() =>
 
 <template>
   <MiuixCard>
-    <MiuixBasicComponent v-if="loading && builtins === null" title="正在检测模块…">
+    <MiuixBasicComponent v-if="loading && builtins === null" :title="t('deployer.modules.detecting')">
       <template #end><MiuixProgressIndicator type="infinite" :size="20" /></template>
     </MiuixBasicComponent>
     <MiuixBasicComponent
       v-else-if="builtins === null"
-      title="模块检测失败"
-      :summary="error ?? '未知错误'"
+      :title="t('deployer.modules.detectFailed')"
+      :summary="error ?? t('deployer.modules.unknownError')"
       summary-color="var(--m-color-error)"
     />
     <MiuixBasicComponent
       v-else-if="!installed.length"
-      title="未检测到受支持的模块"
+      :title="t('deployer.modules.noneInstalled')"
       summary="OhMyKeymint / TEESimulator / TrickyStore"
     />
     <template v-else>

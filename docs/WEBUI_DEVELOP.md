@@ -528,6 +528,21 @@ TEESimulator 可指定 `/data/adb/teesim` 下的 `.xml` 文件名，默认 `keyb
 - 运行中离开页面前给出提示文案；重新进入时按 4.4 恢复。
 - 所有长文本（`head_hex`、日志）放可折叠区域，默认收起。
 
+### 7.6 多语言（i18n）
+
+- 框架：`vue-i18n@11`（Composition 模式，`legacy: false`；`vite.config.ts` 关闭 legacy API 与生产 devtools）。消息在运行时由 JIT 编译成 AST 解释执行，实测生产包不含 `eval`/`new Function`，CSP 不变。
+- 语言：`zh-CN`（源语言）、`zh-TW`、`en`、`ja`、`ko`、`de`、`fr`、`it`。消息树三棵：`src/shared/locales/`（键 `shared.*`）、
+  `src/apps/issuer/locales/`（`issuer.*`）、`src/apps/deployer/locales/`（`deployer.*`）；每个应用包只按需加载 `shared` + 自己那棵，各语言单独分块懒加载。
+- 默认语言：`navigator.languages` 依次匹配（`zh-TW/HK/MO/Hant` → 繁体，其余 `zh*` → 简体，其他按主语言前缀），都不匹配时 `en`。“更多 → 外观 → 语言”可手动选择，
+  存 `localStorage['rkp.locale']`；选“跟随系统”即删除该键。缺失的键回退 `zh-CN`；语言包加载失败时停留在 `zh-CN`，不白屏。
+- API（`src/shared/lib/i18n.ts`）：`t(key, params?, count?)` 键名有类型，未知键 `vue-tsc` 报错；`tCode(key)` 用于由机器码拼出的键（`shared.sync.code.<code>`），
+  源语言没有该键时返回 `undefined`，调用方显示原始 code；`MessageKey` 用于常量表；`currentLocale()` 供 `Intl` 使用（`formatAgo` 用 `Intl.RelativeTimeFormat`）。
+- 约定：非源语言文件写 `satisfies typeof zhCN`，缺键/多键都会 `vue-tsc` 失败。不在模块顶层调用 `t()`（切换语言要即时生效）；整句一个键、用命名参数，不拼接翻译片段；
+  计数参数一律叫 `{n}` 并以 `t(key, count)` 调用，`en/de/fr/it` 可写 `单数 | 复数` 两种形式（法语 0 与 1 取单数）。消息中的 `{ } @ $ |` 是语法字符，字面量写 `{'|'}`。
+- 不翻译：二进制输出的文本（`status.description`、`error.message`）、`dev/` 下的 mock 与 fixture、调试日志。风险说明只来自 `rkp-mini-sync risk`（`zh`/`en` 两种）：
+  中文界面显示 `zh` 并附 `en`，其他语言界面只显示 `en`，不在 WebUI 里另行翻译。
+- 新增文案：先加到对应 `zh-CN.ts`，再给其余 7 个语言文件补同一个键，`bun run build` 通过即键名一致。
+
 ---
 
 ## 8. bridge 封装

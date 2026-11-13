@@ -3,6 +3,7 @@
 import { moduleInfo } from 'kernelsu'
 import { appConfig } from '@app-config'
 import { hasKsu } from './ksu'
+import { t } from './i18n'
 
 /** exec: bridge failed or timed out; exit: non-zero exit; parse: stdout not a JSON envelope. */
 export type CommandErrorKind = 'exec' | 'exit' | 'parse'
@@ -40,10 +41,10 @@ export function parseLastJsonLine<T>(stdout: string): T {
     .map((l) => l.trim())
     .filter(Boolean)
     .pop()
-  if (!line) throw new CommandError('parse', '没有输出', stdout)
+  if (!line) throw new CommandError('parse', t('shared.command.noOutput'), stdout)
   try {
     return JSON.parse(line) as T
   } catch {
-    throw new CommandError('parse', 'JSON 解析失败', line)
+    throw new CommandError('parse', t('shared.command.jsonParseFailed'), line)
   }
 }

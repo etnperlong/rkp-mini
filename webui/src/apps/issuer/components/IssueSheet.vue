@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { MiuixBottomSheet, MiuixButton, MiuixCheckboxPreference, MiuixIcon, MiuixIconButton, MiuixText } from 'miuix-vue'
 import { Close } from 'miuix-vue/icons'
+import { t, type MessageKey } from '../../../shared/lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ keyboxPath: string; hasKeybox: boolean }>()
@@ -19,17 +20,13 @@ function confirm(): void {
   emit('confirm')
 }
 
-const points = [
-  '每次签发都会生成全新的 P-256 密钥，由设备 KeyMint TA（Native V2，0x3122）签名 CSR，再向 Google RKP 服务申请证书。',
-  '需要联网，通常几秒到一分钟。签发在后台进行，可以离开此页面。',
-  '失败不会影响现有证书；签发成功也不保证通过 Play Integrity。',
-]
+const points: MessageKey[] = ['issuer.issueSheet.point1', 'issuer.issueSheet.point2', 'issuer.issueSheet.point3']
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="签发新证书">
+  <MiuixBottomSheet v-model="open" :title="t('issuer.issueSheet.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
@@ -37,20 +34,20 @@ const points = [
     <div class="sheet-body">
       <ul class="points">
         <li v-for="p in points" :key="p">
-          <MiuixText type="body2">{{ p }}</MiuixText>
+          <MiuixText type="body2">{{ t(p) }}</MiuixText>
         </li>
         <li>
           <MiuixText type="body2">
-            成功后保存到 <code>{{ props.keyboxPath }}</code>{{ props.hasKeybox ? '，旧文件备份为 keybox.xml.prev' : '' }}。
+            {{ t('issuer.issueSheet.savedPrefix') }}<code>{{ props.keyboxPath }}</code>{{ t(props.hasKeybox ? 'issuer.issueSheet.savedBackup' : 'issuer.issueSheet.savedEnd') }}
           </MiuixText>
         </li>
       </ul>
 
       <div class="sheet-group">
-        <MiuixCheckboxPreference v-model="acknowledged" title="我已了解，确认签发" />
+        <MiuixCheckboxPreference v-model="acknowledged" :title="t('issuer.issueSheet.acknowledge')" />
       </div>
 
-      <MiuixButton type="primary" :disabled="!acknowledged" @click="confirm">开始签发</MiuixButton>
+      <MiuixButton type="primary" :disabled="!acknowledged" @click="confirm">{{ t('issuer.issueSheet.start') }}</MiuixButton>
     </div>
   </MiuixBottomSheet>
 </template>

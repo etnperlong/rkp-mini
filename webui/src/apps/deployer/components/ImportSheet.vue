@@ -13,6 +13,7 @@ import {
 } from 'miuix-vue'
 import { Close } from 'miuix-vue/icons'
 import ReceiverField from './ReceiverField.vue'
+import { t } from '../../../shared/lib/i18n'
 import { errorMessage, providerLabel } from '../lib/display'
 import {
   importApply,
@@ -87,7 +88,7 @@ async function apply(): Promise<void> {
   try {
     result.value = await importApply(checkedInput.value)
     emit('imported', result.value)
-    void showSnackbar({ message: '已保存同步位置；远端数据尚未下载' })
+    void showSnackbar({ message: t('deployer.importSheet.saved') })
   } catch (e) {
     error.value = errorMessage(e)
   } finally {
@@ -99,15 +100,15 @@ function locationRows(loc: LocationInfo): { label: string; value: string }[] {
   switch (loc.provider) {
     case 'gist':
       return [
-        { label: '最新版直链', value: loc.url ?? '未提供（需要 gist_id 解析）' },
+        { label: t('deployer.importSheet.urlLabel'), value: loc.url ?? t('deployer.importSheet.urlMissing') },
         { label: 'Gist ID', value: loc.gist_id ?? '—' },
-        { label: '文件名', value: loc.filename },
+        { label: t('deployer.importSheet.fileName'), value: loc.filename },
       ]
     case 'webdav':
       return [
         { label: 'Endpoint', value: loc.endpoint },
-        { label: '路径', value: loc.path },
-        { label: '用户名', value: loc.user ?? '匿名' },
+        { label: t('deployer.importSheet.path'), value: loc.path },
+        { label: t('deployer.importSheet.user'), value: loc.user ?? t('deployer.importSheet.anonymous') },
       ]
     case 'url':
       return [{ label: 'URL', value: loc.url }]
@@ -122,22 +123,22 @@ const webdavUser = computed(() => {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="导入同步链接">
+  <MiuixBottomSheet v-model="open" :title="t('deployer.importSheet.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
 
     <div class="sheet-body">
       <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-        粘贴发送端分享的 rkpsync:// 链接或其 JSON。链接只包含存储位置，不包含密码；密码另行设置。
+        {{ t('deployer.importSheet.intro') }}
       </MiuixText>
 
       <div class="sheet-group">
         <ReceiverField
           v-model="input"
-          label="同步链接或 JSON"
+          :label="t('deployer.importSheet.inputLabel')"
           placeholder="rkpsync://v1/import?p=…"
           :multiline="true"
           :rows="4"
@@ -147,7 +148,7 @@ const webdavUser = computed(() => {
       </div>
 
       <MiuixButton type="primary" :disabled="checking || applying || !input.trim()" @click="check">
-        {{ checking ? '检查中…' : '检查' }}
+        {{ checking ? t('deployer.importSheet.checking') : t('deployer.importSheet.check') }}
       </MiuixButton>
 
       <MiuixText v-if="error" type="footnote1" color="var(--m-color-error)">{{ error }}</MiuixText>
@@ -155,17 +156,17 @@ const webdavUser = computed(() => {
       <template v-if="preview">
         <div class="preview">
           <div class="preview__head">
-            <MiuixText type="title4" weight="medium">解码结果（尚未写入）</MiuixText>
+            <MiuixText type="title4" weight="medium">{{ t('deployer.importSheet.previewTitle') }}</MiuixText>
             <MiuixText type="button" color="var(--m-color-primary)">{{ providerLabel(preview.location.provider) }}</MiuixText>
           </div>
 
           <div class="rows">
             <div class="row">
-              <span class="row__k">同步流</span>
+              <span class="row__k">{{ t('deployer.common.stream') }}</span>
               <span class="row__v selectable">{{ preview.stream_id }}</span>
             </div>
             <div v-if="preview.label" class="row">
-              <span class="row__k">标签</span>
+              <span class="row__k">{{ t('deployer.importSheet.label') }}</span>
               <span class="row__v selectable">{{ preview.label }}</span>
             </div>
             <div v-for="r in rows" :key="r.label" class="row row--stack">
@@ -176,17 +177,22 @@ const webdavUser = computed(() => {
 
           <div v-if="preview.blocked" class="banner banner--error">
             <MiuixText type="body2" color="var(--m-color-error)">
-              本地已跟随另一个同步流并验证到 seq {{ preview.verified_seq ?? 0 }}，不能直接导入。请先在部署设置中“清除本地数据”后重试。
+              {{ t('deployer.importSheet.blocked', { seq: preview.verified_seq ?? 0 }) }}
             </MiuixText>
           </div>
           <div v-else-if="preview.stream_change" class="banner banner--warn">
             <MiuixText type="body2" color="var(--app-warning)">
-              将更换同步流：{{ preview.current_stream_id ?? '未配置' }} → {{ preview.stream_id }}。本地尚无已验证版本，可以继续。
+              {{
+                t('deployer.importSheet.streamChange', {
+                  from: preview.current_stream_id ?? t('deployer.importSheet.unconfigured'),
+                  to: preview.stream_id,
+                })
+              }}
             </MiuixText>
           </div>
           <div v-else-if="preview.current_stream_id" class="banner banner--info">
             <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-              与当前同步流相同，可用于更换存储位置；已验证版本会保留。
+              {{ t('deployer.importSheet.sameStream') }}
             </MiuixText>
           </div>
 
@@ -195,31 +201,31 @@ const webdavUser = computed(() => {
             :disabled="applying || preview.blocked"
             @click="apply"
           >
-            {{ applying ? '导入中…' : '确认导入' }}
+            {{ applying ? t('deployer.importSheet.applying') : t('deployer.importSheet.apply') }}
           </MiuixButton>
           <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-            导入只保存位置信息；还需要风险确认与密码，并在“部署”页完成首次 TOFU 核对后才会有 keybox。
+            {{ t('deployer.importSheet.applyNote') }}
           </MiuixText>
         </div>
       </template>
 
       <template v-if="result">
         <div class="divider"></div>
-        <MiuixText type="title4" weight="medium">下一步</MiuixText>
+        <MiuixText type="title4" weight="medium">{{ t('deployer.importSheet.next') }}</MiuixText>
         <ul class="notes">
           <li v-for="note in result.notes" :key="note">{{ note }}</li>
         </ul>
         <div class="sheet-group">
-          <MiuixButton v-if="!result.enabled" type="primary" @click="emit('risk')">接受风险并启用同步</MiuixButton>
+          <MiuixButton v-if="!result.enabled" type="primary" @click="emit('risk')">{{ t('deployer.importSheet.risk') }}</MiuixButton>
           <MiuixButton :type="result.enabled ? 'primary' : 'default'" @click="emit('secret', 'age')">
-            设置 / 更换密码
+            {{ t('deployer.importSheet.setPassword') }}
           </MiuixButton>
-          <MiuixButton v-if="webdavUser" @click="emit('secret', 'webdav-password')">设置 WebDAV 应用密码</MiuixButton>
+          <MiuixButton v-if="webdavUser" @click="emit('secret', 'webdav-password')">{{ t('deployer.importSheet.setWebdav') }}</MiuixButton>
         </div>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          密码必须通过另一个安全渠道从发送端获得；不要把它放进链接、二维码或聊天记录。
+          {{ t('deployer.importSheet.passwordNote') }}
         </MiuixText>
-        <MiuixButton @click="open = false">完成</MiuixButton>
+        <MiuixButton @click="open = false">{{ t('deployer.importSheet.done') }}</MiuixButton>
       </template>
     </div>
   </MiuixBottomSheet>

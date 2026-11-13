@@ -9,6 +9,7 @@ import { CommandError } from '../../../shared/lib/command'
 import type { IssueRunner } from '../lib/issueRunner'
 import { KEYBOX_STATE_LABEL, KEYBOX_STATE_VISUAL, keyboxState, type StatusData } from '../lib/rkp'
 import { daysLeft, formatAgo, formatDateTime, formatElapsed } from '../../../shared/lib/format'
+import { t, type MessageKey } from '../../../shared/lib/i18n'
 
 const props = defineProps<{
   status: StatusData | null
@@ -22,10 +23,10 @@ const props = defineProps<{
 
 const emit = defineEmits<{ detail: []; refresh: [] }>()
 
-const ERROR_KIND: Record<CommandError['kind'], string> = {
-  exec: '无法执行命令',
-  exit: '命令返回错误',
-  parse: '输出无法解析',
+const ERROR_KIND: Record<CommandError['kind'], MessageKey> = {
+  exec: 'issuer.statusCard.kind.exec',
+  exit: 'issuer.statusCard.kind.exit',
+  parse: 'issuer.statusCard.kind.parse',
 }
 
 const r = props.runner
@@ -35,8 +36,11 @@ const days = computed(() => (kb.value?.not_after != null ? daysLeft(kb.value.not
 
 /** Same corner as the issue/sync cards: state label, or the running issuance. */
 const cornerText = computed(() => {
-  if (r.busy.value) return `签发中 ${formatElapsed(r.elapsedMs.value)}${r.overdue.value ? ' · 结果未知' : ''}`
-  return state.value ? KEYBOX_STATE_LABEL[state.value] : '读取失败'
+  if (r.busy.value)
+    return r.overdue.value
+      ? t('issuer.statusCard.runningOverdue', { elapsed: formatElapsed(r.elapsedMs.value) })
+      : t('issuer.statusCard.running', { elapsed: formatElapsed(r.elapsedMs.value) })
+  return state.value ? t(KEYBOX_STATE_LABEL[state.value]) : t('issuer.statusCard.readStateFailed')
 })
 </script>
 
@@ -52,7 +56,7 @@ const cornerText = computed(() => {
     <SvgIcon v-if="state" class="status__mark" :path="KEYBOX_STATE_VISUAL[state].icon" :color="KEYBOX_STATE_VISUAL[state].color" />
     <div class="status">
       <div class="status__head">
-        <MiuixText type="title4" weight="medium">证书状态</MiuixText>
+        <MiuixText type="title4" weight="medium">{{ t('issuer.statusCard.title') }}</MiuixText>
         <MiuixProgressIndicator v-if="loading && !status" type="infinite" :size="18" />
         <!-- Corner status doubles as the refresh control (re-reads status and the sync status). -->
         <CardStateButton
@@ -66,20 +70,30 @@ const cornerText = computed(() => {
 
       <!-- Read failure with no data to fall back on -->
       <div v-if="error && !status" class="warnings">
-        <MiuixText type="body2" color="var(--m-color-error)">读取状态失败：{{ ERROR_KIND[error.kind] }}</MiuixText>
+        <MiuixText type="body2" color="var(--m-color-error)">
+          {{ t('issuer.statusCard.readFailed', { kind: t(ERROR_KIND[error.kind]) }) }}
+        </MiuixText>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ error.message }}</MiuixText>
       </div>
 
       <template v-else-if="status && kb && state">
         <div v-if="state === 'valid' || state === 'expiring'" class="status__hero">
           <span class="status__days">{{ days }}</span>
-          <MiuixText type="body1">天后过期</MiuixText>
+          <MiuixText type="body1">{{ t('issuer.statusCard.daysLeft', days ?? 0) }}</MiuixText>
         </div>
-        <MiuixText v-else-if="state === 'expired'" type="title3" color="var(--m-color-error)">证书已过期</MiuixText>
-        <MiuixText v-else-if="state === 'invalid'" type="title3" color="var(--m-color-error)">keybox 无效</MiuixText>
-        <MiuixText v-else type="title3">尚未签发证书</MiuixText>
+        <MiuixText v-else-if="state === 'expired'" type="title3" color="var(--m-color-error)">
+          {{ t('issuer.statusCard.expired') }}
+        </MiuixText>
+        <MiuixText v-else-if="state === 'invalid'" type="title3" color="var(--m-color-error)">
+          {{ t('issuer.statusCard.invalid') }}
+        </MiuixText>
+        <MiuixText v-else type="title3">{{ t('issuer.statusCard.missing') }}</MiuixText>
         <MiuixText v-if="kb.not_after != null" type="body2" color="var(--m-color-on-surface-variant-summary)">
-          {{ state === 'expired' ? '过期于' : '有效期至' }} {{ formatDateTime(kb.not_after) }}
+          {{
+            state === 'expired'
+              ? t('issuer.statusCard.expiredAt', { time: formatDateTime(kb.not_after) })
+              : t('issuer.statusCard.validUntil', { time: formatDateTime(kb.not_after) })
+          }}
         </MiuixText>
         <MiuixText v-if="state === 'invalid' && kb.error" type="body2" color="var(--m-color-error)">
           {{ kb.error }}
@@ -87,33 +101,46 @@ const cornerText = computed(() => {
 
         <div v-if="kb.exists" class="status__stats">
           <div class="stat">
-            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">证书链</MiuixText>
-            <MiuixText type="body1" weight="medium">{{ kb.certificates }} 张</MiuixText>
+            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ t('issuer.statusCard.chain') }}</MiuixText>
+            <MiuixText type="body1" weight="medium">{{ t('issuer.statusCard.chainCount', kb.certificates) }}</MiuixText>
           </div>
           <div class="stat">
-            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">密钥匹配</MiuixText>
+            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
+              {{ t('issuer.statusCard.keyMatch') }}
+            </MiuixText>
             <MiuixText type="body1" weight="medium" :color="kb.key_match ? undefined : 'var(--m-color-error)'">
-              {{ kb.key_match ? '是' : '否' }}
+              {{ kb.key_match ? t('issuer.common.yes') : t('issuer.common.no') }}
             </MiuixText>
           </div>
           <MiuixIcon class="stat__more" :icon="ChevronForward" :size="18" color="var(--m-color-on-surface-variant-actions)" />
         </div>
 
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          {{ cached ? '签发进行中，显示缓存状态 · ' : '' }}检查于 {{ formatAgo(status.generated_at, now) }}
+          {{
+            cached
+              ? t('issuer.statusCard.cachedCheckedAt', { ago: formatAgo(status.generated_at, now) })
+              : t('issuer.statusCard.checkedAt', { ago: formatAgo(status.generated_at, now) })
+          }}
         </MiuixText>
         <div v-if="error" class="warnings">
           <MiuixText type="footnote1" color="var(--m-color-error)">
-            刷新失败（{{ ERROR_KIND[error.kind] }}）：{{ error.message }}
+            {{
+              t('issuer.statusCard.refreshFailed', {
+                kind: t(ERROR_KIND[error.kind]),
+                message: error.message,
+              })
+            }}
           </MiuixText>
         </div>
       </template>
 
-      <MiuixText v-else-if="loading" type="body2" color="var(--m-color-on-surface-variant-summary)">正在读取…</MiuixText>
+      <MiuixText v-else-if="loading" type="body2" color="var(--m-color-on-surface-variant-summary)">
+        {{ t('shared.common.loading') }}
+      </MiuixText>
     </div>
 
     <div v-if="error?.detail" class="status__fold" @pointerdown.stop @click.stop>
-      <FoldBlock title="错误详情" :text="error.detail" />
+      <FoldBlock :title="t('issuer.statusCard.errorDetail')" :text="error.detail" />
     </div>
   </MiuixCard>
 </template>

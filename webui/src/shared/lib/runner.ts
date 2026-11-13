@@ -11,6 +11,7 @@ import { computed, onBeforeUnmount, ref, type ComputedRef, type Ref } from 'vue'
 import { exec } from './ksu'
 import { debug } from './debug'
 import { parseLastJsonLine } from './command'
+import { t } from './i18n'
 
 const STALE_AFTER_S = 600
 const OVERDUE_AFTER_S = 120
@@ -243,7 +244,7 @@ export function useTaskRunner<E>(
   async function start(args: string[] = []): Promise<void> {
     if (busy.value || phase.value === 'stale') return
     const bad = args.find((a) => !SAFE_ARG.test(a))
-    if (bad !== undefined) throw new Error(`非法任务参数：${bad}`)
+    if (bad !== undefined) throw new Error(t('shared.command.badTaskArg', { arg: bad }))
     phase.value = 'starting'
     launchAt = Date.now()
     nowMs.value = launchAt

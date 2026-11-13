@@ -26,14 +26,15 @@ import {
 } from '../lib/display'
 import { nowUnix } from '../../../shared/lib/format'
 import {
-  TARGET_LABEL,
-  WARNING_LABEL,
+  targetLabel,
+  warningLabel,
   syncErrorText,
   type DeployPlan,
   type SyncEnvelope,
   type SyncErrorInfo,
   type TofuFacts,
 } from '../../../shared/lib/sync'
+import { t, type MessageKey } from '../../../shared/lib/i18n'
 import {
   isDeployReport,
   isDeploySkipped,
@@ -54,9 +55,9 @@ watch(open, (v) => {
   if (v) now.value = nowUnix()
 })
 
-const SKIP_LABEL: Record<DeploySkip, string> = {
-  nothing_staged: '没有已验证的 keybox，未部署',
-  auto_deploy_false: '自动部署已关闭（auto_deploy=false），未部署',
+const SKIP_LABEL: Record<DeploySkip, MessageKey> = {
+  nothing_staged: 'deployer.runResult.skipNothingStaged',
+  auto_deploy_false: 'deployer.runResult.skipAutoDeployOff',
 }
 
 type StepView<T> =
@@ -106,15 +107,15 @@ function stepTone(view: StepView<unknown> | null, code: number | null): PillTone
 }
 
 function stepLabel(view: StepView<unknown> | null, code: number | null): string {
-  if (!view || view.kind === 'not_run') return '未执行'
+  if (!view || view.kind === 'not_run') return t('deployer.runResult.notRun')
   if (view.kind === 'abnormal') {
-    return code === 0 ? '无结果（exit 0）' : `异常退出（exit ${code}）`
+    return code === 0 ? t('deployer.runResult.noResultExit0') : t('deployer.runResult.abnormalExit', { code })
   }
-  return code === 0 ? '成功（exit 0）' : `失败（exit ${code}）`
+  return code === 0 ? t('deployer.runResult.okExit0') : t('deployer.runResult.failExit', { code })
 }
 
 function skipLabel(value: { skipped: DeploySkip }): string {
-  return SKIP_LABEL[value.skipped] ?? `未部署（${value.skipped}）`
+  return t(SKIP_LABEL[value.skipped] ?? 'deployer.runResult.skipUnknown', { code: value.skipped })
 }
 
 const overallOk = computed(() => props.steps?.overall === 0)
@@ -129,9 +130,9 @@ const tofuFromFetch = computed(() => {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="最近一次组合结果">
+  <MiuixBottomSheet v-model="open" :title="t('deployer.runResult.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
@@ -139,32 +140,32 @@ const tofuFromFetch = computed(() => {
     <div class="sheet-body">
       <template v-if="!steps">
         <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-          还没有可读取的组合任务结果。
+          {{ t('deployer.runResult.empty') }}
         </MiuixText>
       </template>
 
       <template v-else>
         <div class="outcome">
           <MiuixText type="body1" :color="outcome?.kind === 'failed' ? 'var(--m-color-error)' : undefined">
-            {{ outcome ? runOutcomeLabel(outcome) : '最近一次组合结果' }}
+            {{ outcome ? runOutcomeLabel(outcome) : t('deployer.runResult.title') }}
           </MiuixText>
           <MiuixText v-if="rebootHint" type="footnote1" color="var(--app-warning)">{{ rebootHint }}</MiuixText>
         </div>
         <div class="row">
-          <span class="row__k">总体结果</span>
+          <span class="row__k">{{ t('deployer.runResult.overall') }}</span>
           <StatusPill
             :tone="overallOk ? 'ok' : 'error'"
-            :label="overallOk ? '成功（exit 0）' : `失败（exit ${steps.overall}）`"
+            :label="overallOk ? t('deployer.runResult.okExit0') : t('deployer.runResult.failExit', { code: steps.overall })"
           />
         </div>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          拉取与部署分别记录退出码；部署被策略跳过不算失败。
+          {{ t('deployer.runResult.overallNote') }}
         </MiuixText>
 
-        <MiuixSmallTitle text="拉取" />
+        <MiuixSmallTitle :text="t('deployer.run.labelFetch')" />
         <div class="section">
           <div class="row">
-            <span class="row__k">退出码</span>
+            <span class="row__k">{{ t('deployer.runResult.exitCode') }}</span>
             <StatusPill
               :tone="stepTone(fetchStep, steps.fetch.code)"
               :label="stepLabel(fetchStep, steps.fetch.code)"
@@ -172,15 +173,15 @@ const tofuFromFetch = computed(() => {
           </div>
 
           <template v-if="fetchStep?.kind === 'not_run'">
-            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">未执行。</MiuixText>
+            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ t('deployer.runResult.notRunPeriod') }}</MiuixText>
           </template>
 
           <template v-else-if="fetchStep?.kind === 'abnormal'">
             <MiuixText v-if="fetchStep.code !== 0" type="body2" color="var(--m-color-error)">
-              该步异常退出（exit {{ fetchStep.code }}），没有 JSON 结果。
+              {{ t('deployer.runResult.stepAbnormal', { code: fetchStep.code }) }}
             </MiuixText>
             <MiuixText v-else type="body2" color="var(--m-color-error)">
-              该步返回 0 但没有 JSON 结果，不能视为成功。
+              {{ t('deployer.runResult.stepNoJson') }}
             </MiuixText>
           </template>
 
@@ -193,23 +194,23 @@ const tofuFromFetch = computed(() => {
               type="footnote1"
               color="var(--m-color-on-surface-variant-summary)"
             >
-              首次拉取需要核对 TOFU 事实并在“拉取”中确认；本次没有暂存或部署任何内容。
+              {{ t('deployer.runResult.tofuNote') }}
             </MiuixText>
             <template v-if="tofuFromFetch">
               <div class="row">
-                <span class="row__k">首次拉取</span>
+                <span class="row__k">{{ t('deployer.runResult.firstFetch') }}</span>
                 <span class="row__v">seq {{ tofuFromFetch.seq }} · {{ providerLabel(tofuFromFetch.provider) }}</span>
               </div>
               <div class="row">
-                <span class="row__k">设备 ID</span>
+                <span class="row__k">{{ t('deployer.common.deviceId') }}</span>
                 <span class="row__v selectable">{{ tofuFromFetch.device_id }}</span>
               </div>
               <div class="row">
-                <span class="row__k">签发时间</span>
+                <span class="row__k">{{ t('deployer.common.issuedAt') }}</span>
                 <span class="row__v">{{ stamp(tofuFromFetch.issued_at) }}</span>
               </div>
               <div class="row">
-                <span class="row__k">叶子有效期</span>
+                <span class="row__k">{{ t('deployer.runResult.leafValidity') }}</span>
                 <span class="row__v">{{ leafLabel(tofuFromFetch.leaf_not_after, now) }}</span>
               </div>
               <div class="row">
@@ -222,13 +223,13 @@ const tofuFromFetch = computed(() => {
           <template v-else-if="fetchStep?.kind === 'ok'">
             <template v-if="isFetchResult(fetchStep.data)">
               <div class="row">
-                <span class="row__k">版本</span>
+                <span class="row__k">{{ t('deployer.common.version') }}</span>
                 <span class="row__v">
-                  seq {{ fetchStep.data.seq }} · {{ fetchStep.data.changed ? '有更新' : '无变化' }}
+                  seq {{ fetchStep.data.seq }} · {{ fetchStep.data.changed ? t('deployer.runResult.changed') : t('deployer.runResult.unchanged') }}
                 </span>
               </div>
               <div v-if="fetchStep.data.device_id" class="row">
-                <span class="row__k">设备 ID</span>
+                <span class="row__k">{{ t('deployer.common.deviceId') }}</span>
                 <span class="row__v selectable">{{ fetchStep.data.device_id }}</span>
               </div>
               <div v-if="fetchStep.data.keybox_sha256" class="row">
@@ -236,25 +237,25 @@ const tofuFromFetch = computed(() => {
                 <span class="row__v mono">{{ shortHash(fetchStep.data.keybox_sha256) }}</span>
               </div>
               <div v-if="fetchStep.data.leaf_not_after" class="row">
-                <span class="row__k">叶子有效期</span>
+                <span class="row__k">{{ t('deployer.runResult.leafValidity') }}</span>
                 <span class="row__v">{{ leafLabel(fetchStep.data.leaf_not_after, now) }}</span>
               </div>
               <div v-if="fetchStep.data.gap" class="row">
-                <span class="row__k">版本链</span>
-                <span class="row__v">跳过了中间版本（gap）</span>
+                <span class="row__k">{{ t('deployer.runResult.chain') }}</span>
+                <span class="row__v">{{ t('deployer.runResult.gap') }}</span>
               </div>
             </template>
             <template v-else-if="isTofu(fetchStep.data)">
               <div class="row">
-                <span class="row__k">首次拉取</span>
+                <span class="row__k">{{ t('deployer.runResult.firstFetch') }}</span>
                 <span class="row__v">seq {{ fetchStep.data.seq }} · {{ providerLabel(fetchStep.data.provider) }}</span>
               </div>
               <div class="row">
-                <span class="row__k">设备 ID</span>
+                <span class="row__k">{{ t('deployer.common.deviceId') }}</span>
                 <span class="row__v selectable">{{ fetchStep.data.device_id }}</span>
               </div>
               <div class="row">
-                <span class="row__k">叶子有效期</span>
+                <span class="row__k">{{ t('deployer.runResult.leafValidity') }}</span>
                 <span class="row__v">{{ leafLabel(fetchStep.data.leaf_not_after, now) }}</span>
               </div>
             </template>
@@ -262,15 +263,15 @@ const tofuFromFetch = computed(() => {
 
           <FoldBlock
             v-if="steps.fetch.stderr.trim()"
-            title="拉取错误输出"
+            :title="t('deployer.runResult.fetchStderr')"
             :text="steps.fetch.stderr"
           />
         </div>
 
-        <MiuixSmallTitle text="部署" />
+        <MiuixSmallTitle :text="t('deployer.run.labelDeploy')" />
         <div class="section">
           <div class="row">
-            <span class="row__k">退出码</span>
+            <span class="row__k">{{ t('deployer.runResult.exitCode') }}</span>
             <StatusPill
               :tone="stepTone(deployStep, steps.deploy.code)"
               :label="stepLabel(deployStep, steps.deploy.code)"
@@ -278,15 +279,15 @@ const tofuFromFetch = computed(() => {
           </div>
 
           <template v-if="deployStep?.kind === 'not_run'">
-            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">未执行。</MiuixText>
+            <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">{{ t('deployer.runResult.notRunPeriod') }}</MiuixText>
           </template>
 
           <template v-else-if="deployStep?.kind === 'abnormal'">
             <MiuixText v-if="deployStep.code !== 0" type="body2" color="var(--m-color-error)">
-              该步异常退出（exit {{ deployStep.code }}），没有 JSON 结果。
+              {{ t('deployer.runResult.stepAbnormal', { code: deployStep.code }) }}
             </MiuixText>
             <MiuixText v-else type="body2" color="var(--m-color-error)">
-              该步返回 0 但没有 JSON 结果，不能视为成功。
+              {{ t('deployer.runResult.stepNoJson') }}
             </MiuixText>
           </template>
 
@@ -296,31 +297,37 @@ const tofuFromFetch = computed(() => {
             </MiuixText>
             <template v-if="isDeployReport(deployStep.data)">
               <div class="row">
-                <span class="row__k">结果</span>
+                <span class="row__k">{{ t('deployer.runResult.result') }}</span>
                 <span class="row__v">
-                  {{ deployStep.data.pending ? '待确认，未写入' : deployStep.data.deployed ? '已写入目标' : '未写入' }}
+                  {{
+                    deployStep.data.pending
+                      ? t('deployer.runResult.pendingNotWritten')
+                      : deployStep.data.deployed
+                        ? t('deployer.runResult.writtenToTarget')
+                        : t('deployer.runResult.notWritten')
+                  }}
                 </span>
               </div>
               <div
-                v-for="t in deployStep.data.targets"
-                :key="t.id"
+                v-for="tg in deployStep.data.targets"
+                :key="tg.id"
                 class="target"
               >
                 <div class="target__head">
-                  <span>{{ TARGET_LABEL[t.id] ?? t.id }}</span>
-                  <StatusPill :tone="t.ok ? 'ok' : 'error'" :label="t.ok ? '成功' : '失败'" />
+                  <span>{{ targetLabel(tg.id) }}</span>
+                  <StatusPill :tone="tg.ok ? 'ok' : 'error'" :label="tg.ok ? t('deployer.common.ok') : t('deployer.common.failed')" />
                 </div>
                 <span class="target__meta">
-                  reload {{ t.reload }}{{ t.reload_status ? ` → ${t.reload_status}` : '' }}
+                  reload {{ tg.reload }}{{ tg.reload_status ? ` → ${tg.reload_status}` : '' }}
                 </span>
-                <span v-if="t.error" class="target__error">
-                  {{ deployCodeLabel(t.error.code) }}（{{ t.error.code }}）：{{ t.error.message }}
+                <span v-if="tg.error" class="target__error">
+                  {{ t('deployer.deploySheet.targetError', { label: deployCodeLabel(tg.error.code), code: tg.error.code, message: tg.error.message }) }}
                 </span>
               </div>
             </template>
             <template v-else-if="isDeployPlan(deployStep.data)">
               <div class="row">
-                <span class="row__k">计划</span>
+                <span class="row__k">{{ t('deployer.runResult.plan') }}</span>
                 <span class="row__v">{{ gateTitle(deployStep.data) }} · seq {{ deployStep.data.staged.seq }}</span>
               </div>
             </template>
@@ -335,67 +342,73 @@ const tofuFromFetch = computed(() => {
 
             <template v-else-if="isDeployReport(deployStep.data)">
               <div class="row">
-                <span class="row__k">结果</span>
+                <span class="row__k">{{ t('deployer.runResult.result') }}</span>
                 <span class="row__v">
-                  {{ deployStep.data.pending ? '待确认，未写入' : deployStep.data.deployed ? '已写入目标' : '未写入' }}
+                  {{
+                    deployStep.data.pending
+                      ? t('deployer.runResult.pendingNotWritten')
+                      : deployStep.data.deployed
+                        ? t('deployer.runResult.writtenToTarget')
+                        : t('deployer.runResult.notWritten')
+                  }}
                 </span>
               </div>
               <div v-if="deployStep.data.pending" class="row">
-                <span class="row__k">待确认</span>
+                <span class="row__k">{{ t('deployer.runResult.pending') }}</span>
                 <span class="row__v">
-                  seq {{ deployStep.data.pending.seq }}（{{ deployStep.data.pending.reason }}）
+                  {{ t('deployer.runResult.pendingValue', { seq: deployStep.data.pending.seq, reason: deployStep.data.pending.reason }) }}
                 </span>
               </div>
               <div class="row">
                 <span class="row__k">keybox</span>
                 <span class="row__v mono">{{ shortHash(deployStep.data.keybox_sha256) }}</span>
               </div>
-              <div v-for="t in deployStep.data.targets" :key="t.id" class="target">
+              <div v-for="tg in deployStep.data.targets" :key="tg.id" class="target">
                 <div class="target__head">
-                  <span>{{ TARGET_LABEL[t.id] ?? t.id }}</span>
-                  <StatusPill :tone="t.ok ? 'ok' : 'error'" :label="t.ok ? '成功' : '失败'" />
+                  <span>{{ targetLabel(tg.id) }}</span>
+                  <StatusPill :tone="tg.ok ? 'ok' : 'error'" :label="tg.ok ? t('deployer.common.ok') : t('deployer.common.failed')" />
                 </div>
                 <span class="target__meta">
-                  reload {{ t.reload }}{{ t.reload_status ? ` → ${t.reload_status}` : '' }}
+                  reload {{ tg.reload }}{{ tg.reload_status ? ` → ${tg.reload_status}` : '' }}
                 </span>
-                <span v-if="t.error" class="target__error">
-                  {{ deployCodeLabel(t.error.code) }}（{{ t.error.code }}）：{{ t.error.message }}
+                <span v-if="tg.error" class="target__error">
+                  {{ t('deployer.deploySheet.targetError', { label: deployCodeLabel(tg.error.code), code: tg.error.code, message: tg.error.message }) }}
                 </span>
               </div>
               <MiuixText v-if="deployStep.data.pending" type="footnote1" color="var(--app-warning)">
-                在“部署”中查看计划并明确批准后才会写入。
+                {{ t('deployer.runResult.approveNote') }}
               </MiuixText>
             </template>
 
             <template v-else-if="isDeployPlan(deployStep.data)">
               <div class="row">
-                <span class="row__k">计划</span>
+                <span class="row__k">{{ t('deployer.runResult.plan') }}</span>
                 <span class="row__v">{{ gateTitle(deployStep.data) }} · seq {{ deployStep.data.staged.seq }}</span>
               </div>
               <div v-for="w in deployStep.data.warnings" :key="w.code" class="row">
-                <span class="row__k">警告</span>
-                <span class="row__v">{{ WARNING_LABEL[w.code] ?? w.message }}</span>
+                <span class="row__k">{{ t('deployer.runResult.warning') }}</span>
+                <span class="row__v">{{ warningLabel(w.code) ?? w.message }}</span>
               </div>
               <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-                未执行写入；请在“部署”中核对计划与警告。
+                {{ t('deployer.runResult.planNote') }}
               </MiuixText>
             </template>
           </template>
 
           <FoldBlock
             v-if="steps.deploy.stderr.trim()"
-            title="部署错误输出"
+            :title="t('deployer.runResult.deployStderr')"
             :text="steps.deploy.stderr"
           />
         </div>
 
         <FoldBlock
           v-if="steps.stderr.trim()"
-          title="编排诊断"
+          :title="t('deployer.runResult.orchestrationStderr')"
           :text="steps.stderr"
         />
 
-        <MiuixButton @click="open = false">关闭</MiuixButton>
+        <MiuixButton @click="open = false">{{ t('shared.common.close') }}</MiuixButton>
       </template>
     </div>
   </MiuixBottomSheet>

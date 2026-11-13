@@ -11,6 +11,7 @@ import SvgIcon from '../../../shared/components/SvgIcon.vue'
 import type { IssueRunner } from '../lib/issueRunner'
 import { KEYBOX_STATE_LABEL, KEYBOX_STATE_VISUAL, keyboxState, stageLabel, type StatusData } from '../lib/rkp'
 import { daysLeft, formatAgo, formatDate, formatElapsed } from '../../../shared/lib/format'
+import { t } from '../../../shared/lib/i18n'
 
 const props = defineProps<{
   status: StatusData | null
@@ -33,11 +34,19 @@ const rows = computed(() => {
   const left = na != null ? daysLeft(na, props.now) : null
   const a = s.auto_issue
   return [
-    { k: '有效期至', v: na != null ? formatDate(na) : '—' },
-    { k: '剩余天数', v: left == null ? '—' : left < 0 ? '已过期' : `${left} 天` },
+    { k: t('issuer.issueStatusCard.validUntil'), v: na != null ? formatDate(na) : '—' },
     {
-      k: '自动签发',
-      v: a.days <= 0 ? '未开启' : a.loop_running ? `已开启 · 剩余 ≤ ${a.days} 天时` : '未开启 · 后台进程未运行',
+      k: t('issuer.issueStatusCard.daysLeft'),
+      v: left == null ? '—' : left < 0 ? t('issuer.issueStatusCard.expired') : t('issuer.issueStatusCard.days', left),
+    },
+    {
+      k: t('issuer.issueStatusCard.autoIssue'),
+      v:
+        a.days <= 0
+          ? t('issuer.issueStatusCard.autoOff')
+          : a.loop_running
+            ? t('issuer.issueStatusCard.autoOn', a.days)
+            : t('issuer.issueStatusCard.autoOnNoLoop'),
     },
   ]
 })
@@ -47,11 +56,15 @@ const warnings = computed<string[]>(() => {
   if (!s || !state.value) return []
   switch (state.value) {
     case 'expiring':
-      return ['证书即将过期，建议立即签发']
+      return [t('issuer.issueStatusCard.warnExpiring')]
     case 'expired':
-      return ['证书已过期，请重新签发']
+      return [t('issuer.issueStatusCard.warnExpired')]
     case 'invalid':
-      return [`keybox 无效${s.keybox.error ? `：${s.keybox.error}` : ''}`]
+      return [
+        s.keybox.error
+          ? t('issuer.issueStatusCard.warnInvalidError', { error: s.keybox.error })
+          : t('issuer.issueStatusCard.warnInvalid'),
+      ]
     default:
       return []
   }
@@ -60,22 +73,31 @@ const warnings = computed<string[]>(() => {
 /** Last finished task, stale lock or failed launch (busy shows in the corner). */
 const task = computed<{ text: string; bad: boolean; dismissible: boolean } | null>(() => {
   if (r.busy.value) return null
-  if (r.phase.value === 'stale') return { text: '任务锁残留，上次签发可能被中断，点按处理', bad: true, dismissible: false }
-  if (r.phase.value === 'launch_failed') return { text: '签发未能启动，点按查看原因', bad: true, dismissible: false }
+  if (r.phase.value === 'stale')
+    return { text: t('issuer.issueStatusCard.staleTask'), bad: true, dismissible: false }
+  if (r.phase.value === 'launch_failed')
+    return { text: t('issuer.issueStatusCard.launchFailed'), bad: true, dismissible: false }
   const res = r.result.value
   if (!r.showLast.value || !res) return null
   const env = res.envelope
   const detail = env?.ok
-    ? `成功 · Device ID ${env.data.device_id}`
+    ? t('issuer.issueStatusCard.lastSuccess', { id: env.data.device_id })
     : env
-      ? `失败 · ${stageLabel(env.error.stage)}：${env.error.code}`
-      : `失败 · 进程异常退出（${res.code}）`
-  return { text: `上次签发 ${formatAgo(res.finishedAt, props.now)} · ${detail}`, bad: res.code !== 0, dismissible: true }
+      ? t('issuer.issueStatusCard.lastFailure', { stage: stageLabel(env.error.stage), code: env.error.code })
+      : t('issuer.issueStatusCard.lastExit', { code: res.code })
+  return {
+    text: t('issuer.issueStatusCard.lastTask', { ago: formatAgo(res.finishedAt, props.now), detail }),
+    bad: res.code !== 0,
+    dismissible: true,
+  }
 })
 
 const cornerText = computed(() => {
-  if (r.busy.value) return `签发中 ${formatElapsed(r.elapsedMs.value)}${r.overdue.value ? ' · 结果未知' : ''}`
-  return state.value ? KEYBOX_STATE_LABEL[state.value] : '读取失败'
+  if (r.busy.value)
+    return r.overdue.value
+      ? t('issuer.issueStatusCard.runningOverdue', { elapsed: formatElapsed(r.elapsedMs.value) })
+      : t('issuer.issueStatusCard.running', { elapsed: formatElapsed(r.elapsedMs.value) })
+  return state.value ? t(KEYBOX_STATE_LABEL[state.value]) : t('issuer.issueStatusCard.readFailed')
 })
 </script>
 
@@ -90,7 +112,7 @@ const cornerText = computed(() => {
     <SvgIcon v-if="state" class="issue__mark" :path="KEYBOX_STATE_VISUAL[state].icon" :color="KEYBOX_STATE_VISUAL[state].color" />
     <div class="issue">
       <div class="issue__head">
-        <MiuixText type="title4" weight="medium">当前证书</MiuixText>
+        <MiuixText type="title4" weight="medium">{{ t('issuer.issueStatusCard.title') }}</MiuixText>
         <MiuixProgressIndicator v-if="loading && !status" type="infinite" :size="18" />
         <!-- Corner status doubles as the refresh control (re-reads the local status). -->
         <CardStateButton
@@ -102,8 +124,12 @@ const cornerText = computed(() => {
         />
       </div>
 
-      <MiuixText v-if="!status && error" type="body2" color="var(--m-color-error)">读取状态失败：{{ error }}</MiuixText>
-      <MiuixText v-else-if="!status" type="body2" color="var(--m-color-on-surface-variant-summary)">正在读取状态…</MiuixText>
+      <MiuixText v-if="!status && error" type="body2" color="var(--m-color-error)">
+        {{ t('issuer.issueStatusCard.readStatusFailed', { error }) }}
+      </MiuixText>
+      <MiuixText v-else-if="!status" type="body2" color="var(--m-color-on-surface-variant-summary)">
+        {{ t('issuer.issueStatusCard.reading') }}
+      </MiuixText>
 
       <template v-else>
         <div class="rows">
@@ -120,7 +146,7 @@ const cornerText = computed(() => {
 
       <div v-if="task" class="task" @pointerdown.stop @click.stop="emit('result')">
         <MiuixText type="body2" :color="task.bad ? 'var(--m-color-error)' : undefined">{{ task.text }}</MiuixText>
-        <MiuixIconButton v-if="task.dismissible" aria-label="不再显示" @click.stop="r.dismiss()">
+        <MiuixIconButton v-if="task.dismissible" :aria-label="t('issuer.common.dismiss')" @click.stop="r.dismiss()">
           <MiuixIcon :icon="Close" :size="16" color="var(--m-color-on-surface-variant-actions)" />
         </MiuixIconButton>
       </div>

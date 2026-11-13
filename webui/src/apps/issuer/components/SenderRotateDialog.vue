@@ -15,6 +15,7 @@ import {
   syncTaskArgs,
   type SyncRunner,
 } from '../../../shared/lib/sync'
+import { t } from '../../../shared/lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ runner: SyncRunner }>()
@@ -28,7 +29,11 @@ const error = ref<string | null>(null)
 const launched = ref(false)
 
 function message(e: unknown): string {
-  return e instanceof CommandError ? `${e.message}${e.detail ? `：${e.detail}` : ''}` : String(e)
+  return e instanceof CommandError
+    ? e.detail
+      ? t('shared.common.withDetail', { message: e.message, detail: e.detail })
+      : e.message
+    : String(e)
 }
 
 function clear(): void {
@@ -50,16 +55,16 @@ watch(
     if (phase === 'launch_failed' && launched.value) {
       void discardRotation()
       launched.value = false
-      error.value = '轮换任务未能启动，新密码未保存'
+      error.value = t('issuer.senderRotateDialog.rotateNotStarted')
     }
   },
 )
 
 const problem = computed(() => {
-  if (!first.value) return '请输入新密码'
-  if (/[\r\n]/.test(first.value)) return '不能包含换行'
-  if (first.value !== second.value) return '两次输入不一致'
-  if (r.busy.value) return '另一个同步任务正在运行'
+  if (!first.value) return t('issuer.senderRotateDialog.required')
+  if (/[\r\n]/.test(first.value)) return t('issuer.senderRotateDialog.newline')
+  if (first.value !== second.value) return t('issuer.senderRotateDialog.mismatch')
+  if (r.busy.value) return t('issuer.senderRotateDialog.busyOther')
   return null
 })
 
@@ -70,12 +75,12 @@ const short = computed(() => {
 
 const progress = computed(() => {
   if (!launched.value) return null
-  if (r.busy.value) return '轮换任务进行中…'
+  if (r.busy.value) return t('issuer.senderRotateDialog.progressRunning')
   const result = r.result.value
-  if (!result || !r.showLast.value) return '任务已启动，结果见同步卡片'
+  if (!result || !r.showLast.value) return t('issuer.senderRotateDialog.started')
   const env = result.envelope
-  if (!env) return `任务异常退出（${result.code}）`
-  return env.ok ? '密码重置完成' : syncErrorText(env.error)
+  if (!env) return t('issuer.senderRotateDialog.exitUnknown', { code: result.code })
+  return env.ok ? t('issuer.senderRotateDialog.done') : syncErrorText(env.error)
 })
 
 const failed = computed(() => {
@@ -93,11 +98,11 @@ async function begin(): Promise<void> {
     await r.start(syncTaskArgs('rotate'))
     if (r.phase.value === 'launch_failed') {
       await discardRotation()
-      error.value = '轮换任务未能启动，新密码未保存'
+      error.value = t('issuer.senderRotateDialog.rotateNotStarted')
       return
     }
     launched.value = true
-    void showSnackbar({ message: '密码重置任务已启动' })
+    void showSnackbar({ message: t('issuer.senderRotateDialog.launched') })
   } catch (e) {
     await discardRotation()
     error.value = message(e)
@@ -117,19 +122,19 @@ function retry(): void {
 <template>
   <MiuixDialog
     v-model="open"
-    title="重置加密密码"
-    summary="用新密码重新加密当前 keybox 并上传。旧密码立即失效，接收端必须改成新密码才能继续拉取。"
+    :title="t('issuer.senderRotateDialog.title')"
+    :summary="t('issuer.senderRotateDialog.summary')"
     :close-on-click-modal="!busy && !r.busy.value"
   >
     <form class="dialog" @submit.prevent="begin">
       <template v-if="!launched">
-        <SecretInput v-model="first" placeholder="新密码" :disabled="busy" />
-        <SecretInput v-model="second" placeholder="再次输入" :disabled="busy" />
+        <SecretInput v-model="first" :placeholder="t('issuer.senderRotateDialog.newPassword')" :disabled="busy" />
+        <SecretInput v-model="second" :placeholder="t('shared.secret.retype')" :disabled="busy" />
         <MiuixText v-if="short" type="footnote1" color="var(--app-warning)">
-          密码较短：建议 6 个以上随机单词或 20+ 随机字符。
+          {{ t('issuer.senderRotateDialog.short') }}
         </MiuixText>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-          新密码经 root shell 写入 0600 临时文件，由 rkp-mini-sync 读取并立即删除；不会出现在命令行参数、URL 或日志中。
+          {{ t('issuer.senderRotateDialog.note') }}
         </MiuixText>
       </template>
 
@@ -142,26 +147,26 @@ function retry(): void {
 
       <div v-if="launched" class="notes">
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-          · 接收端需要设置新密码后才能继续拉取；旧密码不再可用。
+          · {{ t('issuer.senderRotateDialog.noteReceiver') }}
         </MiuixText>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-          · Gist 的历史 revision 仍然可以用旧密码解密：轮换密码不会删除历史密文。
+          · {{ t('issuer.senderRotateDialog.noteHistory') }}
         </MiuixText>
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-          · 真正的撤销 = 重新签发 keybox。已泄露的旧 keybox 仍然有效，换密码只是切断对它的分发。
+          · {{ t('issuer.senderRotateDialog.noteRevoke') }}
         </MiuixText>
       </div>
 
       <div class="dialog-actions">
         <template v-if="!launched">
-          <MiuixButton :disabled="busy" @click="open = false">取消</MiuixButton>
+          <MiuixButton :disabled="busy" @click="open = false">{{ t('shared.common.cancel') }}</MiuixButton>
           <MiuixButton class="danger-btn" type="primary" :disabled="busy || problem !== null" @click="begin">
-            {{ busy ? '提交中…' : '重置密码' }}
+            {{ busy ? t('issuer.senderRotateDialog.submitting') : t('issuer.senderRotateDialog.reset') }}
           </MiuixButton>
         </template>
         <template v-else>
-          <MiuixButton v-if="failed" :disabled="r.busy.value" @click="retry">重新输入</MiuixButton>
-          <MiuixButton type="primary" :disabled="r.busy.value" @click="open = false">完成</MiuixButton>
+          <MiuixButton v-if="failed" :disabled="r.busy.value" @click="retry">{{ t('issuer.senderRotateDialog.retry') }}</MiuixButton>
+          <MiuixButton type="primary" :disabled="r.busy.value" @click="open = false">{{ t('issuer.senderRotateDialog.finish') }}</MiuixButton>
         </template>
       </div>
     </form>

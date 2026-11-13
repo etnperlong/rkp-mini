@@ -1,5 +1,5 @@
 // rkp-mini-sync WebUI contract (design docs/REMOTE_SYNC_DEVELOP.md §19).
-// Single source of every path, command, JSON type and Chinese label used by
+// Single source of every path, command, JSON type and label used by
 // both apps. The role and paths come from `@app-config`, so one module serves
 // the sender (rkp_mini_issuer) and receiver (rkp_mini_deployer) pages.
 //
@@ -18,6 +18,7 @@ import { appConfig } from '@app-config'
 import { exec } from './ksu'
 import { CommandError, SAFE_PATH, parseLastJsonLine, resolveModuleDir } from './command'
 import { useTaskRunner, type TaskResult, type TaskRunner } from './runner'
+import { t, tCode } from './i18n'
 
 // ---- Role and paths --------------------------------------------------------------
 
@@ -409,7 +410,7 @@ export interface DeployReport {
 /** Single-quote a non-secret argument; newlines/control characters are refused. */
 export function shq(value: string): string {
   // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f]/.test(value)) throw new CommandError('exec', '参数含有控制字符')
+  if (/[\u0000-\u001f\u007f]/.test(value)) throw new CommandError('exec', t('shared.command.controlChars'))
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
@@ -494,10 +495,10 @@ const MAX_SECRET_BYTES = 4096
 
 /** UTF-8 → lowercase hex; refuses empty, multi-line or oversize secrets. */
 function secretHex(value: string): string {
-  if (!value) throw new CommandError('exec', '不能为空')
-  if (/[\r\n]/.test(value)) throw new CommandError('exec', '不能包含换行')
+  if (!value) throw new CommandError('exec', t('shared.secret.empty'))
+  if (/[\r\n]/.test(value)) throw new CommandError('exec', t('shared.secret.newline'))
   const bytes = new TextEncoder().encode(value)
-  if (bytes.length > MAX_SECRET_BYTES) throw new CommandError('exec', '过长')
+  if (bytes.length > MAX_SECRET_BYTES) throw new CommandError('exec', t('shared.secret.tooLong'))
   let hex = ''
   for (const b of bytes) hex += b.toString(16).padStart(2, '0')
   return hex
@@ -529,7 +530,7 @@ export async function setSecret(
 /** Sender: stage the new passphrase for the `rotate` task; start it right after. */
 export async function prepareRotation(newPassphrase: string): Promise<void> {
   const r = await exec(inboxWrite('rotate.hex', secretHex(newPassphrase)))
-  if (r.errno !== 0) throw new CommandError('exit', '写入失败', r.stderr.trim())
+  if (r.errno !== 0) throw new CommandError('exit', t('shared.command.writeFailed'), r.stderr.trim())
 }
 
 /** Remove a staged rotation passphrase whose task never started. */
@@ -590,128 +591,47 @@ export function useSyncRunner(onFinished: (result: SyncTaskResult) => Promise<vo
 /** Runner arguments for an operation (validated again by sync.sh). */
 export function syncTaskArgs(op: SyncOp, acceptFirst?: string): string[] {
   if (op !== 'fetch' || acceptFirst === undefined) return [op]
-  if (!/^[0-9a-f]{16,64}$/.test(acceptFirst)) throw new CommandError('exec', '非法的确认值')
+  if (!/^[0-9a-f]{16,64}$/.test(acceptFirst)) throw new CommandError('exec', t('shared.command.badConfirmation'))
   return [op, acceptFirst]
 }
 
 // ---- Labels ---------------------------------------------------------------------------
-
-const STAGE: Record<string, string> = {
-  remote: '远端',
-  decrypt: '解密',
-  validate: '校验',
-  state: '状态',
-  deploy: '部署',
-  config: '配置',
-  generic: '其他',
-}
+// Machine codes map to `shared.sync.*` keys; an unknown code shows verbatim.
 
 export function syncStageLabel(stage: string): string {
-  return STAGE[stage] ?? stage
-}
-
-const CODE: Record<string, string> = {
-  not_initialized: '尚未初始化同步',
-  risk_not_acknowledged: '尚未接受风险说明',
-  risk_version_mismatch: '风险说明已更新，需要重新确认',
-  sync_disabled: '同步已禁用',
-  auto_push_disabled: '自动推送已关闭',
-  stream_missing: '尚未配置同步流',
-  provider_missing: '尚未选择存储方式',
-  secret_missing: '缺少密钥文件',
-  secret_permissions: '密钥文件权限不正确',
-  secret_empty: '密钥为空',
-  secret_invalid: '密钥格式无效',
-  token_missing: '缺少 Gist token',
-  auth_failed: '认证失败（token/应用密码无效）',
-  auth_required: '该链接需要认证，请改用 WebDAV',
-  rate_limited: '请求过于频繁，稍后重试',
-  remote_missing: '远端没有同步文件',
-  remote_conflict: '远端被并发修改，稍后重试',
-  remote_locked: '远端文件被锁定，稍后重试',
-  quota_exceeded: '远端空间不足',
-  remote_unavailable: '远端服务不可用',
-  network: '网络错误',
-  private_address: '地址指向本地/内网，已拒绝',
-  insecure_url: '只允许 https',
-  cross_host_redirect: '拒绝跨主机重定向',
-  response_too_large: '远端响应过大',
-  decrypt_failed: '解密失败（密码错误或文件被篡改）',
-  not_armored: '远端文件不是 age 加密文件',
-  excessive_work: '加密参数超出安全上限',
-  keybox_invalid: 'keybox 校验失败',
-  keybox_expiring: 'keybox 剩余有效期不足',
-  keybox_missing: '本地没有 keybox，请先签发',
-  keybox_permissions: 'keybox 文件权限不正确',
-  manifest_invalid: '同步数据格式无效',
-  manifest_mismatch: '同步数据与 keybox 不一致',
-  stream_mismatch: '同步流不匹配',
-  sync_rollback: '远端版本比已验证版本旧（疑似回放）',
-  seq_conflict: '同一版本号内容不一致',
-  prev_mismatch: '版本链不连续',
-  issued_in_future: '签发时间晚于本机时间',
-  clock_invalid: '本机时间异常',
-  first_import_needs_confirmation: '首次导入需要确认',
-  confirmation_mismatch: '内容已变化，请重新查看后确认',
-  stream_change: '已有其他同步流，请先清除本地数据',
-  locked: '另一个同步任务正在运行',
-  rotation_pending: '上次轮换口令未完成',
-  no_targets: '尚未配置部署目标',
-  target_failed: '部分部署目标失败',
-  target_unreferenced: 'TEESimulator 配置未引用该文件名',
-  omk_incompatible: 'OhMyKeymint 无法解析该 keybox，未写入',
-  target_dir_missing: '目标目录不存在（对应模块未安装？）',
-  target_modified: '目标文件已被其他程序修改，未删除',
-  key_not_settable: '该设置不能在此修改',
-  config_invalid: '配置无效',
-  import_invalid: '导入链接无效',
-  secret_field: '导入链接包含敏感字段，已拒绝',
-  unknown_field: '导入链接包含未知字段，已拒绝',
-  url_userinfo: '链接不能包含用户名/密码',
-  path_traversal: '路径不合法',
-  gist_revision_url: 'Gist 链接指向固定版本，请使用最新版链接',
-  not_published: '尚未推送过，暂无可分享的链接',
-  read_only_provider: '公开链接只读',
+  return tCode(`shared.sync.stage.${stage}`) ?? stage
 }
 
 export function syncCodeLabel(code: string): string {
-  return CODE[code] ?? code
+  return tCode(`shared.sync.code.${code}`) ?? code
 }
 
 /** Sender wording: what the cached `check-remote` result means for this device. */
-export const CHECK_OUTCOME_LABEL: Record<CheckOutcome, string> = {
-  in_sync: '云端与本机一致',
-  remote_behind: '云端不是最新的 keybox，需要推送',
-  remote_ahead: '云端版本比上次推送新',
-  diverged: '同一版本号的内容不一致',
-  missing: '云端没有同步文件',
-  error: '云端检查失败',
+export function checkOutcomeLabel(outcome: string): string | undefined {
+  return tCode(`shared.sync.checkOutcome.${outcome}`)
 }
 
-/** `中文说明（code）` when known, else `code: message`. */
+/** `label（code）` (localized) when the code is known, else `code: message`. */
 export function syncErrorText(e: Pick<SyncErrorInfo, 'code' | 'message'>): string {
-  const label = CODE[e.code]
-  return label ? `${label}（${e.code}）` : `${e.code}: ${e.message}`
+  const label = tCode(`shared.sync.code.${e.code}`)
+  return label ? t('shared.sync.errorText', { label, code: e.code }) : `${e.code}: ${e.message}`
 }
 
-export const IDENTITY_POLICY_LABEL: Record<IdentityPolicy, string> = {
-  scheduled: '临近到期才自动轮换（推荐）',
-  always: '总是自动部署新身份',
-  never: '从不自动部署新身份',
+export function identityPolicyLabel(policy: IdentityPolicy): string {
+  return t(`shared.sync.identityPolicy.${policy}`)
 }
 
-export const TARGET_LABEL: Record<string, string> = {
+const TARGET_NAME: Record<string, string> = {
   omk: 'OhMyKeymint',
   teesim: 'TEESimulator',
   tricky_store: 'TrickyStore / TEESimulator-RS',
-  custom: '自定义',
 }
 
-export const WARNING_LABEL: Record<string, string> = {
-  omk_key_retirement: 'OMK 会删除绑定旧 keybox 的客户端密钥（retire_stale_keybox_bound_keys）',
-  omk_incompatible: 'OhMyKeymint 无法解析该 keybox（会被其内置模板覆盖），omk 目标不会写入',
-  teesim_reattest: 'TEESimulator 会用新 keybox 重新为已有密钥生成证明',
-  teesim_config_missing: '未找到 TEESimulator config.json，按默认文件名部署',
-  no_root_trust_check: '只做了结构与密钥匹配校验，未验证证书签名/根信任/吊销',
-  gap: '跳过了中间版本',
+/** Builtin target's product name, `custom` translated, anything else verbatim. */
+export function targetLabel(id: string): string {
+  return id === 'custom' ? t('shared.sync.targetCustom') : (TARGET_NAME[id] ?? id)
+}
+
+export function warningLabel(code: string): string | undefined {
+  return tCode(`shared.sync.warning.${code}`)
 }

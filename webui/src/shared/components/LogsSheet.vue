@@ -10,21 +10,23 @@ import FoldBlock from './FoldBlock.vue'
 import { SYNC_LOG, SYNC_LOG_LABEL, readSyncLog } from '../lib/sync'
 import { CommandError } from '../lib/command'
 import { debugLog } from '../lib/debug'
+import { t } from '../lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
-withDefaults(
-  defineProps<{
-    /** Footnote under 后台日志; the default is the receiver's wording. */
-    loopHint?: string
-  }>(),
-  { loopHint: '后台循环的记录（最后 200 行），只含 provider、seq、hash 与错误码，不含密码或 token。' },
-)
+defineProps<{
+  /** Footnote under the loop log; defaults to the receiver's wording (`shared.logs.loopHint`). */
+  loopHint?: string
+}>()
 
 const loopText = ref('')
 const loopLoading = ref(false)
 
 function message(e: unknown): string {
-  return e instanceof CommandError ? `${e.message}${e.detail ? `：${e.detail}` : ''}` : String(e)
+  return e instanceof CommandError
+    ? e.detail
+      ? t('shared.common.withDetail', { message: e.message, detail: e.detail })
+      : e.message
+    : String(e)
 }
 
 async function load(): Promise<void> {
@@ -44,9 +46,9 @@ watch(open, (v) => {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="日志">
+  <MiuixBottomSheet v-model="open" :title="t('shared.logs.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
@@ -54,24 +56,28 @@ watch(open, (v) => {
     <div class="sheet-body">
       <slot />
 
-      <MiuixSmallTitle text="后台日志" />
+      <MiuixSmallTitle :text="t('shared.logs.loop')" />
       <div class="sheet-group">
         <FoldBlock
           :title="SYNC_LOG_LABEL"
-          :summary="loopLoading ? '正在读取…' : SYNC_LOG"
-          :text="loopLoading ? '读取中…' : loopText"
+          :summary="loopLoading ? t('shared.common.loading') : SYNC_LOG"
+          :text="loopLoading ? t('shared.common.reading') : loopText"
         />
       </div>
       <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-        {{ loopHint }}
+        {{ loopHint ?? t('shared.logs.loopHint') }}
       </MiuixText>
 
-      <MiuixSmallTitle text="调试日志" />
+      <MiuixSmallTitle :text="t('shared.logs.debug')" />
       <div class="sheet-group">
-        <FoldBlock title="页面调试日志" :summary="`${debugLog.length} 条`" :text="debugLog.join('\n')" />
+        <FoldBlock
+          :title="t('shared.logs.debugTitle')"
+          :summary="t('shared.logs.debugCount', debugLog.length)"
+          :text="debugLog.join('\n')"
+        />
       </div>
       <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-actions)">
-        页面运行时的诊断记录，只保存在内存中，关闭页面即清空。
+        {{ t('shared.logs.debugNote') }}
       </MiuixText>
     </div>
   </MiuixBottomSheet>

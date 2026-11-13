@@ -10,6 +10,8 @@ import { copyText } from '../../../shared/lib/clipboard'
 import { truncateMiddle } from '../../../shared/lib/format'
 import { CommandError } from '../../../shared/lib/command'
 import { share, type ShareResult } from '../../../shared/lib/sync'
+import { providerLabel } from '../lib/rkp'
+import { t } from '../../../shared/lib/i18n'
 
 const open = defineModel<boolean>({ required: true })
 
@@ -38,11 +40,11 @@ async function load(): Promise<void> {
   try {
     const shared = await share()
     result.value = shared
-    if (shared.contains_password !== false) error.value = '分享数据包含密码字段，已拒绝显示'
+    if (shared.contains_password !== false) error.value = t('issuer.senderShareSheet.passwordField')
   } catch (e) {
     if (errorCode(e) === 'not_published') {
       needsPush.value = true
-      error.value = '尚未推送过，暂无可分享的链接'
+      error.value = t('issuer.senderShareSheet.notPublished')
     } else {
       error.value = e instanceof CommandError ? e.message : String(e)
     }
@@ -54,8 +56,6 @@ async function load(): Promise<void> {
 watch(open, (v) => {
   if (v) void load()
 })
-
-const PROVIDER: Record<string, string> = { gist: 'GitHub Gist', webdav: 'WebDAV', url: '公开 HTTPS' }
 
 /** Location fields from the decoded share JSON, for the receiver preview. */
 const location = computed(() => {
@@ -75,61 +75,65 @@ const location = computed(() => {
 </script>
 
 <template>
-  <MiuixBottomSheet v-model="open" title="分享同步链接">
+  <MiuixBottomSheet v-model="open" :title="t('issuer.senderShareSheet.title')">
     <template #start-action>
-      <MiuixIconButton aria-label="关闭" @click="open = false">
+      <MiuixIconButton :aria-label="t('shared.common.close')" @click="open = false">
         <MiuixIcon :icon="Close" />
       </MiuixIconButton>
     </template>
 
     <div class="sheet-body">
-      <MiuixText v-if="loading" type="body2" color="var(--m-color-on-surface-variant-summary)">正在读取同步链接…</MiuixText>
+      <MiuixText v-if="loading" type="body2" color="var(--m-color-on-surface-variant-summary)">
+        {{ t('issuer.senderShareSheet.reading') }}
+      </MiuixText>
 
       <template v-else-if="result">
-        <QrCode :rows="result.qr.rows" label="同步导入链接二维码" />
+        <QrCode :rows="result.qr.rows" :label="t('issuer.senderShareSheet.qrLabel')" />
         <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)" align="center">
-          二维码内容只有导入链接；不含密码。
+          {{ t('issuer.senderShareSheet.qrNote') }}
         </MiuixText>
 
         <div class="uri selectable">{{ result.uri }}</div>
-        <MiuixButton @click="copyText(result.uri, '导入链接')">复制链接</MiuixButton>
+        <MiuixButton @click="copyText(result.uri, t('issuer.senderShareSheet.copyUri'))">
+          {{ t('issuer.senderShareSheet.copy') }}
+        </MiuixButton>
 
         <div v-if="location" class="facts">
           <div v-if="location.provider" class="fact">
-            <span class="fact__k">存储方式</span>
-            <span class="fact__v">{{ PROVIDER[location.provider] ?? location.provider }}</span>
+            <span class="fact__k">{{ t('issuer.senderShareSheet.provider') }}</span>
+            <span class="fact__v">{{ providerLabel(location.provider) }}</span>
           </div>
           <div v-if="location.at" class="fact">
-            <span class="fact__k">位置</span>
+            <span class="fact__k">{{ t('issuer.senderShareSheet.location') }}</span>
             <span class="fact__v selectable">{{ location.at }}</span>
           </div>
           <div v-if="location.stream" class="fact">
-            <span class="fact__k">同步流</span>
+            <span class="fact__k">{{ t('issuer.senderShareSheet.stream') }}</span>
             <span class="fact__v">{{ truncateMiddle(location.stream, 12) }}</span>
           </div>
           <div v-if="location.label" class="fact">
-            <span class="fact__k">标签</span>
+            <span class="fact__k">{{ t('issuer.senderShareSheet.label') }}</span>
             <span class="fact__v">{{ location.label }}</span>
           </div>
         </div>
 
         <div class="notice">
-          <MiuixText type="body2" weight="medium" color="var(--app-warning)">链接与二维码不含密码</MiuixText>
+          <MiuixText type="body2" weight="medium" color="var(--app-warning)">{{ t('issuer.senderShareSheet.noPasswordTitle') }}</MiuixText>
           <MiuixText type="footnote1" color="var(--m-color-on-surface-variant-summary)">
-            请在接收端内粘贴或扫码导入，然后把密码通过另一个安全渠道单独发送。任何拿到链接的人都能下载密文，只有密码能解开。
+            {{ t('issuer.senderShareSheet.noPasswordNote') }}
           </MiuixText>
         </div>
       </template>
 
       <template v-else-if="needsPush">
         <MiuixText type="body2" color="var(--m-color-on-surface-variant-summary)">
-          还没有成功推送过任何版本，因此没有可分享的链接。请先在同步卡片上点“立即推送”。
+          {{ t('issuer.senderShareSheet.needsPush') }}
         </MiuixText>
       </template>
 
       <MiuixText v-else-if="error" type="body2" color="var(--m-color-error)">{{ error }}</MiuixText>
 
-      <MiuixButton v-if="error" :disabled="loading" @click="load">重试</MiuixButton>
+      <MiuixButton v-if="error" :disabled="loading" @click="load">{{ t('issuer.senderShareSheet.retry') }}</MiuixButton>
     </div>
   </MiuixBottomSheet>
 </template>

@@ -1,0 +1,176 @@
+name: Build and release modules
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NDK_VERSION: 30.0.16248370
+  BUN_VERSION: latest
+
+jobs:
+  build:
+    name: Test and build Android modules
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Test release version preparation
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Prepare build versions
+        id: version
+        run: python3 .github/scripts/prepare_release.py
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android
+          components: rustfmt, clippy
+
+      - name: Set up Bun
+        id: bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Run host tests
+        run: cargo test --workspace --locked
+
+      - name: Lint Rust
+        run: cargo clippy --workspace --locked --all-targets -- -D warnings
+
+      - name: Set up Android NDK
+        shell: bash
+        run: |
+          if [[ ! -d "$ANDROID_HOME/ndk/$NDK_VERSION" ]]; then
+            sdkmanager "ndk;$NDK_VERSION"
+          fi
+          echo "NDK=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Build and verify both modules
+        run: ./build.sh
+
+      - name: Prepare checksums and release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          BUN_VERSION: ${{ steps.bun.outputs.bun-version }}
+        shell: bash
+        run: |
+          (cd dist && sha256sum ./*.zip > SHA256SUMS)
+          {
+            if [[ "$PRERELEASE" == true ]]; then
+              cat <<'WARNING'
+          > [!WARNING]
+          > **Nightly 测试版 / Experimental build**
+          > 自动构建自 main，可能存在回归或不可用的问题；通过主机测试不代表已通过真机验证。
+          > Built automatically from main; regressions or broken behavior are possible. Passing host tests does not mean device validation.
+          >
+          > 请先备份配置和现有 keybox，不建议用于依赖稳定性的设备。
+          > Back up your configuration and existing keybox first. Not recommended for devices that require stability.
+
+          WARNING
+            fi
+            cat <<NOTES
+          ## RKP-Mini v$VERSION
+
+          | 模块 / Module | 用途 / Purpose |
+          | --- | --- |
+          | \`rkp_mini_issuer-v$VERSION.zip\` | Qualcomm KeyMint Native V2 签发端，包含同步工具与 WebUI。<br>Issues RKP certificates via Qualcomm KeyMint Native V2; includes the sync CLI and WebUI. |
+          | \`rkp_mini_deployer-v$VERSION.zip\` | 接收与本地部署端，包含同步工具与 WebUI。<br>Receives and deploys keyboxes locally; includes the sync CLI and WebUI. |
+
+          ### 构建信息 / Build information
+
+          - 三个二进制与两个模块版本 / Version of all three binaries and both modules: \`$VERSION\`; \`versionCode=$VERSION_CODE\`
+          - 源码提交 / Source commit: [\`$GITHUB_SHA\`]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA)
+          - [测试与构建日志 / Test and build logs]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
+          - 目标与工具链 / Target and toolchain: Android arm64 / API 26; NDK \`$NDK_VERSION\`; Bun \`$BUN_VERSION\`
+          - 已通过：Rust 格式检查、主机测试、Clippy、WebUI 类型检查与双页面构建、ELF 与 ZIP 打包校验。
+            Passed: Rust formatting, host tests, Clippy, WebUI type-checking and both app builds, ELF and ZIP packaging checks.
+
+          ### 安装与校验 / Installation and verification
+
+          按用途选择 ZIP，在 KernelSU 管理器中安装。下载 \`SHA256SUMS\` 与 ZIP 后可执行 \`sha256sum --ignore-missing -c SHA256SUMS\`。
+          Choose the ZIP for your role and install it in the KernelSU manager. Download \`SHA256SUMS\` alongside the ZIP, then run \`sha256sum --ignore-missing -c SHA256SUMS\`.
+          详见[安装与使用说明 / Installation and usage guide]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/README.md#install--use)。
+
+          ### 支持范围与风险 / Scope and risks
+
+          > 仅支持 Qualcomm KeyMint Native V2，不保证 Play Integrity 通过。远程同步默认关闭；跨设备使用 keybox 属于克隆/伪装，并非合法 RKP provisioning。
+          > Qualcomm KeyMint Native V2 only; Play Integrity success is not guaranteed. Remote sync is disabled by default. Cross-device keybox use is cloning/spoofing, not legitimate RKP provisioning.
+          >
+          > 主机检查不覆盖真机签发、SELinux、安装/开机循环或目标模块热重载。
+          > Host checks do not cover on-device issuance, SELinux, installation/boot loops or target-module hot reload.
+          NOTES
+          } > dist/release-notes.md
+          cat dist/release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload module artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: rkp-mini-v${{ steps.version.outputs.version }}
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS
+            dist/release-notes.md
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.build.outputs.version }}
+      TAG: ${{ needs.build.outputs.tag }}
+      PRERELEASE: ${{ needs.build.outputs.prerelease }}
+    steps:
+      - name: Download verified artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: rkp-mini-v${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Publish release with changelog
+        shell: bash
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS
+          printf '\n### 更新记录 / Changelog\n\n' >> release-notes.md
+          gh api "repos/$GH_REPO/releases/generate-notes" \
+            --method POST -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
+            --jq '.body' >> release-notes.md
+          if [[ "$PRERELEASE" == true ]]; then
+            gh release create "$TAG" ./*.zip SHA256SUMS \
+              --target "$GITHUB_SHA" --title "RKP-Mini Nightly · v$VERSION" \
+              --notes-file release-notes.md --prerelease --latest=false
+          else
+            gh release create "$TAG" ./*.zip SHA256SUMS \
+              --verify-tag --title "RKP-Mini v$VERSION" \
+              --notes-file release-notes.md --latest
+          fi

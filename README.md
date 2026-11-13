@@ -55,6 +55,70 @@ Requires the Android NDK (`$NDK`, default `~/Android/Sdk/ndk/30.0.16248370`),
 WebUI-only iteration: `cd webui && bun run dev:issuer` / `bun run dev:deployer` preview
 each page in a browser against fixtures.
 
+### GitHub Actions releases
+
+`.github/workflows/release.yml` runs on every push to `main` and every `v*` tag push.
+Both paths run the release-version self-checks, Rust formatting, workspace host tests
+and Clippy, then `./build.sh` (WebUI type-check/build, Android arm64 binaries and ZIP
+validation). Publishing runs only after all checks pass, with write permission confined
+to the publish job. Both jobs use Ubuntu `26.04`; actions track their latest stable
+major tags (`checkout@v7`, `upload-artifact@v7`, `download-artifact@v8`,
+`setup-bun@v2`) and the Rust installer tracks `stable`. Patch/minor action updates
+are picked up automatically; `.github/dependabot.yml` checks daily and opens
+grouped PRs for newer action versions, including new majors (not auto-merged).
+Builds use stable Rust, NDK `30.0.16248370` and the latest stable Bun; the actual
+Bun version is recorded in the notes. Floating action references trade exact
+reproducibility and SHA pinning for automatic updates.
+Release notes include Chinese and English build information, install/verification
+instructions and scope/risk notices; nightly warnings are bilingual too.
+GitHub-generated changelog entries retain the original commit/PR text.
+
+Dependabot also checks the root Cargo workspace (all six crates, shared `Cargo.lock`)
+and `/webui` using the native `bun` ecosystem (`package.json` and `bun.lock`).
+All three ecosystems are checked daily; PRs carry `dependencies` plus one of
+`deps:actions`, `deps:rust` or `deps:webui`. Rust/WebUI minor and patch updates are
+grouped per ecosystem; major updates remain separate for review. `miuix-vue` is
+excluded to preserve the project's required exact `0.1.1` pin. No updates are
+auto-merged, and dependency PRs do not create Git release tags.
+Bun version updates are supported, but Dependabot security updates for Bun are not
+currently supported. These settings do not enable repository security alerts.
+The release workflow still runs only on `main`/tag pushes, not on dependency PRs.
+
+| Trigger | Version and publication |
+|---|---|
+| Push to `main` | Source module version + `-nightly.<UTC date>.<run number>.g<short SHA>`, e.g. `0.4.0-nightly.20261113.42.gabcdef0`; a distinct **Pre-release** for each run, with a test-build warning; never marked Latest |
+| Push tag `vX.Y.Z` | Tag version, e.g. `v0.5.0` → `0.5.0`; a normal release marked **Latest**, with generated change notes |
+
+Only canonical stable tags (`v0.5.0`, not `v01.5.0` or `v0.5.0-rc1`) are accepted.
+The tag is authoritative even when the checked-in package versions are older. In the
+ephemeral checkout, the version helper synchronizes all six workspace packages,
+their local `Cargo.lock` entries, and both modules' `version=v<version>` fields.
+All three binaries therefore report the same CI version. Both module `versionCode`
+values use the build's Unix timestamp, newer than the checked-in codes. Dependencies
+are not upgraded, and CI never commits version changes back to the repository.
+For nightly builds, the checked-in issuer and deployer versions must match.
+
+Each successful build uploads both module ZIPs, `SHA256SUMS` and the build notes to
+an Actions artifact retained for 30 days. Releases retain both ZIPs and `SHA256SUMS`;
+nightly releases are not automatically deleted or overwritten. A rerun never replaces
+an already published release with the same tag. Downloaded ZIPs can be checked with:
+
+```sh
+sha256sum --ignore-missing -c SHA256SUMS
+```
+
+To publish a stable release from the intended commit:
+
+```sh
+git tag v0.5.0
+git push origin v0.5.0
+```
+
+No personal access token is needed: publishing uses the workflow's `GITHUB_TOKEN`.
+Repository/organization policy must allow Actions and release creation; a private
+repository's artifacts and releases remain private. Host checks do not establish
+device issuance, installation, SELinux behavior or hot reload.
+
 ## Install & use
 
 1. KernelSU manager → install `dist/rkp_mini_issuer-v0.4.0.zip` → reboot (or reopen the module

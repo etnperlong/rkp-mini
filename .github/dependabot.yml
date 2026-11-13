@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+    labels: [dependencies, 'deps:actions']
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: daily
+    labels: [dependencies, 'deps:rust']
+    groups:
+      rust:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  - package-ecosystem: bun
+    directory: /webui
+    schedule:
+      interval: daily
+    labels: [dependencies, 'deps:webui']
+    ignore:
+      - dependency-name: miuix-vue
+    groups:
+      webui:
+        patterns: ['*']
+        update-types: [minor, patch]

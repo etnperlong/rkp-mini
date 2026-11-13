@@ -13,7 +13,7 @@ path = "src/main.rs"
 rkp-mini-core = { path = "../rkp-mini-core" }
 rkp-mini-runtime = { path = "../rkp-mini-runtime" }
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 der = "0.7"
 libc = "0.2"
 p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }

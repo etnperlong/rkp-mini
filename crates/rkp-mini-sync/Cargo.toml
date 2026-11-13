@@ -14,7 +14,7 @@ rkp-mini-core = { path = "../rkp-mini-core" }
 rkp-mini-runtime = { path = "../rkp-mini-runtime" }
 rkp-mini-sync-core = { path = "../rkp-mini-sync-core" }
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 hex = "0.4"
 libc = "0.2"
 qrcode = { version = "0.14", default-features = false }

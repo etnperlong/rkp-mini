@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # RKP-Mini Deployer composition entry point. Accepts only:
-#   action  foreground fetch + apply (Action button; TTY prompts preserved)
+#   action  foreground fetch + apply (manual, root shell; TTY prompts preserved)
 #   run     WebUI fetch + apply task, results in <tmp>/sync-task
 #   auto    unattended fetch + apply, results in <tmp>/sync-auto
 # The receiver data root stays /data/adb/rkp_sync; binaries come from this

@@ -62,7 +62,7 @@ each page in a browser against fixtures.
    uninstall it first (its data at `/data/misc/keystore/rkp-mini` is kept and reused).
 2. Tap **Open** on the module card for the WebUI: check the 状态 tab, then 签发 → **立即签发**.
    Issuance runs in the background; closing the WebUI does not interrupt it, and reopening
-   shows the result. Alternatively tap **Action**, or run:
+   shows the result. From a root shell:
 
 ```sh
 su -c '/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-issuer issue --acknowledge'
@@ -149,9 +149,10 @@ DEPLOY plan                                  # preview
 DEPLOY apply --confirm-first <keybox_sha256> # or --allow-identity-change for a rotation
 ```
 
-The module Action (and the WebUI task) runs `fetch` and then `apply --if-staged`, so a failed
-fetch still repairs a damaged target from staging that was already verified; a first
-deployment or an identity change outside the policy stays `pending` until it is approved.
+The WebUI's 立即部署 runs `fetch` and then `apply --if-staged`, so a failed fetch still repairs a
+damaged target from staging that was already verified; a first deployment or an identity change
+outside the policy stays `pending` until it is approved. `sh run.sh action` in the module directory
+does the same in a root shell.
 
 Auto-issue does not need sync: `rkp-mini-issuer config set auto_issue_days 3` (or WebUI → 签发 →
 自动签发设置; `0` turns it off) makes the issuer module's `auto-loop.sh` run `rkp-mini-issuer issue
@@ -163,6 +164,12 @@ passes (sync enabled, `password_mode = "secret-file"`, the default). The receive
 `deployer apply --auto --if-staged`. Doze/vendor power saving may delay these loops. Logs:
 `logs/auto.log` (sender) and `logs/sync.log` (receiver) under each data root (seq/hash/provider/error
 codes only); the last auto-issue check is kept in `tmp/auto-issue.last.*`.
+
+The **Action** button on either module card runs one round of that module's loop right now
+(issuer: auto-issue if due, then auto-push; deployer: the verified gate, `fetch --auto`,
+`apply --auto --if-staged`). The round's lines appear in the Action console and are appended to
+the same log the WebUI shows (更多 → 日志 → 后台日志). It is not a forced issuance: with
+`auto_issue_days = 0` the issuer round skips issuing; use 立即签发 for that.
 
 Identity changes on the receiver follow `[deploy].identity_change_policy`: `scheduled`
 (default) deploys a new keybox automatically only within `rotation_lead_days` (default 4) of the old

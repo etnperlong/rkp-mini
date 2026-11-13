@@ -28,7 +28,7 @@ set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/sync-loop.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
-# run.sh is executed by the Action hook and the WebUI runner.
+# run.sh is executed by the loop (auto), the WebUI runner (run) and by hand (action).
 set_perm "$MODPATH/run.sh" 0 0 0755
 # lib/run.sh is only sourced; it stays 0644 from set_perm_recursive.
 

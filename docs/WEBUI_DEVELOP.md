@@ -717,8 +717,8 @@ cargo test --workspace --locked
 
 # 打包
 NDK=/path/to/ndk ./build.sh
-unzip -l dist/rkp_mini_issuer-v0.3.1.zip
-unzip -l dist/rkp_mini_deployer-v0.3.1.zip
+unzip -l dist/rkp_mini_issuer-v0.4.0.zip
+unzip -l dist/rkp_mini_deployer-v0.4.0.zip
 
 # 设备
 su -c '/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-issuer status --json'

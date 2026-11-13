@@ -26,6 +26,6 @@ zeroize = "1"
 [dev-dependencies]
 rkp-mini-core = { path = "../rkp-mini-core", features = ["test-support"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
-rcgen = "0.13"
+rcgen = "0.14"
 tempfile = "3"
 time = "0.3"

@@ -1,282 +1,99 @@
-# RKP Mini
+<div align="center">
 
-Minimal KernelSU modules that issue an Android RKP keybox on **Qualcomm** devices
-by driving the on-device KeyMint TA as a CSR signing oracle (Native V2, vendor
-command `0x3122`). Target: a single Qualcomm reference device (arm64); other devices and firmware are untested.
+# RKP-Mini
 
-> Scope: **only** Native V2 (`0x3122`). No V1, no AIDL V2, no TEE/boot-state spoofing.
-> See the original external design note.
->
-> Remote private-key deployment (`rkp-mini-sync`) is opt-in and disabled by default. It
-> encrypts the keybox to user-controlled storage (Gist/WebDAV/public HTTPS) with an age
-> passphrase. Enabling it requires explicit risk acceptance. It does not guarantee Play
-> Integrity, and using a keybox on a different device is keybox cloning / spoofing, not a
-> legitimate RKP provisioning path.
+**Issue an Android RKP keybox on a Qualcomm device, and optionally sync it, encrypted, to another one.**
 
-Three commands, three jobs — they never call each other:
+[![Build](https://img.shields.io/github/actions/workflow/status/etnperlong/rkp-mini/release.yml?branch=main&style=flat-square&label=build)](https://github.com/etnperlong/rkp-mini/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/etnperlong/rkp-mini?include_prereleases&style=flat-square&label=release)](https://github.com/etnperlong/rkp-mini/releases)
+![Status](https://img.shields.io/badge/status-experimental-orange?style=flat-square)
+![Platform](https://img.shields.io/badge/Android-arm64-3DDC84?style=flat-square&logo=android&logoColor=white)
+![KernelSU](https://img.shields.io/badge/KernelSU-module-4B5563?style=flat-square)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
-| Command | Job |
-|---|---|
-| `rkp-mini-issuer` | obtain a keybox from the KeyMint TA, inspect local status |
-| `rkp-mini-sync` | push the keybox to / fetch it from encrypted remote storage |
-| `rkp-mini-deployer` | write an already-verified staged keybox to local targets |
+**English** | [简体中文](README_ZH.md)
 
-Two modules use them: **RKP-Mini Issuer** (`rkp_mini_issuer`, ships issuer + sync) and
-**RKP-Mini Deployer** (`rkp_mini_deployer`, ships sync + deployer).
+</div>
 
-## What it does
+RKP-Mini is a pair of KernelSU modules with a built-in WebUI. The **Issuer** asks the device's
+own Qualcomm KeyMint TA (Native V2, vendor command `0x3122`) to sign a CSR for a fresh P-256
+key, requests certificates from the Google RKP service, and writes a TrickyStore-compatible
+`keybox.xml`. The **Deployer** receives that keybox on another device and installs it.
 
-- `rkp-mini-issuer status` — read-only prereq + keybox check, updates module description.
-- `rkp-mini-issuer issue --acknowledge` — generate P-256 key → fetch RKP challenge → sign
-  CSR via KeyMint `0x3122` → `signCertificates` → validate chain → write keybox.
-- `rkp-mini-issuer remove --yes` — delete the issued keybox, its `.prev` backup, private key, chain
-  and `meta.json` from the output directory (refused while an issuance holds `tmp/issue.lock`).
-- `rkp-mini-sync` — sender: `push`, `share`, `rotate-password`, `remote-delete`; receiver: `import`,
-  `fetch`; both: `check-remote` (read-only update check).
-- `rkp-mini-deployer` — `plan`, `apply`, `targets`, `add-target`, `remove-target`, `remove`.
-- KernelSU WebUI — issuer page: status, prerequisite checks, one-tap issuance with
-  result/failure diagnostics, certificate details, issue logs, read-only config and the
-  remote-sync (sender) section. Deployer page: import, first-use confirmation, deployment
-  preview/approval, target management and the combined fetch+deploy result.
+> [!WARNING]
+> - **Experimental.** Developed against a single Qualcomm reference device (arm64). Other devices and firmware are untested, and no successful on-device issuance has been recorded.
+> - **Native V2 only.** Unsupported firmware gets a clear error: no V1/AIDL fallback, no TEE or boot-state spoofing. Passing Play Integrity is not guaranteed.
+> - **Remote sync is off by default.** Using a keybox on a different device is keybox cloning/spoofing, not legitimate RKP provisioning. You must accept the risks before it can be enabled.
 
-## Build
+## Modules
 
-```sh
-./build.sh
-```
+| Module | Install on | What it does |
+|---|---|---|
+| **RKP-Mini Issuer** (`rkp_mini_issuer`) | The Qualcomm device that issues | Issues and renews the keybox; optionally pushes it, encrypted, to your own GitHub Gist or WebDAV |
+| **RKP-Mini Deployer** (`rkp_mini_deployer`) | The device that receives | Fetches, decrypts and checks the keybox, then writes it for OhMyKeymint, TEESimulator, TrickyStore / TEESimulator-RS or a custom path |
 
-Produces `dist/rkp_mini_issuer-v0.4.0.zip` and `dist/rkp_mini_deployer-v0.4.0.zip`
-(binaries, hooks and `webroot/`), both installable from the KernelSU manager. Every
-`rkp-mini-*` dependency of a package is compiled from the same workspace: the two ZIPs ship
-a byte-identical `rkp-mini-sync`.
+The WebUI speaks 简体中文, 繁體中文, English, 日本語, 한국어, Deutsch, Français and Italiano.
 
-Requires the Android NDK (`$NDK`, default `~/Android/Sdk/ndk/30.0.16248370`),
-`rustup target add aarch64-linux-android` and [Bun](https://bun.sh) for the WebUI.
-WebUI-only iteration: `cd webui && bun run dev:issuer` / `bun run dev:deployer` preview
-each page in a browser against fixtures.
+## Requirements
 
-### GitHub Actions releases
-
-`.github/workflows/release.yml` runs on every push to `main` and every `v*` tag push.
-Both paths run the release-version self-checks, Rust formatting, workspace host tests
-and Clippy, then `./build.sh` (WebUI type-check/build, Android arm64 binaries and ZIP
-validation). Publishing runs only after all checks pass, with write permission confined
-to the publish job. Both jobs use Ubuntu `26.04`; actions track their latest stable
-major tags (`checkout@v7`, `upload-artifact@v7`, `download-artifact@v8`,
-`setup-bun@v2`) and the Rust installer tracks `stable`. Patch/minor action updates
-are picked up automatically; `.github/dependabot.yml` checks daily and opens
-grouped PRs for newer action versions, including new majors (not auto-merged).
-Builds use stable Rust, NDK `30.0.16248370` and the latest stable Bun; the actual
-Bun version is recorded in the notes. Floating action references trade exact
-reproducibility and SHA pinning for automatic updates.
-Release notes include Chinese and English build information, install/verification
-instructions and scope/risk notices; nightly warnings are bilingual too.
-GitHub-generated changelog entries retain the original commit/PR text.
-
-Dependabot also checks the root Cargo workspace (all six crates, shared `Cargo.lock`)
-and `/webui` using the native `bun` ecosystem (`package.json` and `bun.lock`).
-All three ecosystems are checked daily; PRs carry `dependencies` plus one of
-`deps:actions`, `deps:rust` or `deps:webui`. Rust/WebUI minor and patch updates are
-grouped per ecosystem; major updates remain separate for review. `miuix-vue` is
-excluded to preserve the project's required exact `0.1.1` pin. No updates are
-auto-merged, and dependency PRs do not create Git release tags.
-Bun version updates are supported, but Dependabot security updates for Bun are not
-currently supported. These settings do not enable repository security alerts.
-The release workflow still runs only on `main`/tag pushes, not on dependency PRs.
-
-| Trigger | Version and publication |
-|---|---|
-| Push to `main` | Source module version + `-nightly.<UTC date>.<run number>.g<short SHA>`, e.g. `0.4.0-nightly.20261113.42.gabcdef0`; a distinct **Pre-release** for each run, with a test-build warning; never marked Latest |
-| Push tag `vX.Y.Z` | Tag version, e.g. `v0.5.0` → `0.5.0`; a normal release marked **Latest**, with generated change notes |
-
-Only canonical stable tags (`v0.5.0`, not `v01.5.0` or `v0.5.0-rc1`) are accepted.
-The tag is authoritative even when the checked-in package versions are older. In the
-ephemeral checkout, the version helper synchronizes all six workspace packages,
-their local `Cargo.lock` entries, and both modules' `version=v<version>` fields.
-All three binaries therefore report the same CI version. Both module `versionCode`
-values use the build's Unix timestamp, newer than the checked-in codes. Dependencies
-are not upgraded, and CI never commits version changes back to the repository.
-For nightly builds, the checked-in issuer and deployer versions must match.
-
-Each successful build uploads both module ZIPs, `SHA256SUMS` and the build notes to
-an Actions artifact retained for 30 days. Releases retain both ZIPs and `SHA256SUMS`;
-nightly releases are not automatically deleted or overwritten. A rerun never replaces
-an already published release with the same tag. Downloaded ZIPs can be checked with:
-
-```sh
-sha256sum --ignore-missing -c SHA256SUMS
-```
-
-To publish a stable release from the intended commit:
-
-```sh
-git tag v0.5.0
-git push origin v0.5.0
-```
-
-No personal access token is needed: publishing uses the workflow's `GITHUB_TOKEN`.
-Repository/organization policy must allow Actions and release creation; a private
-repository's artifacts and releases remain private. Host checks do not establish
-device issuance, installation, SELinux behavior or hot reload.
+- Rooted arm64 device with KernelSU.
+- Issuer only: Qualcomm hardware exposing `/vendor/lib64/libkeymasterdeviceutils.so` and `/dev/smcinvoke`, plus network access.
+- Deployer only: at least one of the target modules above.
 
 ## Install & use
 
-1. KernelSU manager → install `dist/rkp_mini_issuer-v0.4.0.zip` → reboot (or reopen the module
-   page). The installer refuses to run while the legacy `rkp_mini` module is still installed:
-   uninstall it first (its data at `/data/misc/keystore/rkp-mini` is kept and reused).
-2. Tap **Open** on the module card for the WebUI: check the 状态 tab, then 签发 → **立即签发**.
-   Issuance runs in the background; closing the WebUI does not interrupt it, and reopening
-   shows the result. From a root shell:
+1. Download the ZIP for your role from [Releases](https://github.com/etnperlong/rkp-mini/releases).
+   Optional check: `sha256sum --ignore-missing -c SHA256SUMS`.
+2. Install it in the KernelSU manager and reboot.
+3. Tap **Open** on the module card.
 
-```sh
-su -c '/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-issuer issue --acknowledge'
-```
+### Issue a keybox
 
-3. Artifacts land in `/data/misc/keystore/rkp-mini/output` (`keybox.xml`, `cert-chain.pem`,
-   `cert-chain.der`, `private-key.pem`, `meta.json`). Copy `keybox.xml` into your keystore
-   module yourself, or use the opt-in remote sync / deployer module below.
+1. **Status** tab: make sure every prerequisite check passes.
+2. **Issue** tab → **Issue now**. Issuance runs in the background; you can close the page and come back for the result.
+3. The keybox is written to `/data/misc/keystore/rkp-mini/output/keybox.xml`. Copy it to your keystore module, or let the Deployer do it (below).
 
-When issuance fails, the WebUI result sheet shows the stage, error code, `ta_status` and
-stderr; full logs live in `/data/misc/keystore/rkp-mini/logs/issue-<unix>.log` (also
-viewable under WebUI → 更多 → 日志). A failed run leaves the existing `keybox.xml` in place.
+Qualcomm RKP certificates last only about 12–14 days. Turn on auto-issue under
+**Issue → Issue settings** (3 days is recommended) and the module renews in the background.
 
-## go/no-go (reference device)
+### Sync to another device (optional)
 
-KeyMint 3 firmware may reject `0x3122`:
+1. **Sender** (Issuer → **Sync** tab): choose Gist or WebDAV, set an encryption passphrase and the
+   Gist token / WebDAV app password, tick every risk item, push, then share the link or QR code.
+2. **Receiver** (Deployer): import the link, enter the passphrase (send it over a different
+   channel), add a deployment target, tap **Deploy now** and confirm the first version shown.
 
-- `-100` UNIMPLEMENTED — TA lacks the command.
-- `-18` INCOMPATIBLE_KEY_FORMAT — TA wants MacedPublicKey; Native V2 unavailable.
-- `-40` INVALID_TAG — vendor command/frame mismatch.
-- HTTP `444` from `signCertificates` — device not registered.
+After that both sides refresh on their own: the Issuer about every 12 h, the Deployer about every 8 h.
 
-On any of these the module stops with a clear error; it never falls back to V1/AIDL.
+- Your storage only ever holds ciphertext; the link and QR code carry the location, never the passphrase.
+- Disabling sync or deleting the remote file does **not** revoke a keybox already received. To revoke, change the passphrase **and** issue a new keybox.
+- The receiver checks structure, key match and expiry. It does not verify certificate signatures, root trust or revocation.
 
-## Remote keybox sync and local deployment (opt-in)
+## Troubleshooting
 
-Design: `docs/REMOTE_SYNC_DEVELOP.md`. No server, accounts or remote revocation: the keybox
-is sealed into one ASCII-armored age file (`rkp-sync.age`, scrypt passphrase) together with a
-CBOR manifest (`stream_id`, monotonic `seq`, `prev` hash, keybox digests). The cloud only ever
-sees ciphertext; links and QR codes carry the location only, never the passphrase or a token.
+A failed issuance never replaces the existing keybox. The result sheet shows the stage, error
+code and `ta_status`; full logs are under **More → Logs**.
 
-- **Sender** (`rkp_mini_issuer` module, ships `bin/rkp-mini-sync`): uploads to a secret GitHub
-  Gist (PAT with `gist` scope) or WebDAV (app password; PUT temp + MOVE, `If-Match` fallback).
-- **Receiver** (`rkp_mini_deployer` module): `rkp-mini-sync import`/`fetch` read a Gist raw link
-  without a token, WebDAV, or a public HTTPS file; they decrypt, enforce
-  `stream_id`/`seq`/`prev`/expiry and strict keybox checks (no DTD, EC-only, chain 2..8 leaf→root,
-  key/leaf match, DeviceID derivation) and stage the keybox (`0600`). `rkp-mini-deployer apply`
-  then writes it atomically to locally configured targets: OhMyKeymint
-  (`/data/misc/keystore/omk/keybox.xml`, `1017:1017`; skipped with `omk_incompatible` when a
-  precheck mirroring OMK's own scanner predicts OMK would reject the keybox and replace it with
-  its bundled template), TEESimulator (a `.xml` file in
-  `/data/adb/teesim/`, must be referenced by `config.json`), TrickyStore or TEESimulator-RS
-  (both read `/data/adb/tricky_store/keybox.xml`), or a custom opt-in path. Each of these
-  modules watches its keybox directory and reloads the replaced file without a reboot.
-  `rkp-mini-deployer targets` lists the built-in targets and whether the owning module is
-  installed; the WebUI only offers targets whose module was detected. Tool configs (OMK
-  `config.toml` / `injector.toml`, TEESim `config.json`) are never synced.
-- Certificate signatures, root trust and revocation are **not** verified.
+| Error | Meaning |
+|---|---|
+| `-100` UNIMPLEMENTED | The KeyMint TA lacks command `0x3122` |
+| `-18` INCOMPATIBLE_KEY_FORMAT | The TA expects a MacedPublicKey; Native V2 is unavailable |
+| `-40` INVALID_TAG | Vendor command/frame mismatch |
+| HTTP `444` | Google's RKP service does not recognize the device |
 
-**WebUI (recommended).** Sender: issuer module → Open → “远程同步” card: initialize, choose
-Gist/WebDAV, set the age passphrase and token/app password, tick every risk item to enable,
-push, then share the link/QR. Receiver: deployer module → Open: paste the link, review the
-location, accept the risks, enter the passphrase received over a separate channel, add a
-deployment target, run the task (confirm the first version's seq/device/expiry, review the
-plan and deploy with the sha of the keybox you just saw). Secrets typed into the pages are
-written by shell builtins into a 0600 inbox file that `rkp-mini-sync` consumes and deletes;
-they never appear in process arguments, URLs or logs. A *debug* build of the KernelSU manager
-logs shell commands to logcat — use a release build.
+These mean the firmware is not supported; RKP-Mini will not try another protocol.
 
-**CLI** (root shell; the same operations). Sender, `SYNC` = `/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-sync`:
+## Documentation
 
-```sh
-SYNC --role sender --config /data/misc/keystore/rkp-mini/config.toml init --provider gist
-SYNC --role sender secret set age            # passphrase from TTY (no echo) → sync/age.pass 0600
-SYNC --role sender secret set gist-token     # or: secret set webdav-password
-SYNC --role sender enable                    # shows the risk statement; type I ACCEPT
-                                             # (non-interactive: review `risk`, then
-                                             #  `enable --accept-risk <version>`)
-SYNC --role sender push                      # first push creates the secret gist
-SYNC --role sender share                     # import link + QR (no password inside)
-```
+- [Usage guide](docs/USAGE.md): command line, automation, revocation, migrating from the old `rkp_mini` / `rkp_sync` modules
+- [Development](docs/DEVELOPMENT.md): building, testing, releases
+- Design records: [remote sync](docs/REMOTE_SYNC_DEVELOP.md), [WebUI](docs/WEBUI_DEVELOP.md)
 
-Receiver, `SYNC` = `/data/adb/modules/rkp_mini_deployer/bin/rkp-mini-sync` and
-`DEPLOY` = `/data/adb/modules/rkp_mini_deployer/bin/rkp-mini-deployer`
-(append `--config /data/adb/rkp_sync/config.toml --role receiver` to both):
+## Acknowledgements
 
-```sh
-SYNC import 'rkpsync://v1/import?p=…'         # review location, accept risk, enter passphrase
-DEPLOY targets                               # which target modules are installed
-DEPLOY add-target omk                        # or teesim / tricky_store
-SYNC fetch                                   # first version: trust-on-first-use confirmation
-                                             # (non-interactive: --accept-first <plaintext_sha256>)
-DEPLOY plan                                  # preview
-DEPLOY apply --confirm-first <keybox_sha256> # or --allow-identity-change for a rotation
-```
-
-The WebUI's 立即部署 runs `fetch` and then `apply --if-staged`, so a failed fetch still repairs a
-damaged target from staging that was already verified; a first deployment or an identity change
-outside the policy stays `pending` until it is approved. `sh run.sh action` in the module directory
-does the same in a root shell.
-
-Auto-issue does not need sync: `rkp-mini-issuer config set auto_issue_days 3` (or WebUI → 签发 →
-自动签发设置; `0` turns it off) makes the issuer module's `auto-loop.sh` run `rkp-mini-issuer issue
---if-expiring-days 3` about every 12 h, so a new keybox is issued only when the current leaf has
-≤ 3 days left. Native Qualcomm RKP leaves are valid for only ~12–14 days, so keep N small: N ≥ 12
-re-issues on every check (the WebUI warns above 14). The same loop runs `sync push --auto` right after while `rkp-mini-sync check-auto`
-passes (sync enabled, `password_mode = "secret-file"`, the default). The receiver loop runs every
-~8 h only while sync is enabled: `sync check-auto --require-verified`, then `sync fetch --auto` and
-`deployer apply --auto --if-staged`. Doze/vendor power saving may delay these loops. Logs:
-`logs/auto.log` (sender) and `logs/sync.log` (receiver) under each data root (seq/hash/provider/error
-codes only); the last auto-issue check is kept in `tmp/auto-issue.last.*`.
-
-The **Action** button on either module card runs one round of that module's loop right now
-(issuer: auto-issue if due, then auto-push; deployer: the verified gate, `fetch --auto`,
-`apply --auto --if-staged`). The round's lines appear in the Action console and are appended to
-the same log the WebUI shows (更多 → 日志 → 后台日志). It is not a forced issuance: with
-`auto_issue_days = 0` the issuer round skips issuing; use 立即签发 for that.
-Action's prompts and step summaries follow the language last synchronized from the WebUI, using
-the owning binary's embedded catalog. Shared loop log messages use the same language; JSON results,
-machine codes, exit behavior and raw binary diagnostics remain unchanged. Before the first language
-synchronization, or if the saved language is invalid, these prompts default to Simplified Chinese.
-
-The module card description follows the language selected in WebUI → More → Appearance → Language.
-Opening the WebUI or changing its language saves the resolved language for subsequent native status
-updates, including background issuance; refresh the KernelSU module list to see the new description.
-The deployer translates its existing introduction, not a new live status summary. With “System” selected,
-system-language changes are picked up the next time the WebUI opens. Before the first synchronization,
-the module description remains Chinese; raw diagnostic details retain their original language.
-Descriptions are rendered by the owning binary from its embedded `rust-i18n` catalog, independently
-of the WebUI's `vue-i18n` messages. The WebUI shares only the active language code and calls the owning
-binary's `update-description` command. The issuer refresh checks local status without issuing a keybox;
-the deployer refreshes its introduction without initializing or enabling sync. If native synchronization
-fails, the WebUI keeps the selected language and reports the error on a manual language change.
-
-Identity changes on the receiver follow `[deploy].identity_change_policy`: `scheduled`
-(default) deploys a new keybox automatically only within `rotation_lead_days` (default 4) of the old
-leaf's expiry and when the new leaf outlives it; otherwise it is held as `pending`. OMK's
-`retire_stale_keybox_bound_keys` (default true) deletes client keys bound to a replaced keybox.
-
-Disable with `sync disable` (stops loops, keeps deployed keyboxes); on the sender
-`sync config set auto_push false` stops only the automatic push. `sync forget` deletes local
-secrets/state (`--reset` on the sender also drops the `[sync]` table); `sync remote-delete --yes`
-deletes the sender's remote file (a whole Gist); `deployer remove --yes` deletes deployed keyboxes.
-Uninstalling either module keeps its data root. Neither disabling nor deleting the remote file is
-revocation: receivers keep what they fetched. Change the passphrase
-(`sync rotate-password`) **and** re-issue the keybox. Old Gist revisions still decrypt with the
-old passphrase. Treat a lost device or root compromise on either side as a passphrase and key
-leak.
-
-### Migrating from the old single-module layout
-
-The old `rkp_mini` (sender) and `rkp_sync` (receiver) modules use the same data roots. Disable
-and uninstall the old module, keep `/data/adb/rkp_sync` (the old receiver uninstaller deletes
-it — back it up first), then install the new module; the new installers refuse to run while the
-legacy module of the same role is present.
-
-## Extension points (not implemented)
-
-- Ed25519-signed manifests (v1 relies on the age passphrase alone).
+- [Duck ToolBox](https://github.com/eltavine/Duck-ToolBox): its device RKP issuer is the model for the issuance flow here.
+- [TeeForge-CD](https://github.com/mcxiaochenn/TeeForge-CD): its slimmed-down take on Duck ToolBox's issuance was the reference for keeping this project minimal.
 
 ## License
 
-MIT. Portions modelled on Duck-ToolBox (MIT).
+[MIT](LICENSE) © 2026 Evans Mike

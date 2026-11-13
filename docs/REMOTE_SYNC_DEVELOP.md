@@ -1,312 +1,316 @@
-# RKP Mini 远程同步（rkp-mini-sync）设计方案
+# RKP Mini Remote Sync (rkp-mini-sync) Design
 
-> 状态：CLI/协议已实现（2026-11-10）；**§19 WebUI 修订**为同日新增决策，按 §19 实现。
-> 读者：接手实现的新 Agent 会话。
-> 先读：仓库根 `AGENTS.md`（Rust 侧约束与验证命令），再读本文。
-> 范围：新增“加密同步 + 接收端部署”能力；不改现有 KeyMint `0x3122` 签发协议，但**扩展仓库 scope**（见 §13）。
-> 本文的决策已经过产品讨论确认；实现时不要重新论证，除非发现事实性错误。
+[简体中文](REMOTE_SYNC_DEVELOP_ZH.md) | **English**
 
----
+> English translation of the Chinese original ([REMOTE_SYNC_DEVELOP_ZH.md](REMOTE_SYNC_DEVELOP_ZH.md)), which is authoritative where the two differ.
 
-## 0. 一句话
-
-把 `rkp-mini-issuer` 签发出的 `keybox.xml` 用 **age v1 口令加密**成单文件密文，上传到用户自己的 **GitHub Gist / WebDAV / 公开 HTTPS**；接收端通过 **不含密码的 URL Scheme** 导入位置，手动输入密码解密、校验、写入本地 `sync-state`，再由**独立部署层**决定写入 OhMyKeymint、TEESimulator 或其它目标。
-
-- 没有服务端。
-- 没有账号注册、设备注册、远端撤销列表。
-- 云端只看到密文。
-- URL/二维码永远不包含 age 密码、Gist token、WebDAV 密码。
-- 同步层与部署层解耦；`sync-state` 不出现 target/path。
-- 独立二进制 `rkp-mini-sync`，不把网络/密码/同步依赖塞进 `rkp-mini-issuer`。
+> Status: CLI/protocol implemented (2026-11-10); the **§19 WebUI revision** is a decision added the same day; implement per §19.
+> Reader: a new agent session taking over the implementation.
+> Read first: repository root `AGENTS.md` (Rust-side constraints and verification commands), then this document.
+> Scope: adds "encrypted sync + receiver-side deployment"; does not change the existing KeyMint `0x3122` issuance protocol, but **expands the repository scope** (see §13).
+> The decisions here were confirmed through product discussion; do not re-argue them during implementation unless a factual error is found.
 
 ---
 
-## 1. 已定决策（不要再重新论证）
+## 0. One sentence
 
-| 决策 | 结论 | 理由 |
+Encrypt the `keybox.xml` issued by `rkp-mini-issuer` into a single ciphertext file with **age v1 passphrase encryption**, and upload it to the user's own **GitHub Gist / WebDAV / public HTTPS**; the receiver imports the location through a **URL Scheme that carries no passphrase**, manually enters the passphrase to decrypt, verify, and write the local `sync-state`, and then an **independent deploy layer** decides whether to write OhMyKeymint, TEESimulator, or another target.
+
+- No server.
+- No account registration, device registration, or remote revocation list.
+- The cloud only ever sees ciphertext.
+- URLs/QR codes never contain the age passphrase, the Gist token, or the WebDAV password.
+- The sync layer and the deploy layer are decoupled; `sync-state` never contains target/path.
+- A separate `rkp-mini-sync` binary; network/passphrase/sync dependencies are not stuffed into `rkp-mini-issuer`.
+
+---
+
+## 1. Settled decisions (do not re-argue)
+
+| Decision | Conclusion | Rationale |
 |---|---|---|
-| 服务端 | **完全不做** | 使用现有 Gist/WebDAV/公开 HTTP；避免部署、账号、撤销服务 |
-| 加密 | age v1 passphrase + ASCII armor | 成熟、口令模式简单、Gist 需要文本 |
-| manifest | 放在 age 密文内部（CBOR） | 不需要额外签名公钥；密码同时提供机密性和完整性 |
-| 远端文件 | 一个 `rkp-sync.age` | 原子替换简单；无多文件事务 |
-| Gist 接收端 | **直链，不需要 GitHub Token** | secret gist 的 raw URL 可直接读；密码保护内容 |
-| Gist 发送端 | 需要 `gist` scope token | 创建/更新 gist 必须认证 |
-| WebDAV | 自定义路径/文件名；密码单独输入 | 兼容坚果云等；URL 不含密码 |
-| 公开 HTTP | 支持 `provider=url` | 部分 WebDAV 有公开分享链接；仍需密码 |
-| URL Scheme | 只含位置和 stream 元数据 | 密码/token 永不进 URL/二维码 |
-| 状态 | 拆成 `sync-state` 与 `deploy-state` | 同步层不知道部署目标，便于解耦 |
-| `sync-state` | 不含 `target` / `target_path` / owner / reload | 部署方式在接收后由部署层决定 |
-| 二进制 | 独立 `rkp-mini-sync` | 接收端不需要 KeyMint/TA；降低攻击面和依赖 |
-| 自动运行 | 默认 `secret-file` | 发送端/接收端都能长期无人值守 |
-| 接收端设备 | **新设备**，跨设备使用 | 必须在 UI 首次启用时接受风险 |
-| 默认开关 | `sync.enabled = false` | 远程私钥下发是高危能力 |
-| 身份轮换 | 默认 `scheduled` | 避免每次 push 都换 keybox；临近到期才自动轮换 |
-| 管理界面 | **WebUI 为主入口**（发送端并入 `rkp_mini_issuer` WebUI；接收端模块自带 WebUI），CLI 保留同等能力 | 见 §19 |
-| 密钥写入 | WebUI 经 `ksu.exec` 用 shell 内建把 **hex 编码**的密钥写入 0600 inbox 文件，`rkp-mini-sync` 读取、校验、落盘并删除 inbox | `ksu.exec` 走 root shell 的 stdin，不进 argv；见 §19.2 |
-| 非交互确认 | `enable --accept-risk <版本>`；`fetch --accept-first <sha>`；`rkp-mini-deployer apply --confirm-first/--allow-identity-change <sha>` | 确认绑定到用户看到的那个版本，防并发替换 |
-| 自动签发 | 以 `auto_issue_days` 为“剩余天数阈值” | 不做无条件周期签发 |
-| 工具配置 | **不同步** | OMK `[crypto]`、TEESim `config.json` 是设备/身份相关 |
-| 额外签名 | 默认不做 Ed25519 | 密码是唯一信任锚；减少公钥分发 |
-| 撤销 | 换密码 + 重新 issue keybox | 无服务端，无法真正远程撤销旧 keybox |
+| Server | **Not built at all** | Use existing Gist/WebDAV/public HTTP; avoids deployment, accounts, and revocation services |
+| Encryption | age v1 passphrase + ASCII armor | Mature, simple passphrase mode, Gist needs text |
+| manifest | Inside the age ciphertext (CBOR) | No extra signing public key; the passphrase provides confidentiality and integrity at once |
+| Remote file | A single `rkp-sync.age` | Atomic replacement is simple; no multi-file transaction |
+| Gist receiver | **Direct link, no GitHub token needed** | The raw URL of a secret gist can be read directly; the passphrase protects the content |
+| Gist sender | Needs a `gist` scope token | Creating/updating a gist requires authentication |
+| WebDAV | Custom path/filename; password entered separately | Compatible with Jianguoyun etc.; the URL carries no password |
+| Public HTTP | Supports `provider=url` | Some WebDAV setups have public share links; the passphrase is still required |
+| URL Scheme | Only location and stream metadata | Passphrase/token never enter the URL/QR code |
+| State | Split into `sync-state` and `deploy-state` | The sync layer does not know the deploy target, which keeps them decoupled |
+| `sync-state` | No `target` / `target_path` / owner / reload | The deploy method is decided by the deploy layer after receiving |
+| Binary | Separate `rkp-mini-sync` | The receiver does not need KeyMint/TA; smaller attack surface and fewer dependencies |
+| Automatic runs | `secret-file` by default | Both sender and receiver can run unattended for long periods |
+| Receiver device | A **new device**, cross-device use | Must accept the risk on first enable in the UI |
+| Default switch | `sync.enabled = false` | Remote private-key delivery is a high-risk capability |
+| Identity rotation | `scheduled` by default | Avoids replacing the keybox on every push; rotates automatically only near expiry |
+| Management UI | **WebUI is the primary entry point** (the sender is folded into the `rkp_mini_issuer` WebUI; the receiver module ships its own WebUI), the CLI keeps equivalent capability | See §19 |
+| Secret write | The WebUI writes the **hex-encoded** secret into a 0600 inbox file through `ksu.exec` using shell builtins; `rkp-mini-sync` reads, validates, persists, and deletes the inbox file | `ksu.exec` goes through the root shell's stdin, not argv; see §19.2 |
+| Non-interactive confirmation | `enable --accept-risk <version>`; `fetch --accept-first <sha>`; `rkp-mini-deployer apply --confirm-first/--allow-identity-change <sha>` | Confirmation is bound to the exact version the user saw, which prevents concurrent replacement |
+| Automatic issuance | `auto_issue_days` means "remaining-days threshold" | No unconditional periodic issuance |
+| Tool configuration | **Not synced** | OMK `[crypto]` and TEESim `config.json` are device/identity specific |
+| Extra signatures | No Ed25519 by default | The passphrase is the only trust anchor; less public-key distribution |
+| Revocation | Change the passphrase + re-issue the keybox | Without a server, an old keybox cannot truly be revoked remotely |
 
 ---
 
-## 2. 目标与非目标
+## 2. Goals and non-goals
 
-### 2.1 目标
+### 2.1 Goals
 
-1. 发送端能把当前 `keybox.xml` 加密上传到 Gist / WebDAV / 公开 HTTPS。
-2. 接收端能通过 URL Scheme 导入远端位置，输入 age 密码，下载、解密、校验。
-3. 接收端能独立决定把 verified artifact 部署到哪个工具、哪个路径、什么权限。
-4. 支持长期自动运行：发送端定时检查/签发/推送，接收端定时拉取/部署。
-5. 支持身份轮换策略，避免“自动更新”意外删除 OMK 的 key。
-6. 所有凭据（age 密码、Gist token、WebDAV 密码、keybox 私钥）不出现在 URL、二维码、日志、WebUI 文本中。
-7. 首次启用远程私钥下发时，用户必须明确接受风险；之后可在设置中禁用。
+1. The sender can encrypt the current `keybox.xml` and upload it to Gist / WebDAV / public HTTPS.
+2. The receiver can import the remote location through a URL Scheme, enter the age passphrase, and download, decrypt, and verify.
+3. The receiver can independently decide which tool, which path, and which permissions the verified artifact is deployed to.
+4. Long-term unattended operation: the sender periodically checks/issues/pushes, the receiver periodically pulls/deploys.
+5. Identity rotation policy, so "automatic update" does not accidentally delete OMK's key.
+6. All credentials (age passphrase, Gist token, WebDAV password, keybox private key) never appear in URLs, QR codes, logs, or WebUI text.
+7. When remote private-key delivery is first enabled, the user must explicitly accept the risk; afterwards it can be disabled in settings.
 
-### 2.2 非目标
+### 2.2 Non-goals
 
-- 不做 Worker/R2/D1、账号体系、设备注册、远端撤销列表。
-- 不做多写者并发控制；一个 stream 只允许一个发送端。
-- 不做 keybox 内容编辑、证书链修改、密钥重用。
-- 不做 OMK `config.toml` / `injector.toml`、TEESim `config.json` 的同步。
-- 不做任意远端命令/路径下发。
-- 不承诺 Play Integrity 通过；跨设备使用不承诺合法 RKP provisioning。
-- 不做 Ed25519 manifest 签名（保留为未来硬化选项）。
-- 不做自动回滚到旧 seq；回滚必须人工重新发布更高 seq。
-- 不做服务端式的“设备撤销”；撤销 = 换密码 + 重新 issue。
+- No Worker/R2/D1, no account system, no device registration, no remote revocation list.
+- No multi-writer concurrency control; one stream allows exactly one sender.
+- No keybox content editing, certificate chain modification, or key reuse.
+- No syncing of OMK `config.toml` / `injector.toml` or TEESim `config.json`.
+- No delivery of arbitrary remote commands/paths.
+- No promise that Play Integrity passes; cross-device use is not promised to be legitimate RKP provisioning.
+- No Ed25519 manifest signing (kept as a future hardening option).
+- No automatic rollback to an older seq; rollback requires a human to publish a higher seq again.
+- No server-style "device revocation"; revocation = change the passphrase + re-issue.
 
 ---
 
-## 3. 术语
+## 3. Terminology
 
-| 术语 | 含义 |
+| Term | Meaning |
 |---|---|
-| sender | 运行 `rkp-mini-issuer` 的签发设备 |
-| receiver | 新设备上的接收端模块/程序 |
-| stream | 一条同步链路；一个 `stream_id` + 一个 age 密码 |
+| sender | The issuing device running `rkp-mini-issuer` |
+| receiver | The receiver module/program on the new device |
+| stream | One sync link; one `stream_id` + one age passphrase |
 | provider | `gist` / `webdav` / `url` |
-| envelope | `rkp-sync.age`，age 加密后的单文件 |
-| plaintext | 解密后的 CBOR manifest + keybox |
-| verified artifact | `fetch` 解密并校验后的 keybox 文件 |
+| envelope | `rkp-sync.age`, the single file after age encryption |
+| plaintext | The decrypted CBOR manifest + keybox |
+| verified artifact | The keybox file after `fetch` decrypted and verified it |
 | deploy target | OMK / TEESim / TrickyStore / custom |
-| identity change | 新 keybox 的 `keybox_sha256` 与已部署的不同 |
-| rotation | 因 RKP 重新签发导致 keybox 身份变化 |
-| `auto_issue_days` | 叶子剩余天数低于该值时触发签发（阈值，不是固定周期） |
+| identity change | The `keybox_sha256` of the new keybox differs from the deployed one |
+| rotation | The keybox identity changes because RKP re-issued it |
+| `auto_issue_days` | Issuance is triggered when the leaf's remaining days fall below this value (a threshold, not a fixed period) |
 
 ---
 
-## 4. 已知事实（不要再重复调研）
+## 4. Known facts (do not re-research)
 
-以下事实在 2026-11-10 的会话中通过读本仓库源码、OhMyKeymint 源码和 TEESimulator 源码确认。
+The following facts were confirmed on 2026-11-10 by reading this repository's source, the OhMyKeymint source, and the TEESimulator source.
 
 ### 4.1 RKP-Mini
 
-- 模块 id：`rkp_mini_issuer`；二进制：`/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-issuer`。
-- 数据根：`/data/misc/keystore/rkp-mini`；默认输出：`output/`。
-- 输出文件：`keybox.xml`、`cert-chain.pem`、`cert-chain.der`、`private-key.pem`、`meta.json`；凭证/数据文件 `0600`，输出目录 `0700`。
-- `keybox.xml` 是 **EC-only**：一个 `algorithm="ecdsa"` 的 `<Key>`，SEC1 `EC PRIVATE KEY`，证书链 leaf→root。
-- `DeviceID` 格式：`rkp-mini-` + `sha256(public key SEC1)[:12]`（`src/rkp/keybox.rs`）。
-- 每次 `issue` 生成新的 P-256 key；失败保留旧 `keybox.xml`。
-- `meta.json` 含 `issued_at`、`leaf_not_after`、`device_id`、`chain_sha256` 等公开诊断字段；不含私钥。
-- `auto_issue_days` 当前是保留字段（默认 0 = 关闭），尚未实现调度。
-- 当前 scope 明确排除 “remote private-key deployment”；本方案要求修改该 scope（§13）。
+- Module id: `rkp_mini_issuer`; binary: `/data/adb/modules/rkp_mini_issuer/bin/rkp-mini-issuer`.
+- Data root: `/data/misc/keystore/rkp-mini`; default output: `output/`.
+- Output files: `keybox.xml`, `cert-chain.pem`, `cert-chain.der`, `private-key.pem`, `meta.json`; credential/data files are `0600`, the output directory is `0700`.
+- `keybox.xml` is **EC-only**: one `<Key>` with `algorithm="ecdsa"`, a SEC1 `EC PRIVATE KEY`, and the certificate chain leaf→root.
+- `DeviceID` format: `rkp-mini-` + `sha256(public key SEC1)[:12]` (`src/rkp/keybox.rs`).
+- Each `issue` generates a new P-256 key; on failure the old `keybox.xml` is kept.
+- `meta.json` contains public diagnostic fields such as `issued_at`, `leaf_not_after`, `device_id`, `chain_sha256`; it contains no private key.
+- `auto_issue_days` is currently a reserved field (default 0 = off); scheduling is not implemented yet.
+- The current scope explicitly excludes "remote private-key deployment"; this design requires changing that scope (§13).
 
-### 4.2 OhMyKeymint（OMK）
+### 4.2 OhMyKeymint (OMK)
 
-以下 §4.2–§4.3 于 2026-11-10 按上游源码复核（OMK `9069c6c`/1.2.6、TEESimulator `dev@06f9f2e`/canary-76、TEESimulator-RS `6d241e5`/v6.0.1、TrickyStore `master@3a515c5` 与 1.4.1 发布包）；均为读源码结论，未在真机验证。
+The following §4.2–§4.3 were re-checked against upstream source on 2026-11-10 (OMK `9069c6c`/1.2.6, TEESimulator `dev@06f9f2e`/canary-76, TEESimulator-RS `6d241e5`/v6.0.1, TrickyStore `master@3a515c5` and the 1.4.1 release package); all are conclusions from reading source, not verified on a real device.
 
-- 模块 id：`oh_my_keymint`（`/data/adb/modules/oh_my_keymint`）。
-- 活动 keybox：`/data/misc/keystore/omk/keybox.xml`，编译期常量，不可配置。
-- 权限：`0600`，owner `1017:1017`（keystore uid）；由 `post-fs-data.sh` 与 keymint 启动时设置。进程启动后降权到 1017，替换文件若是 `root:root 0600` 会读取失败（保留旧 keybox）。
-- 热重载：inotify 监听父目录，mask `IN_CLOSE_WRITE | IN_CREATE | IN_MOVED_TO`，只处理名字等于 `keybox.xml` 的事件 → 同目录临时文件 + `rename(2)` 会立即重载，临时文件自身的事件被忽略。**不要原地写** `keybox.xml`：`IN_CREATE` 时文件为空，解析失败后 OMK 会用内置模板覆盖它。
-- 重启开关：`/data/adb/omk/restart.keymint`（或 `restart.all`）由 wrapper 每 2 秒轮询是否存在，消费后删除并重启 keymint 进程；换 keybox 不需要它。
-- 解析是正则扫描而非 XML DOM：要求字面量 `<Key algorithm="ecdsa">`（或 `ec`）、`<PrivateKey>`、`<NumberOfCertificates>` 且数量与 `<Certificate>` 一致；EC 必需、RSA 可选。SEC1 私钥必须带 `parameters`（namedCurve secp256r1），`common/src/crypto/ec.rs::import_sec1_private_key` 缺该字段即报错。解析失败会用内置模板覆盖文件。`rkp-mini-issuer` 现在按此要求编码私钥（SEC1 + named curve OID）；本仓库的 DOM 校验把 `NumberOfCertificates` 视为可选、也不要求 SEC1 `parameters`，所以手工构造或旧版签发的 keybox 可能通过校验却被 OMK 拒绝。部署层因此在写入前做 OMK 兼容性预检查（§11.4），不兼容时以 `omk_incompatible` 跳过 `omk` 目标；本次改动前签发的 keybox 缺少 `parameters`，必须重新签发。
-- `config.toml` 的 `[crypto]` 是设备唯一 secret；`injector.toml` 是设备/应用范围配置。**两者都不同步**。
-- `retire_stale_keybox_bound_keys` 默认 `true`：换 keybox 会删除旧 keybox 绑定的客户端 key。自动轮换必须警告。
+- Module id: `oh_my_keymint` (`/data/adb/modules/oh_my_keymint`).
+- Active keybox: `/data/misc/keystore/omk/keybox.xml`, a compile-time constant, not configurable.
+- Permissions: `0600`, owner `1017:1017` (keystore uid); set by `post-fs-data.sh` and when keymint starts. The process drops privileges to 1017 after start, so a replacement file that is `root:root 0600` fails to read (the old keybox is kept).
+- Hot reload: inotify watches the parent directory with mask `IN_CLOSE_WRITE | IN_CREATE | IN_MOVED_TO`, and only processes events whose name equals `keybox.xml` → a temp file in the same directory plus `rename(2)` reloads immediately, while the temp file's own events are ignored. **Do not write in place** to `keybox.xml`: on `IN_CREATE` the file is empty, and after parsing fails OMK overwrites it with the built-in template.
+- Restart switch: `/data/adb/omk/restart.keymint` (or `restart.all`) is polled for existence by the wrapper every 2 seconds; once consumed it is deleted and the keymint process is restarted. Replacing the keybox does not need it.
+- Parsing is a regex scan, not XML DOM: it requires the literals `<Key algorithm="ecdsa">` (or `ec`), `<PrivateKey>`, and `<NumberOfCertificates>` with a count matching `<Certificate>`; EC is required, RSA optional. The SEC1 private key must carry `parameters` (namedCurve secp256r1); `common/src/crypto/ec.rs::import_sec1_private_key` errors out when that field is missing. A parse failure overwrites the file with the built-in template. `rkp-mini-issuer` now encodes the private key as required (SEC1 + named curve OID); this repository's DOM validation treats `NumberOfCertificates` as optional and does not require SEC1 `parameters`, so a hand-built keybox or one issued by an older version can pass validation and still be rejected by OMK. The deploy layer therefore runs an OMK compatibility pre-check before writing (§11.4), and skips the `omk` target with `omk_incompatible` when it is incompatible; keyboxes issued before this change lack `parameters` and must be re-issued.
+- `[crypto]` in `config.toml` is the device's unique secret; `injector.toml` is device/app scope configuration. **Neither is synced**.
+- `retire_stale_keybox_bound_keys` defaults to `true`: replacing the keybox deletes client keys bound to the old keybox. Automatic rotation must warn.
 
 ### 4.3 TEESimulator / TEESimulator-RS / TrickyStore
 
-三者是不同项目，注意区分：
+These are three different projects; keep them apart:
 
-| 项目 | 模块 id | keybox | watcher（目录级 inotify） |
+| Project | Module id | keybox | watcher (directory-level inotify) |
 |---|---|---|---|
-| TEESimulator（JingMatrix，`dev`） | `teesim` | `/data/adb/teesim/<profile.keybox>`，默认 `keybox.xml` | `CLOSE_WRITE \| MOVED_TO \| DELETE`；只处理 `config.json`、`overrides.json` 与 `*.xml` |
-| TEESimulator-RS（Enginex0） | `tricky_store` | `/data/adb/tricky_store/keybox.xml`（`target.txt` 的 `[name.xml]` 段可按包指定其它文件） | `CLOSE_WRITE \| MOVED_TO \| DELETE`；`*.xml` 触发缓存失效，下次使用时重读 |
-| TrickyStore（5ec1cff） | `tricky_store` | `/data/adb/tricky_store/keybox.xml`，不可配置 | `CLOSE_WRITE \| DELETE \| MOVED_FROM \| MOVED_TO`；只处理名字等于 `keybox.xml` |
+| TEESimulator (JingMatrix, `dev`) | `teesim` | `/data/adb/teesim/<profile.keybox>`, default `keybox.xml` | `CLOSE_WRITE \| MOVED_TO \| DELETE`; only handles `config.json`, `overrides.json`, and `*.xml` |
+| TEESimulator-RS (Enginex0) | `tricky_store` | `/data/adb/tricky_store/keybox.xml` (the `[name.xml]` section of `target.txt` can specify other files per package) | `CLOSE_WRITE \| MOVED_TO \| DELETE`; `*.xml` invalidates the cache, and the file is re-read on next use |
+| TrickyStore (5ec1cff) | `tricky_store` | `/data/adb/tricky_store/keybox.xml`, not configurable | `CLOSE_WRITE \| DELETE \| MOVED_FROM \| MOVED_TO`; only handles the name `keybox.xml` |
 
-共同点：读取进程是 root，文件 `0:0 / 0600` 可用；同目录临时文件 + `rename(2)` 产生的 `IN_MOVED_TO` 会触发重载，无需重启。临时文件名**不得以 `.xml` 结尾**（否则 TEESimulator 会对半成品触发一次重载）；`.<name>.tmp.<pid>` 满足。
+Common points: the reading process is root, so a `0:0 / 0600` file is usable; a temp file in the same directory plus `rename(2)` produces `IN_MOVED_TO` and triggers a reload without a restart. The temp file name **must not end in `.xml`** (otherwise TEESimulator triggers a reload on a half-written file); `.<name>.tmp.<pid>` satisfies this.
 
-TEESimulator（`teesim`）：
+TEESimulator (`teesim`):
 
-- 数据目录 `/data/adb/teesim` 为 `0700`；`/data/adb/tricky_store` 只在安装时用于一次性拷贝旧 keybox，运行期不读。
-- `config.json` 的 `profiles.<id>.keybox` 是相对文件名，例如 `"keybox": "keybox.xml"`；文件必须直接位于 `/data/adb/teesim` 下，且文件名以 `.xml` 结尾才会被 watcher 重载。
-- 重载后对已有 key 做 re-attest（`ReAttest`），key blob 不变。
-- `rust/teesim-km/src/attest.rs` 明确支持 EC-only；每个 `<Key>` 链至少 2 张证书。README 写“RSA + ECDSA”，与源码不一致；以目标版本实测为准。
-- 若某个 profile 的 keybox 解析失败，提交后的 profile 表可能为空，所有目标暂时失去 TA。
-- WebUI 导入 keybox 时写 `0644`，但目录 `0700`；接收端写 `0600` 由 root 读取也可行。
-- `config.json` 包含 profile、应用范围、设备身份等，**不同步**。
+- The data directory `/data/adb/teesim` is `0700`; `/data/adb/tricky_store` is used only at install time for a one-off copy of the old keybox, and is not read at runtime.
+- `profiles.<id>.keybox` in `config.json` is a relative filename, e.g. `"keybox": "keybox.xml"`; the file must sit directly under `/data/adb/teesim` and its name must end in `.xml` for the watcher to reload it.
+- After a reload it re-attests existing keys (`ReAttest`); the key blobs do not change.
+- `rust/teesim-km/src/attest.rs` explicitly supports EC-only; each `<Key>` chain has at least 2 certificates. The README says "RSA + ECDSA", which disagrees with the source; trust the target version's actual behavior.
+- If a profile's keybox fails to parse, the committed profile table may end up empty and all targets temporarily lose the TA.
+- The WebUI writes `0644` when importing a keybox, but the directory is `0700`; a receiver writing `0600` that root reads also works.
+- `config.json` contains profiles, app scope, device identity, etc. **Not synced**.
 
-TEESimulator-RS 与 TrickyStore（`tricky_store`，同一模块 id 与路径，二者互斥安装，共用 `tricky_store` 目标）：
+TEESimulator-RS and TrickyStore (`tricky_store`, same module id and path, mutually exclusive installation, sharing the `tricky_store` target):
 
-- 都接受 EC-only；TrickyStore 1.1.0 要求 `NumberOfCertificates` 与实际数量一致，1.4.1 不读该字段。
-- 不删除客户端 key。TEESimulator-RS 只清空 patched chain 缓存：替换前已生成/已缓存的 key 继续返回旧证书链，直到守护进程重启；TrickyStore 开源版同样不清理已生成 key 的缓存。
-- 解析失败不会回退到旧 keybox（表现为没有可用的 attestation key）。
+- Both accept EC-only; TrickyStore 1.1.0 requires `NumberOfCertificates` to match the actual count, while 1.4.1 does not read that field.
+- They do not delete client keys. TEESimulator-RS only clears the patched chain cache: keys already generated/cached before the replacement keep returning the old certificate chain until the daemon restarts; the open-source TrickyStore likewise does not clear the cache of already generated keys.
+- A parse failure does not fall back to the old keybox (the symptom is that no attestation key is available).
 
-缺 SEC1 `parameters`（namedCurve）的私钥——即本次改动前 `rkp-mini-issuer` 的输出——在各目标的处理（仍为读源码结论，未在真机验证）：
+Private keys missing SEC1 `parameters` (namedCurve), i.e. the output of `rkp-mini-issuer` before this change, are handled as follows by each target (still source-reading conclusions, not verified on a real device):
 
-- TrickyStore（开源 `3a515c5` + BouncyCastle 1.78.1，以及 1.4.1 dex）**拒绝**：`PEMParser` 得到 `PEMKeyPair`，其 AlgorithmIdentifier 参数为 null，`JcaPEMKeyConverter.getKeyPair` 随即失败；异常发生在 `keyboxes.clear()` 之后，整份 keybox 被丢弃，完全不做 attestation patch。
-- TEESimulator-RS（`6d241e5` + BouncyCastle 1.83）**拒绝**：同一个 `JcaPEMKeyConverter` 失败（"EC domain parameters must be encoded in the algorithm identifier"）；只丢弃该 `<Key>`，EC-only keybox 因此没有可用 attestation key（-75）。
-- TEESimulator（JingMatrix `06f9f2e`）**接受**：私钥只是不透明 DER，内置 BoringSSL 补丁（`rust/patches/kmr-crypto-boring-ec-group.patch`）用调用方提供的 group 解析 SEC1，`parameters` 可选。
+- TrickyStore (open source `3a515c5` + BouncyCastle 1.78.1, and the 1.4.1 dex) **rejects**: `PEMParser` yields a `PEMKeyPair` whose AlgorithmIdentifier parameters are null, so `JcaPEMKeyConverter.getKeyPair` fails immediately; the exception happens after `keyboxes.clear()`, so the whole keybox is discarded and no attestation patching happens at all.
+- TEESimulator-RS (`6d241e5` + BouncyCastle 1.83) **rejects**: the same `JcaPEMKeyConverter` fails ("EC domain parameters must be encoded in the algorithm identifier"); only that `<Key>` is dropped, so an EC-only keybox has no usable attestation key (-75).
+- TEESimulator (JingMatrix `06f9f2e`) **accepts**: the private key is just opaque DER, and the built-in BoringSSL patch (`rust/patches/kmr-crypto-boring-ec-group.patch`) parses SEC1 with the group supplied by the caller, so `parameters` is optional.
 
-因此旧 keybox 只在 TEESimulator 上可用；要在 OhMyKeymint / TrickyStore / TEESimulator-RS 上工作必须重新签发。只有 `omk` 目标有写入前预检查（`omk_incompatible`），`tricky_store` 没有。
+So an old keybox only works on TEESimulator; working on OhMyKeymint / TrickyStore / TEESimulator-RS requires re-issuing. Only the `omk` target has a pre-write check (`omk_incompatible`); `tricky_store` has none.
 
 ### 4.4 Gist / WebDAV
 
-- GitHub Gist 的 “secret” 不是 private：任何拿到 URL 的人都能读；密文仍依赖 age 密码。
-- Secret gist 的 raw URL 可无 token 读取；匿名 API 有速率限制（约 60 次/小时）。
-- Gist 更新用 `PATCH /gists/{id}`，revision 原子提交；历史保留旧密文。
-- Gist 直链应使用“最新版本”URL，不要使用带 revision 的 URL。
-- WebDAV（如坚果云）使用应用密码；ETag/If-Match/MOVE 支持因提供商而异。
+- A GitHub Gist "secret" is not private: anyone with the URL can read it; the ciphertext still depends on the age passphrase.
+- A secret gist's raw URL can be read without a token; the anonymous API is rate limited (about 60 requests/hour).
+- Gist updates use `PATCH /gists/{id}`; the revision is committed atomically and history retains old ciphertext.
+- Gist direct links should use the "latest version" URL, not a URL with a revision.
+- WebDAV (e.g. Jianguoyun) uses an app password; ETag/If-Match/MOVE support varies by provider.
 
 ---
 
-## 5. 架构与信任边界
+## 5. Architecture and trust boundaries
 
-### 5.1 分层
+### 5.1 Layers
 
 ```mermaid
 flowchart LR
-  A[rkp-mini<br/>签发 keybox] --> B[rkp-mini-sync push<br/>CBOR + age + 上传]
-  B --> C[(Gist / WebDAV / 公开 HTTPS)]
-  C --> D[rkp-mini-sync fetch<br/>下载 + 解密 + 校验]
+  A[rkp-mini<br/>issue keybox] --> B[rkp-mini-sync push<br/>CBOR + age + upload]
+  B --> C[(Gist / WebDAV / public HTTPS)]
+  C --> D[rkp-mini-sync fetch<br/>download + decrypt + verify]
   D --> E[verified artifact<br/>staging 0600]
-  E --> F[deploy 层<br/>接收端本地决策]
+  E --> F[deploy layer<br/>receiver-side local decision]
   F --> G[OhMyKeymint]
   F --> H[TEESimulator]
   F --> I[TrickyStore / custom]
 ```
 
-| 层 | 职责 | 明确不知道 |
+| Layer | Responsibility | Explicitly does not know |
 |---|---|---|
-| issuer | 产生 keybox | 接收端部署目标 |
-| sync | 远端寻址、加解密、seq/防回放、下载、校验、staging | target/path/owner/reload |
-| deploy | 目标选择、兼容性检查、权限、原子写、reload、部署状态 | provider、密码、URL、seq |
-| UI | 展示状态、风险确认、输入密码/位置 | 不展示 keybox/私钥/密码 |
+| issuer | Produces the keybox | Receiver deploy target |
+| sync | Remote addressing, encryption/decryption, seq/replay protection, download, verification, staging | target/path/owner/reload |
+| deploy | Target selection, compatibility checks, permissions, atomic writes, reload, deploy state | provider, passphrase, URL, seq |
+| UI | Shows state, risk acceptance, accepts passphrase/location | Never shows keybox/private key/passphrase |
 
-### 5.2 信任边界
+### 5.2 Trust boundaries
 
-| 对象 | 信任程度 | 说明 |
+| Object | Trust level | Notes |
 |---|---|---|
-| age 密码 | **完全信任** | 持有者可解密、可伪造新密文；必须强口令、每 stream 唯一 |
-| Gist / WebDAV / HTTP | 不可信（机密性/完整性），只信可用性 | 可读、可改、可回放、可删除 |
-| URL/二维码 | 不可信 | 只作位置提示；错误内容会解密失败或被 state 拒绝 |
-| `sync-state` / `deploy-state` | 本地信任 | 防回放/部署记录；丢失进入 TOFU |
-| 本地适配器配置 | 本地信任 | 唯一决定写哪个文件、权限、reload |
-| keybox | 高敏感凭据 | 私钥；绝不进 URL/日志/WebUI/云端明文 |
+| age passphrase | **Fully trusted** | The holder can decrypt and can forge new ciphertext; must be strong and unique per stream |
+| Gist / WebDAV / HTTP | Untrusted (confidentiality/integrity), only availability is trusted | Can be read, modified, replayed, deleted |
+| URL/QR code | Untrusted | Only a location hint; wrong content fails decryption or is rejected by state |
+| `sync-state` / `deploy-state` | Locally trusted | Replay protection/deploy records; loss enters TOFU |
+| Local adapter configuration | Locally trusted | Sole authority over which file, permissions, reload |
+| keybox | Highly sensitive credential | Private key; never goes into URLs/logs/WebUI/cloud plaintext |
 
-### 5.3 威胁模型
+### 5.3 Threat model
 
-| 威胁 | 后果 | 控制 |
+| Threat | Consequence | Control |
 |---|---|---|
-| 云读取密文 | 私钥泄露 | age 口令加密；云端无明文 |
-| 云篡改密文 | 植入恶意 keybox | age AEAD 认证；解密失败即拒绝 |
-| 云回放旧密文 | 降级/过期 | `seq` + `prev` + 本地 `sync-state` + 叶子到期 |
-| 云删除/扣留 | 停止更新 | 保留当前 keybox；状态告警；下轮重试 |
-| Gist token 泄露 | 写坏 gist | token 最小 scope；发送端单写者；回读校验；撤销 token |
-| WebDAV 密码泄露 | 写坏文件 | 应用密码可撤销；临时文件 + MOVE；If-Match |
-| URL 钓鱼 | 指向攻击者存储 | 没有密码解不开；接收端展示位置并要求确认 |
-| 密码泄露 | 完全失守 | 强口令、secret-file `0600`、轮换密码 + 重新 issue |
-| 跨设备 keybox | 冒充/完整性失败 | 首次启用风险确认；文档明确不是合法 RKP provisioning |
-| 本地 root 被攻破 | 密码/keybox 泄露 | 无法在 root 威胁下保护；轮换 + 重新 issue |
-| state 丢失 | TOFU 回放窗口 | 首次导入人工核对 seq/时间/device_id/到期 |
-| OMK 自动轮换 | 删除旧 key | identity gate + `retire_stale_keybox_bound_keys` 警告 |
-| SSRF / XXE | 本地服务或解析器被攻击 | 限制 provider/URL、禁 DTD/实体、大小限制 |
-| 自定义 scheme 劫持 | 钓鱼接收端 | 优先在接收端内粘贴/扫码；URL 不含密码 |
+| Cloud reads the ciphertext | Private key leak | age passphrase encryption; no plaintext in the cloud |
+| Cloud tampers with the ciphertext | Malicious keybox injected | age AEAD authentication; decryption failure is a rejection |
+| Cloud replays old ciphertext | Downgrade/expiry | `seq` + `prev` + local `sync-state` + leaf expiry |
+| Cloud deletes/withholds | Updates stop | Keep the current keybox; state warning; retry next round |
+| Gist token leak | Gist written badly | Minimal token scope; single sender; read-back verification; revoke the token |
+| WebDAV password leak | Files written badly | The app password can be revoked; temp file + MOVE; If-Match |
+| URL phishing | Points at attacker storage | Useless without the passphrase; the receiver shows the location and requires confirmation |
+| Passphrase leak | Complete compromise | Strong passphrase, `secret-file` at `0600`, rotate the passphrase + re-issue |
+| Cross-device keybox | Impersonation/integrity failure | Risk acceptance on first enable; the docs state plainly that this is not legitimate RKP provisioning |
+| Local root compromised | Passphrase/keybox leak | Cannot be protected against a root threat; rotate + re-issue |
+| State lost | TOFU replay window | Manually check seq/time/device_id/expiry on first import |
+| OMK automatic rotation | Old key deleted | identity gate + `retire_stale_keybox_bound_keys` warning |
+| SSRF / XXE | Local service or parser attacked | Restrict provider/URL, forbid DTD/entities, size limits |
+| Custom scheme hijack | Phishing receiver | Prefer pasting/scanning inside the receiver; the URL carries no passphrase |
 
 ---
 
-## 6. 密文格式
+## 6. Ciphertext format
 
-### 6.1 远端文件
+### 6.1 Remote file
 
 ```text
 rkp-sync.age
 ```
 
-- 内容：age v1 **ASCII armor** 文本。
-- 加密模式：age passphrase（scrypt + ChaCha20-Poly1305）。
-- 文件名固定；Gist 一个 stream 一个 gist；WebDAV 允许自定义文件名，但建议稳定。
-- 不做压缩（keybox 很小，避免额外解析面）。
+- Content: age v1 **ASCII armor** text.
+- Encryption mode: age passphrase (scrypt + ChaCha20-Poly1305).
+- Fixed filename; on Gist, one gist per stream; WebDAV allows a custom filename, but a stable one is recommended.
+- No compression (the keybox is tiny; avoids extra parsing surface).
 
-### 6.2 明文 CBOR
+### 6.2 Plaintext CBOR
 
 ```text
 {
   v: 1,                         // uint
   stream_id: "st_01J...",       // text
   seq: 42,                      // uint64, >= 1
-  prev: h'...' | null,          // 上一版 plaintext 的 SHA-256；第一版 null
-  issued_at: 1762750000,        // int64 Unix 秒
+  prev: h'...' | null,          // SHA-256 of the previous plaintext; null for the first version
+  issued_at: 1762750000,        // int64 Unix seconds
   keybox: {
-    sha256: h'...',             // keybox_xml 的 SHA-256
+    sha256: h'...',             // SHA-256 of keybox_xml
     device_id: "rkp-mini-...",  // text
     leaf_not_before: 1762700000,
     leaf_not_after: 1794000000,
     chain_sha256: h'...'
   },
-  keybox_xml: h'...',           // 原始 XML 字节
-  meta_json: h'...' | null      // 可选，诊断用；不参与安全决策
+  keybox_xml: h'...',           // raw XML bytes
+  meta_json: h'...' | null      // optional, diagnostic; not used in security decisions
 }
 ```
 
-编码规则（保证不同实现可复现）：
+Encoding rules (so independent implementations are reproducible):
 
-- 使用 CBOR definite-length；禁止 indefinite-length。
-- map key 为 text；字段顺序固定为上面列出的顺序。
-- 不使用 tags、不包含浮点数。
-- 字符串 UTF-8；字节串用 bstr。
-- `seq` 从 1 开始；发送端不能回退。
-- `prev` = 上一版**明文 CBOR 原始字节**的 SHA-256；第一版为 null。
-- `plaintext_sha256` 不入 CBOR，由接收端对解密后的原始字节计算。
-- `keybox.sha256` = `keybox_xml` 原始字节的 SHA-256。
-- `meta_json` 只作诊断；接收端不得依据其做安全判断。
+- Use CBOR definite-length; indefinite-length is forbidden.
+- Map keys are text; the field order is fixed as listed above.
+- No tags, no floating point numbers.
+- Strings are UTF-8; byte strings use bstr.
+- `seq` starts at 1; the sender must not go backwards.
+- `prev` = SHA-256 of the previous version's **raw plaintext CBOR bytes**; null for the first version.
+- `plaintext_sha256` is not in the CBOR; the receiver computes it over the raw decrypted bytes.
+- `keybox.sha256` = SHA-256 of the raw `keybox_xml` bytes.
+- `meta_json` is diagnostic only; the receiver must not base security decisions on it.
 
-### 6.3 大小限制
+### 6.3 Size limits
 
-| 对象 | 上限 |
+| Object | Limit |
 |---|---|
-| 整个 age 文件 | 256 KiB |
-| 解密后的 CBOR | 192 KiB |
+| Whole age file | 256 KiB |
+| Decrypted CBOR | 192 KiB |
 | `keybox_xml` | 128 KiB |
 | `meta_json` | 16 KiB |
-| URL 解码后的 JSON | 4 KiB |
-| Gist/WebDAV 单个响应 | 256 KiB |
+| URL-decoded JSON | 4 KiB |
+| Single Gist/WebDAV response | 256 KiB |
 
-超限直接拒绝；不要边读边无限缓冲。
+Anything over the limit is rejected outright; do not buffer without bound while reading.
 
-### 6.4 口令规则
+### 6.4 Passphrase rules
 
-- UTF-8；只去掉输入行尾的单个 `\n` 或 `\r\n`；**不 trim 首尾空格**。
-- 建议至少 6 个随机单词或 20+ 随机字符；每个 stream 唯一。
-- 不提供“密码校验字段”；解密失败统一报 `decrypt_failed`。
-- 不在日志、错误消息、URL、二维码、外部进程 argv、环境变量中出现密码；WebUI 的写入路径见 §19.2（经 shell stdin + 内建命令，不产生含密码的 argv）。
-- `secret-file` 内容为原始口令；读取时只去掉行尾换行；文件 `0600`。
-- 默认使用 age 的 scrypt 参数；若低端设备耗时明显，记录耗时但不要降低到不可接受的安全参数。
+- UTF-8; strip only a single trailing `\n` or `\r\n` from the input line; **do not trim leading/trailing spaces**.
+- At least 6 random words or 20+ random characters is recommended; unique per stream.
+- No "passphrase check field"; decryption failure reports `decrypt_failed` uniformly.
+- The passphrase must not appear in logs, error messages, URLs, QR codes, external process argv, or environment variables; for the WebUI write path see §19.2 (through shell stdin + builtin commands, producing no argv that contains the passphrase).
+- `secret-file` holds the raw passphrase; when reading, strip only the trailing newline; the file is `0600`.
+- Use age's default scrypt parameters; if low-end devices are noticeably slow, record the timing, but do not lower to unacceptable security parameters.
 
-### 6.5 为什么不做 Ed25519
+### 6.5 Why not Ed25519
 
-- manifest 在密文内，age AEAD 已经认证；
-- 额外签名需要分发/固定签发公钥，和“无服务端、轻量”冲突；
-- 密码泄露时签名也救不了；
-- 保留为未来硬化选项，不属于 v1。
+- The manifest is inside the ciphertext, already authenticated by age AEAD;
+- An extra signature requires distributing/pinning the signing public key, which conflicts with "no server, lightweight";
+- If the passphrase leaks, the signature does not save you;
+- Kept as a future hardening option, not part of v1.
 
 ---
 
-## 7. 状态
+## 7. State
 
 ### 7.1 `sync-state.json`
 
-只描述“同步层验证到哪一版”，**不包含 target/path**。
+Describes only "which version the sync layer has verified"; **contains no target/path**.
 
 ```json
 {
@@ -326,14 +330,14 @@ rkp-sync.age
 }
 ```
 
-- `verified_seq` 是当前已解密并通过校验的最高 seq，不是“已部署”的 seq。
-- 发送端复用同一结构记录“最近一次成功 push”：`verified_seq` = 已上传 seq，`plaintext_sha256` = 该版明文 hash；用于远端删除/重建后的 seq 延续。
-- 部署层通过 `deploy-state` 记录实际部署情况。
-- `location` 可随 Gist 重建/URL 更换更新，但 `stream_id` 不变；更新前必须成功验证同一 stream。
+- `verified_seq` is the highest seq that has been decrypted and passed verification, not the "deployed" seq.
+- The sender reuses the same structure to record "the last successful push": `verified_seq` = the uploaded seq, `plaintext_sha256` = that version's plaintext hash; used to continue the seq after the remote is deleted/recreated.
+- The deploy layer records the actual deployment via `deploy-state`.
+- `location` may be updated when a Gist is recreated or the URL changes, but `stream_id` does not change; the same stream must be verified successfully before updating.
 
 ### 7.2 `deploy-state.json`
 
-由接收端部署层维护：
+Maintained by the receiver deploy layer:
 
 ```json
 {
@@ -361,191 +365,191 @@ rkp-sync.age
 }
 ```
 
-- `pending` 可用于记录“已 fetch 但因 identity gate 未部署”的 `{seq, keybox_sha256}`。
-- 一个 keybox 可对应多个 target；每个 target 独立记录成功/失败。
-- 不把 deploy 信息写回 `sync-state`。
+- `pending` can record `{seq, keybox_sha256}` for "fetched but not deployed because of the identity gate".
+- One keybox may map to several targets; each target records success/failure independently.
+- Deploy information is not written back into `sync-state`.
 
 ### 7.3 verified artifact
 
-- `rkp-mini-sync fetch` 解密并校验后写：
-  - 接收端数据目录 `staging/<keybox_sha256>.xml`，`0600`。
-  - `staging/latest.json`，`0600`，记录 `{seq, keybox_sha256, plaintext_sha256, device_id, leaf_not_after}`。
-- `fetch --json` 输出 staging 路径与元数据。
-- `rkp-mini-deployer apply` 读取 staging，按本地 target 配置部署；成功后清理 staging（或保留最近 1 个用于诊断）。
-- staging 是明文私钥文件；目录 `0700`，文件 `0600`，不得进入备份/日志/WebUI。
+- After `rkp-mini-sync fetch` decrypts and verifies, it writes:
+  - `<receiver data dir>/staging/<keybox_sha256>.xml`, `0600`.
+  - `staging/latest.json`, `0600`, recording `{seq, keybox_sha256, plaintext_sha256, device_id, leaf_not_after}`.
+- `fetch --json` outputs the staging path and metadata.
+- `rkp-mini-deployer apply` reads staging and deploys per the local target configuration; staging is cleaned up afterwards (or the most recent one is kept for diagnostics).
+- staging is a plaintext private-key file; directory `0700`, files `0600`; it must not enter backups/logs/WebUI.
 
-### 7.4 防回放规则
+### 7.4 Replay protection rules
 
-接收端处理顺序：
+Receiver processing order:
 
-1. 解密 → 解析 CBOR → 校验 schema/大小/stream_id。
-2. `seq > sync-state.verified_seq` → 继续。
-3. `seq == verified_seq`：
-   - `plaintext_sha256` 相同 → 幂等，允许重新 emit artifact（供部署重试）；
-   - 不同 → `seq_conflict`，拒绝。
-4. `seq < verified_seq` → `sync_rollback`，拒绝。
-5. `seq == verified_seq + 1` 时要求 `prev == sync-state.plaintext_sha256`。
-6. 跳号（离线多版）允许，但记录 `gap=true` 并告警；不要要求下载全部中间版本。
-7. `issued_at <= now + 600`；本地时钟异常（< 2020）→ `clock_invalid`。
-8. 叶子 `not_after >= now + min_validity_days`；否则 `keybox_expiring`。
-9. 首次导入（无 state）：TOFU，必须人工确认，展示 seq/时间/device_id/到期/目标影响。
-10. state 丢失：同样 TOFU；这是无服务端方案的残余回放窗口。
+1. Decrypt → parse CBOR → validate schema/size/stream_id.
+2. `seq > sync-state.verified_seq` → continue.
+3. `seq == verified_seq`:
+   - same `plaintext_sha256` → idempotent, re-emitting the artifact is allowed (for deploy retries);
+   - different → `seq_conflict`, reject.
+4. `seq < verified_seq` → `sync_rollback`, reject.
+5. When `seq == verified_seq + 1`, require `prev == sync-state.plaintext_sha256`.
+6. Gaps (several versions missed while offline) are allowed, but record `gap=true` and warn; do not require downloading all intermediate versions.
+7. `issued_at <= now + 600`; a bad local clock (< 2020) → `clock_invalid`.
+8. Leaf `not_after >= now + min_validity_days`; otherwise `keybox_expiring`.
+9. First import (no state): TOFU, requires manual confirmation, showing seq/time/device_id/expiry/target impact.
+10. State lost: also TOFU; this is the residual replay window of a server-less design.
 
-### 7.5 远端删除/重建后的 seq
+### 7.5 seq after remote deletion/recreation
 
-- 发送端本地保留 `verified_seq` 与 `plaintext_sha256`（最近一次成功 push 的值）。
-- 选择基点：`base = (remote.seq >= local.verified_seq) ? remote : local`；远端不存在时用 local。
-- 新 seq = `base.seq + 1`，不是固定 1。
-- `prev` = `base.plaintext_sha256`；完全没有历史时才是 null。
-- 远端存在但解密失败：终止，不覆盖；不要假设“远端坏了就重来”。
-- 更换 Gist/WebDAV 文件后，接收端更新 `location`，但保留 `verified_seq`；新位置 seq 更低会被拒绝。
-- 发送端 state 丢失且远端也丢失时，可能从 1 重新开始；接收端会拒绝低 seq，需要人工确认新 stream 或导入新的 stream_id。
+- The sender keeps `verified_seq` and `plaintext_sha256` locally (the values of the last successful push).
+- Base selection: `base = (remote.seq >= local.verified_seq) ? remote : local`; use local when the remote does not exist.
+- New seq = `base.seq + 1`, not always 1.
+- `prev` = `base.plaintext_sha256`; null only when there is no history at all.
+- Remote exists but fails to decrypt: stop, do not overwrite; do not assume "the remote is broken, start over".
+- After switching Gist/WebDAV files, the receiver updates `location` but keeps `verified_seq`; a lower seq at the new location is rejected.
+- If the sender state is lost and the remote is lost too, the sequence may restart at 1; the receiver rejects the low seq, and the user must confirm a new stream or import a new stream_id.
 
 ---
 
-## 8. 远端 provider
+## 8. Remote providers
 
 ### 8.1 GitHub Gist
 
-**最佳实践：**
+**Best practice:**
 
-| 项 | 结论 |
+| Item | Conclusion |
 |---|---|
-| 数量 | 一个 stream 一个 gist；不要一个 gist 放多条 stream |
-| Gist ID | 使用 GitHub 生成的 ID；不要尝试自定义 |
-| 文件名 | 固定 `rkp-sync.age`；更新保持同名 |
-| 类型 | `public: false`（secret）；secret ≠ private |
-| 描述 | 通用描述，不含设备/型号/stream 信息 |
-| 发送端 | PAT 仅 `gist` scope，`0600` 存放 |
-| 接收端 | 直接 GET 密文 URL，不需要 token |
-| 直链 | 最新版本 URL，不带 revision |
-| 更新 | `PATCH /gists/{id}` 替换文件 |
-| 历史 | revision 保留旧密文，按旧密码仍可解处理 |
-| 速率 | 匿名 API 约 60 次/小时；接收端轮询间隔足够 |
+| Count | One gist per stream; do not put several streams in one gist |
+| Gist ID | Use the GitHub-generated ID; do not try to customize it |
+| Filename | Fixed `rkp-sync.age`; keep the same name on updates |
+| Type | `public: false` (secret); secret ≠ private |
+| Description | Generic description, no device/model/stream information |
+| Sender | PAT with only the `gist` scope, stored `0600` |
+| Receiver | GET the ciphertext URL directly, no token needed |
+| Direct link | Latest-version URL, no revision |
+| Update | `PATCH /gists/{id}` replaces the file |
+| History | Revisions keep old ciphertext, still decryptable with the old passphrase |
+| Rate | Anonymous API about 60/hour; the receiver's polling interval is well above that |
 
-直链构造：
+Direct link construction:
 
 ```text
 https://gist.githubusercontent.com/<owner>/<gist_id>/raw/rkp-sync.age
 ```
 
-不要使用：
+Do not use:
 
 ```text
 https://gist.githubusercontent.com/<owner>/<gist_id>/raw/<revision>/rkp-sync.age
 ```
 
-带 revision 的 URL 会永久指向旧版本。
+A URL with a revision points at the old version forever.
 
-接收端无 token 读取：
+Receiver-side reading without a token:
 
-- 直接 GET 上述 URL；secret gist 可匿名访问。
-- 若响应被 CDN 缓存，可加 `Cache-Control: no-cache`；轮询间隔 6–12 小时时通常无感。
-- 若直链 404 或需要更高限额，可选用 `GET https://api.github.com/gists/{id}`（仍可无 token），解析 `files["rkp-sync.age"].content`；若 `truncated`，再取 `raw_url`，并校验 host 为 `gist.githubusercontent.com`。
-- 接收端不要求配置 GitHub Token；只有用户主动选择“带 token 读取”时才使用。
+- GET the URL above directly; secret gists are anonymously accessible.
+- If the response is cached by a CDN, add `Cache-Control: no-cache`; with a 6–12 hour polling interval this is usually imperceptible.
+- If the direct link 404s or higher limits are needed, optionally use `GET https://api.github.com/gists/{id}` (still without a token), parse `files["rkp-sync.age"].content`; if `truncated`, fetch `raw_url` and verify the host is `gist.githubusercontent.com`.
+- The receiver does not require a GitHub token; it is used only when the user explicitly chooses "read with token".
 
-发送端流程：
+Sender-side flow:
 
-1. 首次：`POST /gists`，`public: false`，单文件。
-2. 后续：`PATCH /gists/{id}`，同名文件内容替换。
-3. 回读/解析 `updated_at` 或内容 hash，确认写入。
-4. 失败重试；不要并发写多个发送端。
+1. First time: `POST /gists` with `public: false`, single file.
+2. After that: `PATCH /gists/{id}`, replacing the content of the same filename.
+3. Read back/parse `updated_at` or the content hash to confirm the write.
+4. Retry on failure; do not have several senders writing concurrently.
 
 ### 8.2 WebDAV
 
-- 允许自定义路径/文件名，例如 `/rkp/phone-a-keybox.age`。
-- 发送端：
-  1. `PUT` 到同目录临时文件 `rkp-sync.age.tmp`；
-  2. `MOVE` 到目标，`Overwrite: T`；
-  3. 不支持 MOVE 时 `PUT` 目标 + `If-Match`（若服务器支持）。
-- 接收端：
-  - `HEAD` 取 ETag/Last-Modified；
-  - `GET` + `If-None-Match`，304 则 no-op；
-  - 不支持 ETag 时直接 GET，靠解密后的 `seq/hash` 判断。
-- 认证：用户名 + 应用密码；URL Scheme 可含用户名（非 secret），**不含密码**。
-- 只允许 https；拒绝跨 host 重定向；拒绝 URL userinfo。
-- 失败：401/403 停止并提示；409/412/423 重新读取/下轮重试；507 配额不足告警。
-- 文件名可自定义，但建议稳定；改名会留下旧密文，接收端需要重新导入位置。
+- Custom paths/filenames are allowed, e.g. `/rkp/phone-a-keybox.age`.
+- Sender:
+  1. `PUT` to a temp file in the same directory `rkp-sync.age.tmp`;
+  2. `MOVE` to the target with `Overwrite: T`;
+  3. When MOVE is unsupported, `PUT` the target + `If-Match` (if the server supports it).
+- Receiver:
+  - `HEAD` for ETag/Last-Modified;
+  - `GET` + `If-None-Match`, no-op on 304;
+  - without ETag support, GET directly and rely on the decrypted `seq/hash`.
+- Authentication: username + app password; the URL Scheme may contain the username (not secret), **never the password**.
+- https only; reject cross-host redirects; reject URL userinfo.
+- Failures: 401/403 stop and prompt; 409/412/423 re-read/retry next round; 507 warns about the quota.
+- The filename can be custom but should be stable; renaming leaves the old ciphertext behind and the receiver must re-import the location.
 
-### 8.3 公开 HTTPS 文件
+### 8.3 Public HTTPS file
 
-新增 `provider = "url"`：
+New `provider = "url"`:
 
-- 直接 GET 一个公开 HTTPS 文件；无认证。
-- 适用于 WebDAV 公开分享链接、静态文件服务器。
-- 仍需 age 密码。
-- 校验：
-  - 只允许 `https://`；默认拒绝 `http://`（本地调试需显式开关）；
-  - 拒绝 URL userinfo；
-  - 默认拒绝 localhost/私网 IP，防 SSRF；本地调试需 `--allow-private`；
-  - 限制重定向为同 host/scheme；
-  - 限制响应大小；
-  - 不信任 `Content-Type`，按 age armor 解析。
-- 如果 URL 需要 Cookie/Basic Auth，改用 WebDAV provider，不要试图把凭据放进 URL。
+- GET a public HTTPS file directly; no authentication.
+- Suitable for WebDAV public share links and static file servers.
+- The age passphrase is still required.
+- Validation:
+  - only `https://` allowed; `http://` rejected by default (explicit switch needed for local debugging);
+  - reject URL userinfo;
+  - reject localhost/private IPs by default, to prevent SSRF; `--allow-private` for local debugging;
+  - restrict redirects to the same host/scheme;
+  - limit the response size;
+  - do not trust `Content-Type`; parse as age armor.
+- If the URL needs a Cookie/Basic Auth, use the WebDAV provider instead; do not try to put credentials into the URL.
 
-### 8.4 对比
+### 8.4 Comparison
 
-| | Gist | WebDAV | 公开 URL |
+| | Gist | WebDAV | Public URL |
 |---|---|---|---|
-| 接收端认证 | 无 token（secret raw URL） | 用户名+应用密码 | 无 |
-| 发送端认证 | PAT `gist` | 用户名+应用密码 | 无（只读） |
-| 原子更新 | revision 原子，无 CAS | PUT+MOVE / If-Match | 不适用 |
-| 自定义文件名 | 固定 | 允许 | 取决于服务器 |
-| 限流 | GitHub | 提供商 | 提供商/CDN |
-| 适用 | 快速、无自建 | 自托管/网盘 | 公开分享/静态站 |
+| Receiver auth | No token (secret raw URL) | Username + app password | None |
+| Sender auth | PAT `gist` | Username + app password | None (read-only) |
+| Atomic update | Revision atomic, no CAS | PUT+MOVE / If-Match | Not applicable |
+| Custom filename | Fixed | Allowed | Depends on the server |
+| Rate limiting | GitHub | Provider | Provider/CDN |
+| Suitable for | Quick, no self-hosting | Self-hosted/cloud drive | Public sharing/static sites |
 
 ---
 
 ## 9. URL Scheme
 
-### 9.1 格式
+### 9.1 Format
 
 ```text
 rkpsync://v1/import?p=<base64url(JSON)>
 ```
 
-- `p`：无 padding 的 base64url；解码后 UTF-8 JSON。
-- 整个 URI 上限 2 KiB；JSON 上限 4 KiB。
-- 二维码内容就是该 URI。
-- 同时支持在接收端内粘贴原始 URI/JSON；不要依赖浏览器点击自定义 scheme。
+- `p`: unpadded base64url; after decoding, UTF-8 JSON.
+- Whole URI limit 2 KiB; JSON limit 4 KiB.
+- The QR code content is exactly that URI.
+- Pasting the raw URI/JSON inside the receiver is also supported; do not rely on clicking a custom scheme in a browser.
 
 ### 9.2 schema
 
-公共字段：
+Common fields:
 
-| 字段 | 类型 | 必填 | 说明 |
+| Field | Type | Required | Notes |
 |---|---|---|---|
-| `v` | int | 是 | 固定 1 |
-| `provider` | string | 是 | `gist` / `webdav` / `url` |
-| `stream_id` | string | 是 | 与密文内一致；非 secret |
-| `label` | string | 否 | UI 展示，≤64 字符，不含敏感信息 |
-| `format` | string | 是 | 固定 `age-armor` |
+| `v` | int | Yes | Fixed 1 |
+| `provider` | string | Yes | `gist` / `webdav` / `url` |
+| `stream_id` | string | Yes | Must match the ciphertext; not secret |
+| `label` | string | No | UI display, ≤64 characters, no sensitive information |
+| `format` | string | Yes | Fixed `age-armor` |
 
-Gist：
+Gist:
 
-| 字段 | 必填 | 说明 |
+| Field | Required | Notes |
 |---|---|---|
-| `url` | 推荐 | 最新版直链；接收端优先使用 |
-| `gist_id` | 否 | 无 `url` 时用 API 解析（可无 token） |
-| `filename` | 否 | 默认 `rkp-sync.age` |
+| `url` | Recommended | Latest direct link; the receiver prefers it |
+| `gist_id` | No | Resolved through the API when `url` is absent (may be tokenless) |
+| `filename` | No | Defaults to `rkp-sync.age` |
 
-WebDAV：
+WebDAV:
 
-| 字段 | 必填 | 说明 |
+| Field | Required | Notes |
 |---|---|---|
-| `endpoint` | 是 | `https://.../dav/` |
-| `path` | 是 | 固定文件路径；规范化后使用 |
-| `user` | 否 | 用户名；密码单独输入 |
+| `endpoint` | Yes | `https://.../dav/` |
+| `path` | Yes | Fixed file path; used after normalization |
+| `user` | No | Username; the password is entered separately |
 
-公开 URL：
+Public URL:
 
-| 字段 | 必填 | 说明 |
+| Field | Required | Notes |
 |---|---|---|
-| `url` | 是 | 公开 HTTPS 文件 |
+| `url` | Yes | Public HTTPS file |
 
-### 9.3 示例
+### 9.3 Examples
 
-Gist：
+Gist:
 
 ```json
 {
@@ -560,7 +564,7 @@ Gist：
 }
 ```
 
-WebDAV：
+WebDAV:
 
 ```json
 {
@@ -575,7 +579,7 @@ WebDAV：
 }
 ```
 
-公开 URL：
+Public URL:
 
 ```json
 {
@@ -588,36 +592,36 @@ WebDAV：
 }
 ```
 
-### 9.4 安全校验
+### 9.4 Security validation
 
-接收端必须：
+The receiver must:
 
-- 拒绝任何 `password`、`passphrase`、`token`、`secret`、`key` 字段。
-- 拒绝未知字段（避免走私）。
-- 拒绝 URL userinfo（`https://user:pass@...`）。
-- 只允许已知 provider；`endpoint`/`url` 必须 https。
-- 拒绝 localhost/私网地址（除非显式 `--allow-private`）。
-- 规范化 `path`，拒绝 `..`、绝对路径逃逸、控制字符。
-- `filename` 只允许 `[A-Za-z0-9._-]+`，必须以 `.age` 结尾。
-- `stream_id` 限定字符集/长度。
-- 展示解码后的 provider/endpoint/path/stream/label，用户确认后再输入密码。
-- 不在 URL 中放密码；如需传输密码，必须单独安全渠道。
+- Reject any `password`, `passphrase`, `token`, `secret`, or `key` field.
+- Reject unknown fields (to prevent smuggling).
+- Reject URL userinfo (`https://user:pass@...`).
+- Allow only known providers; `endpoint`/`url` must be https.
+- Reject localhost/private addresses (unless `--allow-private` is explicit).
+- Normalize `path`; reject `..`, absolute-path escapes, and control characters.
+- `filename` allows only `[A-Za-z0-9._-]+` and must end in `.age`.
+- Restrict `stream_id` character set/length.
+- Show the decoded provider/endpoint/path/stream/label; ask for the passphrase only after the user confirms.
+- Do not put the passphrase in the URL; if the passphrase must be transferred, use a separate secure channel.
 
-### 9.5 分享与二维码
+### 9.5 Sharing and QR codes
 
-- `rkp-mini-sync share` 输出 URI + 二维码 + 可复制的 JSON。
-- 分享界面把“存储位置”和“解密密码”分开显示；明确提示二维码不含密码。
-- 二维码只编码 URI；不要编码密码/token。
-- 自定义 scheme 可能被恶意 app 注册；优先接收端内扫码/粘贴，不要从浏览器直接点。
-- `label` 只用于展示，不要放设备序列号、IMEI、邮箱等敏感信息。
+- `rkp-mini-sync share` outputs the URI + QR code + copyable JSON.
+- The share UI shows "storage location" and "decryption passphrase" separately; it states explicitly that the QR code does not contain the passphrase.
+- The QR code encodes only the URI; never the passphrase/token.
+- Custom schemes can be registered by malicious apps; prefer scanning/pasting inside the receiver rather than clicking from a browser.
+- `label` is for display only; do not put device serial numbers, IMEI, email addresses, or other sensitive information in it.
 
 ---
 
-## 10. 发送端
+## 10. Sender
 
-### 10.1 配置
+### 10.1 Configuration
 
-发送端在 `config.toml` 增加 `[sync]`（或独立 `sync.toml`；建议复用主配置）：
+The sender adds a `[sync]` section to `config.toml` (or a separate `sync.toml`; reusing the main config is recommended):
 
 ```toml
 [sync]
@@ -631,7 +635,7 @@ request_timeout_seconds = 30
 # Gist
 gist_id = ""
 gist_filename = "rkp-sync.age"
-gist_url = ""                     # 可选：分享用最新版直链
+gist_url = ""                     # optional: latest direct link for sharing
 gist_token_file = "/data/misc/keystore/rkp-mini/sync/gist.token"  # 0600
 
 # WebDAV
@@ -640,106 +644,108 @@ webdav_path = "/rkp/rkp-sync.age"
 webdav_user = ""
 webdav_password_file = "/data/misc/keystore/rkp-mini/sync/webdav.pass" # 0600
 
-# 口令
+# Passphrase
 password_mode = "secret-file"     # secret-file | prompt
 password_file = "/data/misc/keystore/rkp-mini/sync/age.pass"      # 0600
 ```
 
-- `risk_ack_version` 由 UI 写入；未确认时 `enabled` 不得为 true。
-- `password_mode = "secret-file"` 是默认；首次设置必须让用户确认“密码将落盘用于自动运行”。
-- `gist_token_file` / `webdav_password_file` / `password_file` 都是 `0600`。
-- 不把 token/密码写进 TOML 值本身；只写路径。
+- `risk_ack_version` is written by the UI; while it is unacknowledged, `enabled` must not be true.
+- `password_mode = "secret-file"` is the default; the first setup must make the user confirm "the passphrase will be written to disk for automatic runs".
+- `gist_token_file` / `webdav_password_file` / `password_file` are all `0600`.
+- Do not write the token/passphrase into TOML values; write paths only.
 
 ### 10.2 CLI
 
 ```text
-rkp-mini-sync init                  # 初始化 stream/非敏感配置
-rkp-mini-sync push                  # 读取 keybox，加密上传
-rkp-mini-sync share                 # 输出 URL/二维码（不含密码）
-rkp-mini-sync status [--json]       # 远端/seq/hash/有效期
-rkp-mini-sync rotate-password       # 新密码重新加密最新 keybox
-rkp-mini-sync sync-now              # push 的别名/自动任务入口
-rkp-mini-sync forget                # 清除本地 token/密码/state（不删除远端）
+rkp-mini-sync init                  # initialize the stream/non-sensitive config
+rkp-mini-sync push                  # read the keybox, encrypt and upload
+rkp-mini-sync share                 # output URL/QR code (no passphrase)
+rkp-mini-sync status [--json]       # remote/seq/hash/validity
+rkp-mini-sync rotate-password       # re-encrypt the latest keybox with a new passphrase
+rkp-mini-sync sync-now              # alias of push/entry point for automatic tasks
+rkp-mini-sync forget                # clear local token/passphrase/state (keep the remote)
 ```
 
-`rkp-mini-sync` 不负责 `issue`；自动任务由 `rkp-mini-issuer` + `rkp-mini-sync` 编排。
+`rkp-mini-sync` does not handle `issue`; automatic tasks are orchestrated by `rkp-mini-issuer` + `rkp-mini-sync`.
 
-### 10.3 push 流程
+### 10.3 push flow
 
 ```text
-1. 读取 keybox.xml + meta.json
-2. 校验：
-   - 文件存在、0600、大小限制
-   - 至少一个 ecdsa Key；SEC1 私钥
-   - 链 2..8 张，leaf→root 链接
-   - 私钥与叶子公钥匹配
+1. Read keybox.xml + meta.json
+2. Validate:
+   - file exists, 0600, within size limits
+   - at least one ecdsa Key; SEC1 private key
+   - chain of 2..8, leaf→root links
+   - private key matches the leaf public key
    - DeviceID == rkp-mini-<sha256(pubkey)[:12]>
-   - 叶子 not_after >= now + min_validity_days
-3. 读取远端 rkp-sync.age：
-   - 不存在：base = local（首次 seq=0/prev=null）
-   - 存在：用当前密码解密，取 seq/plaintext_sha256
-   - 解密失败：终止，不覆盖远端
-4. 若远端 keybox_sha256 == 本地且 seq 未变：no-op（除非 --force）
-5. 选择基点：base = remote.seq >= local.verified_seq ? remote : local
-6. 构造 CBOR：
+   - leaf not_after >= now + min_validity_days
+3. Read the remote rkp-sync.age:
+   - absent: base = local (first time seq=0/prev=null)
+   - present: decrypt with the current passphrase, take seq/plaintext_sha256
+   - decryption failure: stop, do not overwrite the remote
+4. If the remote keybox_sha256 == local and seq is unchanged: no-op (unless --force)
+5. Choose the base: base = remote.seq >= local.verified_seq ? remote : local
+6. Build the CBOR:
    seq = base.seq + 1
-   prev = base.plaintext_sha256（无任何历史则 null）
+   prev = base.plaintext_sha256 (null if there is no history at all)
    issued_at = now
-   keybox_xml = 本地内容
-7. age armor 加密
-8. 上传：
+   keybox_xml = local content
+7. age armor encryption
+8. Upload:
    Gist: PATCH /gists/{id}
    WebDAV: PUT tmp + MOVE / If-Match PUT
-9. 回读校验：
-   下载/解密，比较 plaintext_sha256/seq/keybox_sha256
-10. 更新本地 sync-state.json；日志只记 seq/hash/provider
+9. Read-back verification:
+   download/decrypt, compare plaintext_sha256/seq/keybox_sha256
+10. Update the local sync-state.json; log only seq/hash/provider
 ```
 
-### 10.4 并发
+### 10.4 Concurrency
 
-- 发送端本地 `sync.lock`（`tmp/sync.lock` 或专用目录），WebUI/CLI/定时任务互斥。
-- Gist 无 CAS：单写者；写入后回读，若内容不是自己写的 → 告警。
-- WebDAV 有 `If-Match` 时使用 ETag；412 → 重新读取、seq+1、重试。
-- 两个发送端同时写同一 stream 不是支持场景；需要多写者就拆 stream。
+- Sender-local `sync.lock` (`tmp/sync.lock` or a dedicated directory), mutually excluding WebUI/CLI/scheduled tasks.
+- Gist has no CAS: single writer; read back after writing, and warn if the content is not what you wrote.
+- WebDAV with `If-Match` uses the ETag; 412 → re-read, seq+1, retry.
+- Two senders writing the same stream at the same time is not a supported scenario; if multiple writers are needed, split the stream.
 
-### 10.5 自动签发 + 自动推送
+### 10.5 Automatic issuance + automatic push
 
-> **2026-11 更新**：自动签发已与同步解耦。`auto_issue_days` 由 `rkp-mini-issuer config set auto_issue_days N`
-> 修改（`rkp-mini-sync` 不再读写它）；发送端循环改为签发模块的 `auto-loop.sh`：每 30 分钟醒来按墙钟判断是否到期，
-> 到期轮次先在 `auto_issue_days > 0` 时签发（与 WebUI 共用 `tmp/issue.lock`），再在 `check-auto` 通过时 `push --auto`；
-> 两者都关闭时循环退出。下面的阈值语义不变。高通本机签发的 RKP 叶子只有约 12–14 天有效期，因此默认值相应缩小：
-> 推荐 `auto_issue_days = 3`（WebUI 超过 14 警告），发送端 `min_validity_days = 3`、接收端 `= 2`，
-> `rotation_lead_days = 4`（天数向下取整，需大于 3 才能让轮换到达即部署）。本文其余示例中的 14/7/30 为设计期数值。
+> **2026-11 update**: automatic issuance is decoupled from sync. `auto_issue_days` is changed by
+> `rkp-mini-issuer config set auto_issue_days N` (`rkp-mini-sync` no longer reads or writes it); the sender loop became the
+> issuing module's `auto-loop.sh`: it wakes every 30 minutes and decides by wall clock whether it is due; a due round first issues
+> when `auto_issue_days > 0` (sharing `tmp/issue.lock` with the WebUI), then runs `push --auto` when `check-auto` passes;
+> when both are off the loop exits. The threshold semantics below are unchanged. On Qualcomm devices, locally issued RKP leaves are valid for only
+> about 12–14 days, so the defaults were reduced accordingly: `auto_issue_days = 3` is recommended (the WebUI warns above 14),
+> sender `min_validity_days = 3`, receiver `= 2`, and `rotation_lead_days = 4` (days rounded down; it must exceed 3 for a rotation
+> to be deployed as soon as it arrives). The 14/7/30 values in the other examples are design-time numbers.
 
-现有 `auto_issue_days` 从“保留字段”改为“剩余天数阈值”：
+The existing `auto_issue_days` changes from "reserved field" to "remaining-days threshold":
 
 ```text
-每天/每 12h：
+every day/every 12h:
   rkp-mini-issuer issue --if-expiring-days <auto_issue_days>
   rkp-mini-sync push
 ```
 
-- `days_left > auto_issue_days`：不签发。
-- `days_left <= auto_issue_days`：签发新 keybox；成功后 push。
-- 签发失败：保留旧 keybox，下轮重试。
-- push 失败：本地 keybox 已更新，远端仍旧；下轮重试；接收端保留旧版本。
-- 不做“无条件每天 issue”；那会频繁换身份，触发接收端 identity gate。
-- `issue` 和 `push` 是独立步骤；`rkp-mini-issuer` 不链接 `rkp-mini-sync`。
+- `days_left > auto_issue_days`: do not issue.
+- `days_left <= auto_issue_days`: issue a new keybox; push on success.
+- Issuance failure: keep the old keybox, retry next round.
+- push failure: the local keybox is already updated, the remote is stale; retry next round; the receiver keeps the old version.
+- No "issue every day unconditionally"; that changes identity frequently and trips the receiver's identity gate.
+- `issue` and `push` are separate steps; `rkp-mini-issuer` does not link `rkp-mini-sync`.
 
-### 10.6 发送端 guard
+### 10.6 Sender guard
 
-- 命中以下情况拒绝上传：keybox 不存在/不可读、私钥与叶子不匹配、链结构错误、叶子剩余不足、密码文件缺失/权限错误。
-- `--allow-expiring` 仅用于手动应急，并在日志中记录。
-- 日志绝不出现 keybox、私钥、age 密码、Gist token、WebDAV 密码。
-- `share` 明确提示：链接可以公开，密码必须单独安全渠道发送。
+- Refuse to upload when: the keybox is missing/unreadable, the private key does not match the leaf, the chain structure is wrong, the leaf has too little validity left, or the passphrase file is missing/has wrong permissions.
+- `--allow-expiring` is only for manual emergencies and is recorded in the log.
+- Logs never contain the keybox, the private key, the age passphrase, the Gist token, or the WebDAV password.
+- `share` states explicitly: the link can be public, the passphrase must be sent over a separate secure channel.
 
 ---
 
-## 11. 接收端
+## 11. Receiver
 
-### 11.1 配置
+### 11.1 Configuration
 
-接收端独立模块（例如 `rkp_mini_deployer`）配置：
+The receiver is a separate module (e.g. `rkp_mini_deployer`) configured as follows:
 
 ```toml
 [sync]
@@ -750,7 +756,7 @@ stream_id = "st_01J..."
 min_validity_days = 7
 request_timeout_seconds = 30
 
-# Gist（直链优先；不需要 token）
+# Gist (direct link preferred; no token needed)
 gist_url = "https://gist.githubusercontent.com/.../raw/rkp-sync.age"
 gist_id = ""
 gist_filename = "rkp-sync.age"
@@ -761,7 +767,7 @@ webdav_path = ""
 webdav_user = ""
 webdav_password_file = "/data/adb/rkp_sync/secrets/webdav.pass" # 0600
 
-# age 口令
+# age passphrase
 password_mode = "secret-file"     # secret-file | prompt
 password_file = "/data/adb/rkp_sync/secrets/age.pass"           # 0600
 
@@ -785,112 +791,112 @@ reload = "auto"
 # reload = "auto"
 ```
 
-- `sync-state` 在 `<receiver>/sync/sync-state.json`。
-- `deploy-state` 在 `<receiver>/deploy/deploy-state.json`。
-- staging 在 `<receiver>/staging/`，`0700`。
-- 所有 secret `0600`，目录 `0700`；不得进入模块 ZIP/云备份。
+- `sync-state` lives at `<receiver>/sync/sync-state.json`.
+- `deploy-state` lives at `<receiver>/deploy/deploy-state.json`.
+- staging lives at `<receiver>/staging/`, `0700`.
+- All secrets are `0600`, directories `0700`; they must not enter the module ZIP or cloud backups.
 
 ### 11.2 import / fetch
 
 ```text
-rkp-mini-sync import 'rkpsync://...' # 解析位置，展示确认
-rkp-mini-sync fetch [--json]         # 下载/解密/校验，写 staging
-rkp-mini-deployer plan [--json]      # 只读预览（身份门控）
-rkp-mini-deployer apply [--json]     # 按本地 targets 部署（--confirm-first/--allow-identity-change）
-rkp-mini-sync status [--json]        # sync + deploy 状态（只读）
+rkp-mini-sync import 'rkpsync://...' # parse the location, show it for confirmation
+rkp-mini-sync fetch [--json]         # download/decrypt/verify, write staging
+rkp-mini-deployer plan [--json]      # read-only preview (identity gating)
+rkp-mini-deployer apply [--json]     # deploy to the local targets (--confirm-first/--allow-identity-change)
+rkp-mini-sync status [--json]        # sync + deploy state (read-only)
 ```
 
-接收端的 fetch + deploy 组合由模块脚本负责（`modules/deployer/run.sh` 的
-`action|run|auto`），没有顶层 `run` 子命令：`fetch` 失败仍会执行
-`rkp-mini-deployer apply --if-staged`，后者自己重新校验 enabled/risk/stream。
+The receiver's fetch + deploy combination is driven by the module script (`action|run|auto` in
+`modules/deployer/run.sh`); there is no top-level `run` subcommand: when `fetch` fails, it still runs
+`rkp-mini-deployer apply --if-staged`, which re-checks enabled/risk/stream itself.
 
-`import`：
+`import`:
 
-1. 解析 URL/QR；校验 schema/无 secret/HTTPS/路径。
-2. 展示 provider/endpoint/path/stream/label；用户确认。
-3. 首次启用展示风险说明（§13），写入 `risk_ack_version`。
-4. 提示输入 age 密码；默认保存到 `secret-file`（用户可改 `prompt`）。
-5. 可选：测试连接（只下载大小/HEAD；不要求先解密）。
-6. 不自动应用 keybox；需要 `fetch` + `deploy`。
+1. Parse the URL/QR; validate schema/no secrets/HTTPS/path.
+2. Show provider/endpoint/path/stream/label; the user confirms.
+3. On first enable, show the risk disclosure (§13) and write `risk_ack_version`.
+4. Prompt for the age passphrase; by default save it to `secret-file` (the user may switch to `prompt`).
+5. Optional: test the connection (size only/HEAD; no need to decrypt first).
+6. Do not apply the keybox automatically; `fetch` + `deploy` are required.
 
-`fetch`：
+`fetch`:
 
-1. 读取远端；条件请求（ETag/Last-Modified/API updated_at）。
-2. 大小限制；age 解密。
-3. CBOR schema/stream/seq/prev/时间/叶子校验。
-4. 严格 keybox 校验（§11.4）。
-5. 写 staging + `sync-state`；只输出同步层元数据，不读取/不比较 `deploy-state`。
-6. 不修改目标文件。
+1. Read the remote; conditional request (ETag/Last-Modified/API updated_at).
+2. Size limits; age decryption.
+3. CBOR schema/stream/seq/prev/time/leaf validation.
+4. Strict keybox validation (§11.4).
+5. Write staging + `sync-state`; output only sync-layer metadata, never read or compare `deploy-state`.
+6. Do not modify target files.
 
-`rkp-mini-deployer apply`：
+`rkp-mini-deployer apply`:
 
-1. 读取 staging/latest。
-2. 读取 `deploy-state`；比较 `keybox_sha256`：
-   - 与已部署相同 → 幂等，按需修复权限/reload；
-   - 不同 → 走 identity gate。
-3. 按 targets 逐个部署；每个 target 独立成功/失败。
-4. 更新 `deploy-state`。
-5. 不修改 `sync-state`。
+1. Read staging/latest.
+2. Read `deploy-state`; compare `keybox_sha256`:
+   - same as deployed → idempotent, fix permissions/reload as needed;
+   - different → go through the identity gate.
+3. Deploy target by target; each target succeeds/fails independently.
+4. Update `deploy-state`.
+5. Do not modify `sync-state`.
 
-### 11.3 严格 keybox 校验
+### 11.3 Strict keybox validation
 
-接收端必须独立实现严格校验，不能只做字符串包含：
+The receiver must implement strict validation independently; string containment is not enough:
 
-- 解析器禁用 DTD/外部实体（建议 `roxmltree`；拒绝 `<!DOCTYPE` / `<!ENTITY`）。
-- 大小 ≤ 128 KiB。
-- 恰好一个 `<AndroidAttestation>`/`<Keybox>` 结构（按 RKP-Mini 输出）。
-- 至少一个 `algorithm="ecdsa"` 的 `<Key>`；拒绝仅 RSA（RKP-Mini 不产生）。
-- `PrivateKey` 为 SEC1 `EC PRIVATE KEY`；解析出私钥并推导公钥。
-- 证书链 2..8 张；leaf→root 顺序；issuer/subject 链接正确。
-- 叶子公钥与私钥匹配。
-- `DeviceID` == `rkp-mini-` + `sha256(public SEC1)[:12]`。
-- 叶子 `not_before <= now + skew`；`not_after >= now + min_validity_days`。
-- `keybox_sha256` 与 manifest/payload 一致。
-- 证书签名/根信任/吊销检查为可选硬化；v1 至少做结构、链接、key match，并在 UI 标注“未做根信任/吊销检查”。
+- The parser disables DTDs/external entities (recommended: `roxmltree`; reject `<!DOCTYPE` / `<!ENTITY`).
+- Size ≤ 128 KiB.
+- Exactly one `<AndroidAttestation>`/`<Keybox>` structure (as produced by RKP-Mini).
+- At least one `<Key>` with `algorithm="ecdsa"`; reject RSA-only (RKP-Mini never produces it).
+- `PrivateKey` is a SEC1 `EC PRIVATE KEY`; parse the private key and derive the public key.
+- Certificate chain of 2..8; leaf→root order; issuer/subject links correct.
+- The leaf public key matches the private key.
+- `DeviceID` == `rkp-mini-` + `sha256(public SEC1)[:12]`.
+- Leaf `not_before <= now + skew`; `not_after >= now + min_validity_days`.
+- `keybox_sha256` matches the manifest/payload.
+- Certificate signature/root trust/revocation checks are optional hardening; v1 at minimum does structure, links, and key match, and labels in the UI "no root trust/revocation check".
 
-### 11.4 部署适配器
+### 11.4 Deploy adapters
 
-目标只来自本地配置；URL/密文不能指定路径/命令。
+Targets come only from local configuration; the URL/ciphertext cannot specify paths/commands.
 
-| id | 路径 | owner / mode | reload | 说明 |
+| id | Path | owner / mode | reload | Notes |
 |---|---|---|---|---|
-| `omk` | `/data/misc/keystore/omk/keybox.xml` | `1017:1017` / `0600` | 模块 watcher（`reload = "auto"`）；`restart` 额外创建 `/data/adb/omk/restart.keymint` 重启 keymint | 模块 `oh_my_keymint`；不同步 `config.toml`/`injector.toml`；警告 `retire_stale_keybox_bound_keys` |
-| `teesim` | `/data/adb/teesim/<name>.xml`，默认 `keybox.xml` | `0:0` / `0600`（目录 `0700`） | 模块 watcher | 模块 `teesim`；需匹配 `config.json` profile 的 keybox 文件名，且必须以 `.xml` 结尾；源码支持 EC-only，链 ≥2 |
-| `tricky_store` | `/data/adb/tricky_store/keybox.xml` | `0:0` / `0600` | 模块 watcher | 模块 `tricky_store`：TrickyStore 或 TEESimulator-RS（同 id、同路径） |
-| `custom` | 本地显式配置 | 本地显式配置 | 本地显式配置 | 必须手动 opt-in；禁止远端下发路径/命令 |
+| `omk` | `/data/misc/keystore/omk/keybox.xml` | `1017:1017` / `0600` | Module watcher (`reload = "auto"`); `restart` additionally creates `/data/adb/omk/restart.keymint` to restart keymint | Module `oh_my_keymint`; does not sync `config.toml`/`injector.toml`; warns about `retire_stale_keybox_bound_keys` |
+| `teesim` | `/data/adb/teesim/<name>.xml`, default `keybox.xml` | `0:0` / `0600` (directory `0700`) | Module watcher | Module `teesim`; must match the keybox filename of a `config.json` profile and must end in `.xml`; the source supports EC-only, chain ≥2 |
+| `tricky_store` | `/data/adb/tricky_store/keybox.xml` | `0:0` / `0600` | Module watcher | Module `tricky_store`: TrickyStore or TEESimulator-RS (same id, same path) |
+| `custom` | Explicit local configuration | Explicit local configuration | Explicit local configuration | Must be opted into manually; delivering paths/commands remotely is forbidden |
 
-`rkp-mini-deployer targets [--json]` 只读地列出上表的内置目标，并检测对应模块是否安装（`/data/adb/modules/<模块 id>/module.prop` 存在；`disable`/`remove` 标记 → `enabled = false`；读取失败按未安装处理）。`data.builtin[]`：`id`、`path`、`owner`、`mode`、`module { id, installed, enabled, name, version }`。CLI 的 `add-target` 不受检测结果限制。
+`rkp-mini-deployer targets [--json]` lists the built-in targets in the table above read-only, and detects whether the corresponding module is installed (`/data/adb/modules/<module id>/module.prop` exists; `disable`/`remove` markers → `enabled = false`; a read failure is treated as not installed). `data.builtin[]`: `id`, `path`, `owner`, `mode`, `module { id, installed, enabled, name, version }`. The CLI's `add-target` is not restricted by the detection result.
 
-TEESim 特别说明：
+TEESim notes:
 
-- 如果 `config.json` 的 profile 引用 `foo.xml`，接收端写 `keybox.xml` 不会生效；`deploy` 应解析 `config.json`，确认 target path 的 basename 被至少一个 profile 引用；否则报 `target_unreferenced`。
-- 不自动修改 `config.json`。
-- README 与源码对 RSA 要求不一致；以目标版本实测为准。
+- If a `config.json` profile references `foo.xml`, writing `keybox.xml` on the receiver has no effect; `deploy` should parse `config.json` and confirm the basename of the target path is referenced by at least one profile; otherwise report `target_unreferenced`.
+- Do not modify `config.json` automatically.
+- The README and the source disagree about RSA requirements; trust the target version's actual behavior.
 
-OMK 特别说明：
+OMK notes:
 
-- OMK 固定读取 `/data/misc/keystore/omk/keybox.xml`，不需要改配置。
-- `retire_stale_keybox_bound_keys=true` 时换 keybox 会删除旧 keybox 绑定的客户端 key；部署前必须警告。
-- `chown 1017:1017` 必须成功；失败则报错，不继续。
-- 写入前有 OMK 兼容性预检查（`crates/rkp-mini-deployer/src/omk.rs`）：手写扫描器复刻 OMK 1.2.6（`9069c6c`）的 `src/keybox.rs` 四条正则、`decode_pem` 与 `common/src/crypto/ec.rs::import_sec1_private_key`，确认 OMK 会读到与本地校验完全相同的私钥和证书链（链 DER 哈希、DeviceID、SEC1 namedCurve）；只是比 OMK 更严，绝不更宽松。
-- 结果：配置了 `omk` 目标时，`plan` 的 `data.warnings[]` 在**每个** gate 都带 `omk_incompatible`；`apply` 在访问该目标文件之前就让 `omk` 目标以 `targets[].error.code = "omk_incompatible"` 失败（deploy 与 gate `same` 的修复路径一致，不写、不改权限、不 reload），其它目标照常继续。原因文本固定，不含 keybox 文本、base64 或密钥字节。
-- 已知残余：OMK 还会比较叶子证书完整 SPKI DER 与 BoringSSL 由私钥导出的 SPKI；SPKI 使用非 namedCurve `AlgorithmIdentifier` 编码时预检查发现不了。
-- 本次改动前签发的 keybox 私钥缺少 SEC1 `parameters`，会被判为不兼容；重新签发（`rkp-mini-issuer issue`）后再部署。其它目标对该格式的处理见 §4.3：只有 `omk` 目标有预检查，`tricky_store` 没有。
+- OMK reads `/data/misc/keystore/omk/keybox.xml` with a fixed path; no configuration change is needed.
+- With `retire_stale_keybox_bound_keys=true`, replacing the keybox deletes client keys bound to the old keybox; this must be warned about before deploying.
+- `chown 1017:1017` must succeed; on failure report an error and do not continue.
+- There is an OMK compatibility pre-check before writing (`crates/rkp-mini-deployer/src/omk.rs`): a handwritten scanner replicates the four regexes in `src/keybox.rs` of OMK 1.2.6 (`9069c6c`), `decode_pem`, and `common/src/crypto/ec.rs::import_sec1_private_key`, confirming that OMK will read exactly the same private key and certificate chain as the local validation (chain DER hash, DeviceID, SEC1 namedCurve); it is only stricter than OMK, never looser.
+- Result: when the `omk` target is configured, `plan`'s `data.warnings[]` carries `omk_incompatible` at **every** gate; `apply` fails the `omk` target with `targets[].error.code = "omk_incompatible"` before touching that target's file (same repair path as a `same` deploy gate: no write, no permission change, no reload), while other targets continue as usual. The reason text is fixed and contains no keybox text, base64, or key bytes.
+- Known residual: OMK also compares the leaf certificate's full SPKI DER with the SPKI BoringSSL derives from the private key; when the SPKI is encoded with a non-namedCurve `AlgorithmIdentifier`, the pre-check cannot detect it.
+- Keyboxes issued before this change have private keys without SEC1 `parameters` and are judged incompatible; re-issue (`rkp-mini-issuer issue`) and then deploy. For how other targets treat that format see §4.3: only the `omk` target has a pre-check; `tricky_store` has none.
 
-### 11.5 identity gate 与 rotation policy
+### 11.5 identity gate and rotation policy
 
-比较 `deploy-state.deployed_keybox_sha256` 与 staging：
+Compare `deploy-state.deployed_keybox_sha256` with staging:
 
-- 相同 → 幂等部署；可修复权限/触发 reload。
-- 不同 → identity change：
-  - `scheduled`（默认）：仅当旧 keybox `keybox_not_after - now <= rotation_lead_days` 或已过期，且新叶子 `not_after > 旧 not_after` 时自动部署；否则记录 `pending`，通知用户。
-  - `always`：自动部署任何新身份；明确风险。
-  - `never`：必须人工 `rkp-mini-deployer apply --allow-identity-change`。
-- 首次部署（无 deploy-state）：必须人工确认，展示 old/new 影响；即使 `always` 也不静默。
+- Same → idempotent deploy; may fix permissions/trigger reload.
+- Different → identity change:
+  - `scheduled` (default): deploy automatically only when the old keybox has `keybox_not_after - now <= rotation_lead_days` or is already expired, and the new leaf's `not_after > the old not_after`; otherwise record `pending` and notify the user.
+  - `always`: deploy any new identity automatically; explicit risk.
+  - `never`: requires a manual `rkp-mini-deployer apply --allow-identity-change`.
+- First deploy (no deploy-state): requires manual confirmation showing the old/new impact; even with `always` it is not silent.
 
-OMK 警告必须在实际写入前展示/记录；TEESim 提示会触发已有 key 的 re-attest。
+The OMK warning must be shown/recorded before the actual write; the TEESim hint that existing keys will be re-attested must also be shown.
 
-### 11.6 原子写
+### 11.6 Atomic write
 
 ```text
 tmp = target_dir/.<name>.tmp.<pid>
@@ -899,100 +905,100 @@ write + fsync
 fchmod/fchown
 rename(tmp, target)
 fsync(target_dir)
-restorecon（如需要）
-读回 target，校验 sha256
-写 deploy-state（原子）
+restorecon (if needed)
+read back target, verify sha256
+write deploy-state (atomic)
 ```
 
-- 任何一步失败：目标文件保持旧版本；deploy-state 记录错误。
-- 不在 rename 前删除旧文件；不清空目录。
-- 多 target：逐个部署；一个失败不阻塞其它，但状态分别记录。
-- 不保留目标目录下的明文 `.prev`；如需回滚，由用户/部署层另行处理（v1 不提供自动回滚）。
+- If any step fails: the target file keeps the old version; deploy-state records the error.
+- Do not delete the old file before rename; do not empty the directory.
+- Multiple targets: deploy one by one; one failure does not block the others, but status is recorded separately.
+- Do not keep a plaintext `.prev` in the target directory; if rollback is needed, the user/deploy layer handles it separately (v1 offers no automatic rollback).
 
-### 11.7 自动运行与 secret-file
+### 11.7 Automatic runs and secret-file
 
-你已选择默认 `secret-file`，因此发送端和接收端都可长期无人值守：
+You chose `secret-file` as the default, so both sender and receiver can run unattended for long periods:
 
-- 发送端 `age.pass` 0600；接收端 `age.pass` 0600。
-- 发送端每天/每 12h：`rkp-mini-issuer issue --if-expiring-days N` + `rkp-mini-sync push`。
-- 接收端每 6–12h：`sh modules/deployer/run.sh auto`（`check-auto --require-verified`，
-  然后 `fetch --auto` + `apply --auto --if-staged`）。
-- 定时器：`service.sh` 等 `sys.boot_completed` + 网络；后台循环 `setsid/nohup` + 锁 + 抖动。
-- Android Doze/厂商省电可能冻结 root shell 循环；纯 shell 不保证严格定时。若要严格定时，接收端应做成 App + WorkManager。
-- `secret-file` 缺失/权限不对：自动任务停止并报错；不要静默回退到空密码或提示输入。
-- 读取口令后尽快 zeroize；不把密码传给子进程 argv；必要时用 stdin/fd/inbox 文件（§19.2）。
+- Sender `age.pass` 0600; receiver `age.pass` 0600.
+- Sender every day/every 12h: `rkp-mini-issuer issue --if-expiring-days N` + `rkp-mini-sync push`.
+- Receiver every 6–12h: `sh modules/deployer/run.sh auto` (`check-auto --require-verified`,
+  then `fetch --auto` + `apply --auto --if-staged`).
+- Timer: `service.sh` waits for `sys.boot_completed` + network; background loop with `setsid/nohup` + lock + jitter.
+- Android Doze/vendor power saving may freeze root shell loops; plain shell cannot guarantee strict timing. If strict timing is needed, the receiver should become an app + WorkManager.
+- `secret-file` missing/wrong permissions: the automatic task stops and reports an error; never silently fall back to an empty passphrase or a prompt.
+- Zeroize the passphrase as soon as possible after reading it; do not pass it to child process argv; use stdin/fd/inbox files when necessary (§19.2).
 
 ---
 
-## 12. 二进制拆分
+## 12. Binary split
 
-### 12.1 建议
+### 12.1 Recommendation
 
-**拆成独立 `rkp-mini-sync`，建议 Cargo workspace + 共享 core。**
+**Split into a standalone `rkp-mini-sync`; a Cargo workspace + shared core is recommended.**
 
-| 维度 | `rkp-mini-issuer` | `rkp-mini-sync` |
+| Dimension | `rkp-mini-issuer` | `rkp-mini-sync` |
 |---|---|---|
-| 依赖 | KeyMint/vendor ABI、TA worker、RKP 协议 | age、CBOR、HTTP、URL、keybox 校验 |
-| 运行位置 | 签发设备 | 发送端 + 接收端（无需 RKP 硬件） |
-| 攻击面 | 高（vendor 调用） | 中（网络/密码/文件） |
-| 生命周期 | 签发/状态 | 长期定时同步 |
-| 测试 | 需 Android/TA | 可 host 完整测试 |
-| 包体 | 保持精简 | 独立增量 |
+| Dependencies | KeyMint/vendor ABI, TA worker, RKP protocol | age, CBOR, HTTP, URL, keybox validation |
+| Runs on | The issuing device | Sender + receiver (no RKP hardware needed) |
+| Attack surface | High (vendor calls) | Medium (network/passphrase/files) |
+| Lifecycle | Issuance/status | Long-term scheduled sync |
+| Testing | Needs Android/TA | Fully testable on the host |
+| Package size | Stays lean | Separate increment |
 
-不建议把 sync 直接塞进 `rkp-mini-issuer` 单二进制：age/网络/密码会把签发程序依赖和攻击面一起放大；接收端根本不需要 KeyMint 代码。
+Stuffing sync into the single `rkp-mini-issuer` binary is not recommended: age/network/passphrase enlarge the issuing program's dependencies and attack surface together, and the receiver does not need KeyMint code at all.
 
-### 12.2 推荐布局
+### 12.2 Recommended layout
 
 ```text
 crates/
-  rkp-mini/          # 现有签发 CLI；不链接 sync 代码
-  rkp-mini-sync/          # 同步/部署 CLI
-  rkp-mini-sync-core/     # age、CBOR、URL、state、严格 keybox 校验
+  rkp-mini/          # existing issuance CLI; does not link sync code
+  rkp-mini-sync/          # sync/deploy CLI
+  rkp-mini-sync-core/     # age, CBOR, URL, state, strict keybox validation
 ```
 
-或者独立仓库 `rkp-mini-sync` + 发布 `rkp-mini-sync-core`。
+Alternatively a separate repository `rkp-mini-sync` + publish `rkp-mini-sync-core`.
 
-- 发送端模块包含 `bin/rkp-mini-issuer` + `bin/rkp-mini-sync`。
-- 接收端模块只包含 `bin/rkp-mini-sync` + 接收端部署适配器/WebUI。
-- `rkp-mini-issuer` 不依赖 `rkp-mini-sync-core`；两者通过文件/子进程编排。
-- 若不想改 workspace，可先独立仓库；不要用第二个 `src/bin` 共享全部依赖作为长期方案。
+- The sender module contains `bin/rkp-mini-issuer` + `bin/rkp-mini-sync`.
+- The receiver module contains only `bin/rkp-mini-sync` + receiver deploy adapters/WebUI.
+- `rkp-mini-issuer` does not depend on `rkp-mini-sync-core`; the two are orchestrated through files/subprocesses.
+- If changing the workspace is undesirable, start with a separate repository; do not use a second `src/bin` sharing all dependencies as the long-term solution.
 
-### 12.3 依赖与约束
+### 12.3 Dependencies and constraints
 
-建议保持仓库现有风格：
+Follow the repository's existing style:
 
-- 同步、阻塞 I/O；不引 async runtime、不引 `clap`、不引 `reqwest`。
-- HTTP：复用 `ureq`（TLS）。
-- 加密：`age`（passphrase/armor）。
-- 序列化：`ciborium`、`serde`、`serde_json`。
-- 哈希/编码：`sha2`、`hex`、`base64`。
-- XML：`roxmltree`（纯解析、无 DTD/实体）。
-- 配置：`toml`；时间：`time`。
-- 错误：`anyhow`；密码内存 zeroize 可用 `zeroize`。
-- release profile 与主项目一致（`panic = "abort"`；不要依赖 catch_unwind）。
+- Synchronous blocking I/O; no async runtime, no `clap`, no `reqwest`.
+- HTTP: reuse `ureq` (TLS).
+- Encryption: `age` (passphrase/armor).
+- Serialization: `ciborium`, `serde`, `serde_json`.
+- Hashing/encoding: `sha2`, `hex`, `base64`.
+- XML: `roxmltree` (pure parsing, no DTD/entities).
+- Config: `toml`; time: `time`.
+- Errors: `anyhow`; `zeroize` may be used for passphrase memory.
+- The release profile matches the main project (`panic = "abort"`; do not rely on catch_unwind).
 
-### 12.4 打包
+### 12.4 Packaging
 
-- `build.sh` 需交叉编译两个二进制（若同仓库），并检查 ZIP。
-- 发送端 ZIP 根目录必须含 `bin/rkp-mini-issuer`、`bin/rkp-mini-sync`、`module.prop`、hook、`webroot/`（若 WebUI）。
-- 接收端有独立 ZIP/模块；不要把接收端代码塞进 `rkp_mini_issuer`。
-- `rkp-mini-sync` 有自己的 `--version` 和协议版本（`sync protocol v1`），不要与模块版本强绑定。
+- `build.sh` must cross-compile both binaries (if in the same repository) and inspect the ZIP.
+- The sender ZIP root must contain `bin/rkp-mini-issuer`, `bin/rkp-mini-sync`, `module.prop`, hooks, and `webroot/` (if a WebUI is included).
+- The receiver has its own ZIP/module; do not stuff receiver code into `rkp_mini_issuer`.
+- `rkp-mini-sync` has its own `--version` and protocol version (`sync protocol v1`); do not hard-bind it to the module version.
 
 ---
 
-## 13. Scope、UI 与跨设备风险
+## 13. Scope, UI, and cross-device risk
 
-### 13.1 仓库 scope 变更
+### 13.1 Repository scope change
 
-本方案要求修改 `AGENTS.md` / `README.md`：
+This design requires changing `AGENTS.md` / `README.md`:
 
-原 scope 中的：
+The original scope text:
 
 ```text
 No ... remote private-key deployment.
 ```
 
-改为：
+becomes:
 
 ```text
 Remote private-key deployment is opt-in and disabled by default. It encrypts the
@@ -1002,224 +1008,224 @@ Play Integrity, and using a keybox on a different device is keybox cloning /
 spoofing, not a legitimate RKP provisioning path.
 ```
 
-同时补充：
+Also add:
 
-- 默认关闭；首次启用必须风险确认；可在设置中禁用。
-- 密码默认落盘（`secret-file`）用于自动运行；这是明确接受的取舍。
-- 不同步 OMK `config.toml`/`injector.toml`、TEESim `config.json`。
-- 接收端是新设备时的跨设备风险。
+- Disabled by default; risk acceptance is required on first enable; it can be disabled in settings.
+- The passphrase is written to disk (`secret-file`) by default for automatic runs; this is an explicitly accepted trade-off.
+- OMK `config.toml`/`injector.toml` and TEESim `config.json` are not synced.
+- The cross-device risk when the receiver is a new device.
 
-### 13.2 首次启用风险确认
+### 13.2 Risk acceptance on first enable
 
-UI 必须展示并让用户勾选确认：
+The UI must display these and have the user tick each one:
 
-- 该 keybox 是签发设备的 RKP 身份，在新设备上使用属于 keybox 克隆/冒充。
-- Play Integrity、Key Attestation、银行/支付应用可能拒绝，Google 可能撤销。
-- 私钥会被复制到新设备；任一台设备泄露，另一台一起失守。
-- age 密码会保存到 `0600` 文件以支持自动运行；设备丢失/root 被攻破会泄露。
-- OMK 的 `retire_stale_keybox_bound_keys=true` 可能在轮换时删除旧 key。
-- 这不是合法的跨设备 RKP provisioning；风险由用户承担。
+- This keybox is the issuing device's RKP identity; using it on a new device is keybox cloning/impersonation.
+- Play Integrity, Key Attestation, and banking/payment apps may refuse it; Google may revoke it.
+- The private key is copied to the new device; compromising either device compromises both.
+- The age passphrase is saved to a `0600` file to support automatic runs; device loss or root compromise leaks it.
+- OMK's `retire_stale_keybox_bound_keys=true` may delete old keys during rotation.
+- This is not legitimate cross-device RKP provisioning; the risk is borne by the user.
 
-写入 `risk_ack_version` 与时间；版本变化后重新确认。禁止默认勾选、禁止隐藏。
+Write `risk_ack_version` and the timestamp; require re-confirmation when the version changes. Pre-checked boxes and hiding are forbidden.
 
-### 13.3 设置与禁用
+### 13.3 Settings and disabling
 
-- 设置页保留“启用/禁用同步”开关。
-- **禁用**：停止定时任务、停止 fetch/deploy；保留已部署 keybox，避免突然破坏设备。
-- **禁用并清除远端**：删除 `age.pass`、Gist token、WebDAV 密码、URL、sync/deploy state；可选删除 staging。
-- **移除已部署 keybox**：单独操作，二次确认；可能让 OMK/TEESim 回到无 keybox 状态。
-- 禁用不等于撤销：旧 keybox 仍然存在；真正撤销需换密码 + 重新 issue。
-- **2026-11 更新（发送端）**：自动推送有独立开关 `[sync].auto_push`（默认 `true`；关闭后发送端 `check-auto`
-  失败为 `auto_push_disabled`，只停自动推送，手动 `push` 不受影响），发送端页面不再提供“禁用同步”（CLI `disable` 保留）。
-  `remote-delete --yes`（仅发送端）先用本机口令解密云端并核对 stream，再按刚读到的 token 做条件删除：
-  Gist 删除整个 Gist 并清空 `gist_id`/`gist_url`（Gist 不能没有文件；下次 push 新建，接收端需重新导入），
-  WebDAV `DELETE` + `If-Match`（412 → `remote_conflict`）；不动 `sync-state`，seq 按 §7.5 延续。
-  **删除云端文件不等于撤销**：已拉取的接收端仍保留 keybox。`forget --reset`（仅发送端）在 `forget` 之后删除整个
-  `[sync]` 表（保留签发端字段），回到未初始化；不动云端。
-- **2026-11 更新（两端）**：`check-remote` 只读检查云端：解密并核对 stream，与本地比较后把结果写入
-  `<root>/sync/remote-check.json`（`status --json` 的 `remote_check`），不写云端、staging、`sync-state`、`deploy-state`。
-  `outcome`：`in_sync`、`remote_behind`（发送端：云端 keybox 与本机不同，需要推送；接收端：云端 seq 比已验证的旧）、
-  `remote_ahead`（发送端：云端 seq 比上次推送新；接收端：有可拉取的更新）、`diverged`（同 seq 不同内容）、`missing`、`error`。
+- The settings page keeps an "enable/disable sync" switch.
+- **Disable**: stop scheduled tasks, stop fetch/deploy; keep the deployed keybox so the device is not broken abruptly.
+- **Disable and clear remote**: delete `age.pass`, the Gist token, the WebDAV password, the URL, and the sync/deploy state; optionally delete staging.
+- **Remove the deployed keybox**: a separate operation with a second confirmation; it may leave OMK/TEESim without a keybox.
+- Disabling is not revocation: the old keybox still exists; real revocation requires changing the passphrase + re-issuing.
+- **2026-11 update (sender)**: automatic push has its own switch `[sync].auto_push` (default `true`; when off, the sender's `check-auto`
+  fails with `auto_push_disabled`, stopping only automatic pushes, while manual `push` is unaffected); the sender page no longer offers "disable sync" (the CLI `disable` is kept).
+  `remote-delete --yes` (sender only) first decrypts the cloud with the local passphrase and verifies the stream, then performs a conditional delete with the token it just read:
+  Gist deletes the whole Gist and clears `gist_id`/`gist_url` (a Gist cannot exist without files; the next push creates a new one and the receiver must re-import),
+  WebDAV `DELETE` + `If-Match` (412 → `remote_conflict`); `sync-state` is untouched and seq continues per §7.5.
+  **Deleting the cloud file is not revocation**: receivers that already pulled keep the keybox. `forget --reset` (sender only) deletes the whole
+  `[sync]` table after `forget` (keeping issuer-side fields), returning to uninitialized; it does not touch the cloud.
+- **2026-11 update (both sides)**: `check-remote` checks the cloud read-only: it decrypts and verifies the stream, compares with the local state, and writes the result to
+  `<root>/sync/remote-check.json` (`remote_check` in `status --json`), without writing the cloud, staging, `sync-state`, or `deploy-state`.
+  `outcome`: `in_sync`, `remote_behind` (sender: the cloud keybox differs from this device and needs a push; receiver: the cloud seq is older than the verified one),
+  `remote_ahead` (sender: the cloud seq is newer than the last push; receiver: there is an update to pull), `diverged` (same seq, different content), `missing`, `error`.
 
-### 13.4 跨设备使用
+### 13.4 Cross-device use
 
-接收端不是同一台设备，因此：
+The receiver is not the same device, therefore:
 
-- 不承诺 RKP 合法性；这是用户主动选择的 keybox 克隆/冒充。
-- 每台接收设备建议独立 stream + 独立密码；不要把一份 keybox 分发给多台设备。
-- 如果未来要合法多设备，应在每台设备上分别运行 RKP 签发（需要该设备的 Qualcomm KeyMint 支持），而不是复制 keybox。
+- RKP legitimacy is not promised; this is a keybox clone/impersonation deliberately chosen by the user.
+- Each receiving device should get its own stream + its own passphrase; do not distribute one keybox to multiple devices.
+- If legitimate multi-device use is needed later, run RKP issuance separately on each device (which requires that device's Qualcomm KeyMint support) instead of copying the keybox.
 
 ---
 
-## 14. 失败矩阵
+## 14. Failure matrix
 
-| 场景 | 行为 |
+| Scenario | Behavior |
 |---|---|
-| `age.pass` 缺失/权限不对 | 自动任务停止；报路径/权限；不猜密码 |
-| Gist 直链 404 | 保留当前 keybox；提示重新导入/更新链接 |
-| Gist 直链返回旧缓存 | 等待/重试；可用 API 读取（仍可不带 token，注意限流） |
-| Gist token 401/403 | 发送端停止；提示更新 token |
-| WebDAV 401/403 | 停止；提示更新应用密码 |
-| WebDAV 409/412/423 | 重新读取 ETag；锁冲突下轮重试 |
-| 公开 URL 401/403 | 说明需要认证；改用 WebDAV provider |
-| 解密失败 | `decrypt_failed`；不覆盖本地，不清 state |
-| CBOR/XML 非法 | 拒绝；保留当前 |
-| seq 回退/同 seq 不同 hash | 拒绝；告警 |
-| stream_id 不匹配 | 拒绝 |
-| 叶子不足 `min_validity_days` | 拒绝；发送端重新 issue |
-| 身份变化未允许 | 记录 `pending`；通知；不写目标 |
-| OMK key retirement 触发 | 部署成功但可能删 key；UI 提前警告 |
-| keybox 通过本地校验但 OMK 读不了 | `omk_incompatible`；`omk` 目标不写入（不触发 OMK 模板覆盖），其它目标照常；提示重新签发或改用 OMK 可解析的 keybox |
-| 目标写文件失败 | 保留旧文件；报 path/errno/SELinux |
-| reload 失败 | 文件已落盘；标记 degraded；提示手动重启/查日志 |
-| 禁用同步 | 停任务；保留已部署 keybox；不自动删除 |
-| 跨设备 attestation 失败 | 本地无法可靠检测；UI 说明是使用风险，不是同步错误 |
+| `age.pass` missing/wrong permissions | Automatic task stops; report path/permissions; never guess the passphrase |
+| Gist direct link 404 | Keep the current keybox; prompt to re-import/update the link |
+| Gist direct link returns stale cache | Wait/retry; the API read is available (still tokenless, watch the rate limit) |
+| Gist token 401/403 | Sender stops; prompt to update the token |
+| WebDAV 401/403 | Stop; prompt to update the app password |
+| WebDAV 409/412/423 | Re-read the ETag; retry next round under a lock conflict |
+| Public URL 401/403 | Explain that authentication is needed; switch to the WebDAV provider |
+| Decryption failure | `decrypt_failed`; do not overwrite local, do not clear state |
+| Invalid CBOR/XML | Reject; keep the current one |
+| seq rollback/same seq with a different hash | Reject; warn |
+| stream_id mismatch | Reject |
+| Leaf below `min_validity_days` | Reject; the sender must re-issue |
+| Identity change not allowed | Record `pending`; notify; do not write targets |
+| OMK key retirement triggered | Deploy succeeds but keys may be deleted; warn beforehand in the UI |
+| keybox passes local validation but OMK cannot read it | `omk_incompatible`; the `omk` target is not written (no OMK template overwrite), other targets proceed; prompt to re-issue or use a keybox OMK can parse |
+| Target file write fails | Keep the old file; report path/errno/SELinux |
+| reload fails | The file is already on disk; mark degraded; prompt for a manual restart/check the logs |
+| Sync disabled | Stop tasks; keep the deployed keybox; do not delete automatically |
+| Cross-device attestation failure | Cannot be detected reliably locally; the UI states it is a usage risk, not a sync error |
 
 ---
 
-## 15. 安全要求（MUST）
+## 15. Security requirements (MUST)
 
-1. 密码/token/WebDAV 密码/keybox/私钥 **MUST NOT** 出现在 URL、二维码、日志、错误消息、WebUI 文本（输入框除外，提交后立即清空）、外部进程 argv、环境变量。
-2. 所有 secret/state/staging **MUST** 为 `0600`；目录 `0700`；目标 keybox 权限按适配器要求。
-3. 密码输入 **MUST** 走 stdin/TTY/`0600` 文件/§19.2 的 inbox；**MUST NOT** 使用 `--password <明文>`。
-4. 远端响应 **MUST** 有大小上限；解密前不得无限缓冲。
-5. age 解密失败 **MUST** 拒绝应用；不得“跳过校验”。
-6. `seq/prev/stream_id/叶子到期` **MUST** 全部校验。
-7. keybox XML 解析 **MUST** 禁用 DTD/外部实体；**MUST** 限制链长度/大小。
-8. 私钥与叶子公钥 **MUST** 匹配；`DeviceID` **MUST** 与公钥推导一致。
-9. 部署路径/owner/mode/reload **MUST** 只来自本地配置；远端 **MUST NOT** 指定。
-10. 只允许 https；http **MUST** 需要显式 `--allow-insecure-http` 且仅本地调试。
-11. URL **MUST** 拒绝 userinfo、未知字段、`..`、私网地址（默认）。
-12. 写入 **MUST** 原子：同目录 temp + fsync + rename + fsync(dir)。
-13. 部署失败 **MUST** 保留旧 keybox；不得先删除再写。
-14. Gist token **MUST** 最小 scope；WebDAV 使用应用密码；可撤销。
-15. `secret-file` 设备丢失/root 失守视为密码泄露；必须换密码 + 重新 issue keybox。
-16. 首次启用 **MUST** 风险确认；默认关闭；不得静默开启。
-17. 日志 **MUST** 只记 seq/hash/provider/路径/错误码，不记内容。
+1. Passphrase/token/WebDAV password/keybox/private key **MUST NOT** appear in URLs, QR codes, logs, error messages, WebUI text (except input fields, cleared immediately after submission), external process argv, or environment variables.
+2. All secrets/state/staging **MUST** be `0600`; directories `0700`; target keybox permissions follow the adapter's requirements.
+3. Passphrase input **MUST** go through stdin/TTY/a `0600` file/the §19.2 inbox; **MUST NOT** use `--password <plaintext>`.
+4. Remote responses **MUST** have a size limit; nothing may be buffered without bound before decryption.
+5. age decryption failure **MUST** reject application; "skip validation" is not allowed.
+6. `seq/prev/stream_id/leaf expiry` **MUST** all be validated.
+7. keybox XML parsing **MUST** disable DTDs/external entities; chain length/size **MUST** be limited.
+8. The private key and leaf public key **MUST** match; `DeviceID` **MUST** agree with the public key derivation.
+9. Deploy path/owner/mode/reload **MUST** come only from local configuration; the remote **MUST NOT** specify them.
+10. Only https is allowed; http **MUST** require an explicit `--allow-insecure-http` and is for local debugging only.
+11. URLs **MUST** reject userinfo, unknown fields, `..`, and private addresses (by default).
+12. Writes **MUST** be atomic: same-directory temp + fsync + rename + fsync(dir).
+13. A failed deploy **MUST** keep the old keybox; never delete before writing.
+14. The Gist token **MUST** have minimal scope; WebDAV uses an app password; both are revocable.
+15. `secret-file` device loss/root compromise is treated as a passphrase leak; change the passphrase + re-issue the keybox.
+16. First enable **MUST** require risk acceptance; disabled by default; never enable silently.
+17. Logs **MUST** record only seq/hash/provider/path/error codes, never content.
 
 ---
 
-## 16. 实施阶段
+## 16. Implementation phases
 
-| 阶段 | 内容 | 完成标准 |
+| Phase | Content | Completion criterion |
 |---|---|---|
-| **P0** | `rkp-mini-sync-core`：CBOR envelope、age armor、URL parser、严格 keybox 校验、sync/deploy state；local directory transport | host 单测全过；无网络/无 Android 依赖 |
-| **P1** | 独立 `rkp-mini-sync` 二进制；发送端 Gist（token）+ `push/share`；接收端 Gist 直链（无 token）+ `import/fetch`；OMK 手动部署 | 真实 Gist 创建/更新/拉取/解密；OMK reload；权限正确 |
-| **P2** | WebDAV（自定义文件名、tmp+MOVE、If-Match）+ 公开 URL；TEESim/TrickyStore 适配器；deploy-state/identity gate | 坚果云实测；TEESim `config.json` 引用检查；身份变化拦截 |
-| **P3** | `secret-file` 自动运行；发送端 `auto_issue_days` 阈值 + push；接收端定时 `run`；rotation policy `scheduled` | 重启后自动运行；OMK 警告；Doze 行为记录 |
-| **P4** | 密码轮换、风险 UI/scope 文档、跨设备 QA、打包/版本、故障注入 | 验收清单全过；文档/AGENTS/README 更新 |
+| **P0** | `rkp-mini-sync-core`: CBOR envelope, age armor, URL parser, strict keybox validation, sync/deploy state; local directory transport | All host unit tests pass; no network/Android dependency |
+| **P1** | Standalone `rkp-mini-sync` binary; sender Gist (token) + `push/share`; receiver Gist direct link (no token) + `import/fetch`; manual OMK deploy | Real Gist create/update/pull/decrypt; OMK reload; correct permissions |
+| **P2** | WebDAV (custom filename, tmp+MOVE, If-Match) + public URL; TEESim/TrickyStore adapters; deploy-state/identity gate | Tested against Jianguoyun; TEESim `config.json` reference check; identity change blocked |
+| **P3** | `secret-file` automatic runs; sender `auto_issue_days` threshold + push; receiver scheduled `run`; rotation policy `scheduled` | Runs automatically after reboot; OMK warning; Doze behavior recorded |
+| **P4** | Passphrase rotation, risk UI/scope documentation, cross-device QA, packaging/versioning, fault injection | Acceptance checklist fully passes; docs/AGENTS/README updated |
 
-每个阶段都必须保持 `rkp-mini-issuer` 现有签发/status 契约不变；P0 先做 core，避免网络/密码代码污染签发路径。
-
----
-
-## 17. 验收清单
-
-### 17.1 单元/集成
-
-- age passphrase 加解密 round-trip；错误密码、篡改、截断、超大输入全部拒绝。
-- CBOR 字段/大小/编码；`prev`/`seq`/`stream_id` 校验。
-- URL parser：拒绝 password/token/未知字段/userinfo/私网/`..`；接受三种 provider。
-- keybox 校验：EC-only、链 >=2、key match、DeviceID 推导、DTD/XXE、超大 XML。
-- state 原子写；断电模拟；staging 清理；sync/deploy 分离（`sync-state` 无 target/path）。
-- Gist：secret gist 创建/更新；接收端无 token 直链读取；缓存/404/限流。
-- WebDAV：自定义文件名；PUT+MOVE；If-Match；401/403；配额。
-- 公开 URL：无认证读取；SSRF 拒绝；重定向限制。
-- identity gate：same hash 幂等；scheduled 窗口；always/never；首次部署人工确认。
-- 自动任务：secret-file 缺失/权限错；锁；重试；重启恢复。
-
-### 17.2 安全
-
-- 远端 bucket/gist/WebDAV 无明文 keybox/私钥。
-- 日志/错误/URL/二维码无密码/token。
-- `ps`/argv 无密码；临时文件 0600 且及时 unlink。
-- `secret-file` 0600/目录 0700；SELinux 上下文正确。
-- URL 解析拒绝 secret 字段；SSRF/XXE 测试通过。
-- 禁用同步不会自动删除已部署 keybox。
-
-### 17.3 设备
-
-- OMK：写入后 watcher reload；owner `1017:1017`；`retire_stale_keybox_bound_keys` 警告可见。
-- TEESim：`config.json` 引用匹配；watcher reload；EC-only 实测。
-- 跨设备：首次风险确认；新设备部署后 attestation 行为记录；失败不伪报成功。
-- 自动：重启后任务启动；Doze/省电下行为记录；手动 `run` 兜底。
-- 密码轮换后旧密文/旧 keybox 行为记录。
+Every phase must keep `rkp-mini-issuer`'s existing issuance/status contract unchanged; P0 builds the core first so network/passphrase code does not contaminate the issuance path.
 
 ---
 
-## 18. 实现自由度与边界
+## 17. Acceptance checklist
 
-已定决策不要改；以下是实现细节自由度：
+### 17.1 Unit/integration
 
-- workspace vs 独立仓库：推荐 workspace；若工期紧可先独立 crate，但不要塞进 `rkp-mini-issuer` 单二进制。
-- Gist 直链 vs API 解析：默认直链；API 作为无 token 回退。
-- WebDAV MOVE vs If-Match：按目标服务器能力选择；保留失败回退。
-- UI 技术栈：KernelSU WebUI（§19），复用 `webui/` 的 Vue + miuix-vue；CLI 保持同等能力。风险确认/禁用必须在两者都存在。
-- 是否保留 staging 最近 1 份：允许，但必须 0600 且可清理。
-- 是否加 Ed25519：v1 不做；未来如做，必须单独设计公钥分发，不要混入本方案。
+- age passphrase encrypt/decrypt round-trip; wrong passphrase, tampering, truncation, and oversized input are all rejected.
+- CBOR fields/size/encoding; `prev`/`seq`/`stream_id` validation.
+- URL parser: rejects password/token/unknown fields/userinfo/private addresses/`..`; accepts all three providers.
+- keybox validation: EC-only, chain >=2, key match, DeviceID derivation, DTD/XXE, oversized XML.
+- state atomic writes; power-loss simulation; staging cleanup; sync/deploy separation (`sync-state` has no target/path).
+- Gist: secret gist create/update; tokenless direct-link read on the receiver; cache/404/rate limit.
+- WebDAV: custom filename; PUT+MOVE; If-Match; 401/403; quota.
+- Public URL: unauthenticated read; SSRF rejection; redirect limits.
+- identity gate: same hash idempotent; scheduled window; always/never; manual confirmation on first deploy.
+- Automatic tasks: `secret-file` missing/wrong permissions; locking; retry; recovery after reboot.
 
-## 19. WebUI 修订（2026-11-10，已定）
+### 17.2 Security
 
-原 v1 只做 CLI，理由是“WebUI 经 `ksu.exec` 传密码会进 argv”。读 KernelSU manager 源码后该前提不成立，改为 WebUI 为主入口。
+- No plaintext keybox/private key in remote buckets/gists/WebDAV.
+- No passphrase/token in logs/errors/URLs/QR codes.
+- No passphrase in `ps`/argv; temp files 0600 and unlinked promptly.
+- `secret-file` 0600/directories 0700; correct SELinux context.
+- URL parsing rejects secret fields; SSRF/XXE tests pass.
+- Disabling sync does not automatically delete the deployed keybox.
 
-### 19.1 已确认事实（KernelSU `main`）
+### 17.3 Device
 
-| 事实 | 来源 | 影响 |
+- OMK: watcher reload after the write; owner `1017:1017`; the `retire_stale_keybox_bound_keys` warning is visible.
+- TEESim: `config.json` reference matches; watcher reload; EC-only measured on device.
+- Cross-device: risk acceptance on first enable; attestation behavior after deploying on the new device recorded; failures are not reported as success.
+- Automatic: tasks start after reboot; behavior under Doze/power saving recorded; manual `run` as a fallback.
+- Old ciphertext/old keybox behavior after passphrase rotation is recorded.
+
+---
+
+## 18. Implementation freedom and boundaries
+
+Do not change settled decisions; the following implementation details are free:
+
+- workspace vs separate repository: a workspace is recommended; if the schedule is tight, start as a separate crate, but do not stuff it into the single `rkp-mini-issuer` binary.
+- Gist direct link vs API resolution: direct link by default; the API as a tokenless fallback.
+- WebDAV MOVE vs If-Match: choose by the target server's capabilities; keep a failure fallback.
+- UI stack: KernelSU WebUI (§19), reusing `webui/`'s Vue + miuix-vue; the CLI keeps equivalent capability. Risk acceptance/disabling must exist in both.
+- Whether to keep the most recent staging copy: allowed, but it must be 0600 and removable.
+- Whether to add Ed25519: not in v1; if added later, public-key distribution must be designed separately and not mixed into this design.
+
+## 19. WebUI revision (2026-11-10, settled)
+
+The original v1 was CLI-only because "passing a passphrase through `ksu.exec` from the WebUI puts it in argv". Reading the KernelSU manager source showed that premise is false, so the WebUI becomes the primary entry point.
+
+### 19.1 Confirmed facts (KernelSU `main`)
+
+| Fact | Source | Impact |
 |---|---|---|
-| `exec(cmd[, opts], cb)` 用 libsu：`createRootShell` 构造 `libksud.so debug su [-g]`，命令经 `newJob().add(cmd)` 写入该 shell 的 **stdin** | `ui/webui/WebViewInterface.kt`、`ui/util/KsuCli.kt` | 命令文本不出现在任何进程 argv；只有 shell 再 `exec` 的**外部命令**会把参数放进 argv |
-| `opts.env` 被拼成 `export k=v;` 前缀，同样走 stdin | 同上 | 不要用 env 传密钥：子进程会继承环境变量 |
-| `Shell.enableVerboseLogging = BuildConfig.DEBUG` | `KsuCli.kt` | **debug 版** manager 会把命令写进 logcat；release 版不会。这是残余风险，写进风险说明 |
-| WebView 同源 `https://mui.kernelsu.org`，生产 CSP `connect-src 'none'` | `docs/WEBUI_DEVELOP.md` | 页面拿到的密码无法外传；只能经 `exec` 落盘 |
+| `exec(cmd[, opts], cb)` uses libsu: `createRootShell` builds `libksud.so debug su [-g]`, and the command is written into that shell's **stdin** via `newJob().add(cmd)` | `ui/webui/WebViewInterface.kt`, `ui/util/KsuCli.kt` | Command text never appears in any process argv; only **external commands** that the shell then `exec`s put arguments into argv |
+| `opts.env` is prepended as `export k=v;`, which also goes through stdin | Same | Do not pass secrets via env: child processes inherit environment variables |
+| `Shell.enableVerboseLogging = BuildConfig.DEBUG` | `KsuCli.kt` | A **debug** manager writes commands to logcat; a release build does not. This is a residual risk and goes into the risk disclosure |
+| WebView origin `https://mui.kernelsu.org`, production CSP `connect-src 'none'` | `docs/WEBUI_DEVELOP.md` | A passphrase in the page cannot leave the device; it can only reach disk through `exec` |
 
-### 19.2 密钥写入（inbox）
+### 19.2 Secret write (inbox)
 
 ```text
-WebUI: hex = utf8ToHex(password)        // [0-9a-f]，无引号/转义/换行问题
+WebUI: hex = utf8ToHex(password)        // [0-9a-f]; no quoting/escaping/newline issues
 exec:  umask 077; mkdir -p <inbox> 2>/dev/null; echo <hex> > <inbox>/<kind>.hex && \
        <bin> --json secret set <kind> --from-file <inbox>/<kind>.hex --hex
 ```
 
-- 只用 shell **内建**（`umask`、`echo`、重定向）承载密钥；`mkdir`、`rkp-mini-sync` 等外部命令的 argv 只有路径。hex 让 mksh/ash/bash 的 `echo` 行为一致；不用 here-doc（mksh 会落临时文件）。
-- inbox：发送端 `<数据根>/sync/inbox/`，接收端 `/data/adb/rkp_sync/sync/inbox/`，`0700`。
-- `secret set --from-file`：`O_NOFOLLOW` 打开；必须是当前 euid 拥有的普通文件、无 group/other 位；≤ 8 KiB；`--hex` 解码（容忍一个行尾换行）；非空 UTF-8；原子写入配置的 secret 路径（0600）。**无论成败都删除 inbox 文件**，并清空内存。
-- 同一机制用于 `rotate-password --from-file <f> --hex`（新口令）。
-- 页面：`type=password`、`autocomplete=off`；提交后立即清空输入与 hex 变量；从不回显、从不读取已存的 secret 文件，只展示“已设置/缺失/权限错误”。
+- Carry the secret using shell **builtins** only (`umask`, `echo`, redirection); the argv of external commands like `mkdir` and `rkp-mini-sync` contains only paths. hex makes `echo` behave the same in mksh/ash/bash; no here-doc (mksh writes temp files).
+- inbox: `<data root>/sync/inbox/` on the sender, `/data/adb/rkp_sync/sync/inbox/` on the receiver, `0700`.
+- `secret set --from-file`: opened with `O_NOFOLLOW`; must be a regular file owned by the current euid with no group/other bits; ≤ 8 KiB; `--hex` decoded (tolerating one trailing newline); non-empty UTF-8; written atomically to the configured secret path (0600). **Delete the inbox file whether it succeeds or fails**, and clear memory.
+- The same mechanism is used for `rotate-password --from-file <f> --hex` (the new passphrase).
+- Page: `type=password`, `autocomplete=off`; clear the input and the hex variable immediately after submission; never echo back, never read the stored secret file, only show "set/missing/bad permissions".
 
-### 19.3 非交互确认（绑定版本）
+### 19.3 Non-interactive confirmation (bound to a version)
 
-| 操作 | CLI | 绑定 |
+| Operation | CLI | Binding |
 |---|---|---|
-| 风险接受 | `rkp-mini-sync --json risk` 输出 `{version, items[], passphrase_path}`；`enable --accept-risk <version>` | `<version>` 必须等于当前 `RISK_VERSION`；旧 UI 不能替新版本说明“同意” |
-| 首次导入 TOFU | `fetch` 失败 `first_import_needs_confirmation`，错误信封带 `data`（seq/issued_at/device_id/leaf_not_after/keybox_sha256/plaintext_sha256）；`fetch --accept-first <plaintext_sha256>` | 只接受与展示一致的那一版；否则 `confirmation_mismatch` |
-| 首次部署 / 身份变化 | `rkp-mini-deployer plan --json`（只读：gate、warnings、targets、old/new）；`rkp-mini-deployer apply --confirm-first <keybox_sha256>` / `--allow-identity-change <keybox_sha256>` | 在 `sync.lock` 内比对 staged sha；后台循环若已换了 staging，拒绝 `confirmation_mismatch` |
+| Risk acceptance | `rkp-mini-sync --json risk` outputs `{version, items[], passphrase_path}`; `enable --accept-risk <version>` | `<version>` must equal the current `RISK_VERSION`; an old UI cannot "agree" on behalf of a newer disclosure |
+| First import TOFU | `fetch` fails with `first_import_needs_confirmation`, and the error envelope carries `data` (seq/issued_at/device_id/leaf_not_after/keybox_sha256/plaintext_sha256); `fetch --accept-first <plaintext_sha256>` | Accepts only the exact version that was shown; otherwise `confirmation_mismatch` |
+| First deploy / identity change | `rkp-mini-deployer plan --json` (read-only: gate, warnings, targets, old/new); `rkp-mini-deployer apply --confirm-first <keybox_sha256>` / `--allow-identity-change <keybox_sha256>` | Compares the staged sha inside `sync.lock`; if the background loop changed staging meanwhile, reject with `confirmation_mismatch` |
 
-sha 参数接受完整 hex 或 ≥16 位前缀。TTY 交互路径不变（仍可 y/N）。
+The sha argument accepts a full hex string or a prefix of ≥16 characters. The TTY interaction path is unchanged (y/N still works).
 
-### 19.4 配置编辑
+### 19.4 Config editing
 
-- `rkp-mini-sync --json config show`：生效配置（不含任何密钥值，只含 secret 路径与状态）。
-- `rkp-mini-sync config set <key> <value>`：**白名单**，写后重新加载校验，失败回滚。发送端：`provider`、`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`gist_id`、`gist_filename`、`webdav_endpoint`、`webdav_path`、`webdav_user`、`password_mode`、`auto_push`。接收端：`label`、`min_validity_days`、`request_timeout_seconds`、`proxy`、`password_mode`、`identity_change_policy`、`rotation_lead_days`、`auto_deploy`。位置字段（接收端）只经 `import` 写入；`enabled`/`risk_ack_*` 只经 `enable/disable`；部署目标只经 `rkp-mini-deployer add-target/remove-target`。
-- `rkp-mini-issuer` WebUI 原“配置只读”决策仅对 `rkp-mini-issuer` 自身字段保持；`[sync]` 经上面的命令修改，顶层 `auto_issue_days` 经 `rkp-mini-issuer config set auto_issue_days N`（签发页“自动签发设置”）修改。
+- `rkp-mini-sync --json config show`: the effective config (no secret values at all, only secret paths and status).
+- `rkp-mini-sync config set <key> <value>`: **whitelisted**, reloaded and validated after writing, rolled back on failure. Sender: `provider`, `label`, `min_validity_days`, `request_timeout_seconds`, `proxy`, `gist_id`, `gist_filename`, `webdav_endpoint`, `webdav_path`, `webdav_user`, `password_mode`, `auto_push`. Receiver: `label`, `min_validity_days`, `request_timeout_seconds`, `proxy`, `password_mode`, `identity_change_policy`, `rotation_lead_days`, `auto_deploy`. Location fields (receiver) are written only through `import`; `enabled`/`risk_ack_*` only through `enable/disable`; deploy targets only through `rkp-mini-deployer add-target/remove-target`.
+- The `rkp-mini-issuer` WebUI's previous "config is read-only" decision now applies only to `rkp-mini-issuer`'s own fields; `[sync]` is modified through the commands above, and the top-level `auto_issue_days` through `rkp-mini-issuer config set auto_issue_days N` (the "automatic issuance settings" on the Issue page).
 
-### 19.5 页面
+### 19.5 Pages
 
-- **发送端**（`rkp_mini_issuer` WebUI 新增“远程同步”卡片 + 底部弹层）：状态（启用、provider、位置、seq、上次推送/错误、本地 keybox 到期、自动循环是否运行）；初始化；provider 配置；设置 age 口令 / Gist token / WebDAV 密码；风险确认弹层（§13.2 每条独立复选框，默认全不勾，全勾才可提交，含 §19.1 debug manager 残余风险）；启用/禁用；立即推送；分享（URI + 由 `share --json` 的 `qr` 矩阵本地渲染的二维码 + “不含密码”提示）；轮换口令；清除本地数据；同步日志。
-  **2026-11 改版**：同步 Tab 改为签发端状态页风格：状态卡（存储方式、同步时间、自动推送；异常时警告条：云端检查结果、
-  密钥文件缺失/权限错误、风险说明过期、上次错误）点击打开详情（位置、同步 ID、本机/云端 keybox、上次推送 seq）；
-  进入时只读本地缓存，“刷新状态”经 runner 运行 `check-remote`。设置弹层：自动推送（开关 + 最小剩余有效期）、
-  云端存储（含 Gist token / WebDAV 凭据）、加密（“密码”）、其他（标签）、危险区（删除云端文件、重置加密密码、
-  清除本地数据、完全重置同步设置；均先弹窗确认）。日志统一在“更多 → 日志”。
-- **接收端**（`rkp_mini_deployer` 模块 `webroot/`，同一 Vue 工程的第二个入口）：粘贴导入链接 → `import --check` 预览位置 → 确认后 `import --yes`；风险确认；口令/WebDAV 密码；目标增删（omk/teesim/tricky_store）；策略设置；拉取（TOFU 弹层展示事实后 `--accept-first <sha>`）；部署（先 `rkp-mini-deployer plan`，首次/身份变化弹层展示 old→new、OMK key 删除警告、TEESim re-attest、“未做根信任检查”，再带 sha 执行）；pending 提示；立即运行；禁用；清除；移除已部署 keybox（两步确认）；日志。
-- “部署目标”弹层先调用 `rkp-mini-deployer targets`：只有 `module.installed` 为 true 的内置目标可以添加；未检测到模块的目标显示为不可选并给出模块 id；检测失败时不提供任何添加入口。已停用的模块仍可选择，但会提示启用前不会重载。
-- 长任务（push、fetch、rotate-password）走 `webroot/runner/sync.sh <op> [非密钥参数]`，与 `issue.sh` 相同的 `setsid` + 状态文件 + 轮询模型；短命令（status/plan/config/secret/enable）直接 `exec`。
-- 启用后页面立即以 `setsid` 启动模块的 `sync-loop.sh`（脚本自带 pid 锁，重复启动无害）；禁用后循环在下一次唤醒时退出。
-- 页面从不读取或展示 keybox、私钥、口令、token；`staging/`、`secrets/`、`inbox/` 不出现在任何 `cat`/`ls` 命令里。
+- **Sender** (new "Remote sync" card + bottom sheet in the `rkp_mini_issuer` WebUI): status (enabled, provider, location, seq, last push/error, local keybox expiry, whether the automatic loop is running); initialize; provider configuration; set the age passphrase / Gist token / WebDAV password; risk acceptance sheet (one checkbox per §13.2 item, none checked by default, submission only when all are checked, including the §19.1 debug manager residual risk); enable/disable; push now; share ("Share" with URI + a QR code rendered locally from `share --json`'s `qr` matrix + a "contains no passphrase" notice); rotate passphrase; clear local data; sync logs.
+  **2026-11 revision**: the Sync tab follows the issuer status-page style: a status card (storage, sync time, auto-push; when something is wrong a warning bar shows the cloud check result,
+  missing secret file/wrong permissions, an outdated risk disclosure, and the last error) which opens details on tap (location, sync ID, local/cloud keybox, last pushed seq);
+  on entry it only reads the local cache, and "Refresh status" runs `check-remote` through the runner. Settings sheet: auto-push (switch + minimum remaining validity),
+  cloud storage (including Gist token / WebDAV credentials), encryption ("Passphrase"), other (Label), danger zone (Delete cloud file, Reset encryption passphrase,
+  Clear local data, Fully reset sync settings; each asks for confirmation first). Logs live under "More → Logs".
+- **Receiver** (`rkp_mini_deployer` module `webroot/`, a second entry of the same Vue project): paste the import link → `import --check` previews the location → `import --yes` after confirmation; risk acceptance; passphrase/WebDAV password; add/remove targets (omk/teesim/tricky_store); policy settings; pull (the TOFU sheet shows the facts, then `--accept-first <sha>`); deploy (run `rkp-mini-deployer plan` first; on first deploy/identity change a sheet shows old→new, the OMK key deletion warning, TEESim re-attest, and "no root trust check", then executes with the sha); pending notice; run now; disable; clear; remove the deployed keybox (two-step confirmation); logs.
+- The "Deploy targets" sheet first calls `rkp-mini-deployer targets`: only built-in targets whose `module.installed` is true can be added; targets whose module was not detected are shown as unselectable with the module id; when detection fails no add entry is offered at all. Disabled modules can still be selected, but the UI notes they will not reload until enabled.
+- Long tasks (push, fetch, rotate-password) go through `webroot/runner/sync.sh <op> [non-secret args]`, the same `setsid` + status file + polling model as `issue.sh`; short commands (status/plan/config/secret/enable) are `exec`ed directly.
+- After enabling, the page immediately starts the module's `sync-loop.sh` with `setsid` (the script has its own pid lock, so duplicate starts are harmless); after disabling, the loop exits at its next wake-up.
+- The page never reads or displays the keybox, private key, passphrase, or token; `staging/`, `secrets/`, and `inbox/` never appear in any `cat`/`ls` command.
 
 ---
 
-## 附录 A：配置示例
+## Appendix A: Configuration examples
 
-### A.1 发送端（节选）
+### A.1 Sender (excerpt)
 
 ```toml
 [sync]
@@ -1244,9 +1250,9 @@ password_mode = "secret-file"
 password_file = "/data/misc/keystore/rkp-mini/sync/age.pass"
 ```
 
-`auto_issue_days` 保持在主配置顶层；语义改为“剩余天数阈值”。
+`auto_issue_days` stays at the top level of the main config; its meaning changes to "remaining-days threshold".
 
-### A.2 接收端（节选）
+### A.2 Receiver (excerpt)
 
 ```toml
 [sync]
@@ -1282,24 +1288,24 @@ mode = "0600"
 reload = "auto"
 ```
 
-## 附录 B：CLI JSON 契约
+## Appendix B: CLI JSON contract
 
-统一输出：
+Unified output:
 
 ```json
 {"ok":true,"data":{...}}
 {"ok":false,"error":{"stage":"remote|decrypt|validate|state|deploy|config|generic","code":"...","message":"..."}}
 ```
 
-- stdout 只输出一个 envelope；诊断写 stderr。
-- 退出码：
-  - `0` 成功
-  - `2` 用法/配置/风险确认缺失
-  - `8` 同步/网络/解密/校验/state 失败
-  - `9` 部署/写入/reload 失败
-  - `1` 其它
+- stdout carries exactly one envelope; diagnostics go to stderr.
+- Exit codes:
+  - `0` success
+  - `2` usage/config/missing risk acceptance
+  - `8` sync/network/decrypt/validation/state failure
+  - `9` deploy/write/reload failure
+  - `1` anything else
 
-`push --json` data：
+`push --json` data:
 
 ```json
 {
@@ -1312,7 +1318,7 @@ reload = "auto"
 }
 ```
 
-`fetch --json` data：
+`fetch --json` data:
 
 ```json
 {
@@ -1328,7 +1334,7 @@ reload = "auto"
 }
 ```
 
-`rkp-mini-deployer apply --json` data：
+`rkp-mini-deployer apply --json` data:
 
 ```json
 {
@@ -1348,30 +1354,30 @@ reload = "auto"
 }
 ```
 
-## 附录 C：参考
+## Appendix C: References
 
-- age：<https://age-encryption.org/>
-- GitHub Gist API：<https://docs.github.com/en/rest/gists>
-- WebDAV（RFC 4918）：<https://www.rfc-editor.org/rfc/rfc4918>
-- OhMyKeymint：<https://github.com/qwq233/OhMyKeymint>
-- TEESimulator：<https://github.com/JingMatrix/TEESimulator>
-- TrickyStore：<https://github.com/5ec1cff/TrickyStore>
-- 现有 WebUI 方案：`docs/WEBUI_DEVELOP.md`
-- 仓库约束：`AGENTS.md`
+- age: <https://age-encryption.org/>
+- GitHub Gist API: <https://docs.github.com/en/rest/gists>
+- WebDAV (RFC 4918): <https://www.rfc-editor.org/rfc/rfc4918>
+- OhMyKeymint: <https://github.com/qwq233/OhMyKeymint>
+- TEESimulator: <https://github.com/JingMatrix/TEESimulator>
+- TrickyStore: <https://github.com/5ec1cff/TrickyStore>
+- Existing WebUI design: `docs/WEBUI_DEVELOP.md`
+- Repository constraints: `AGENTS.md`
 
 ---
 
-## 附录 D：实现前检查
+## Appendix D: Pre-implementation checks
 
-实现 Agent 在写代码前应确认：
+The implementing agent should confirm before writing code:
 
-- [ ] 已读 `AGENTS.md` 和本文；没有重新引入服务端。
-- [ ] `sync-state` 不出现 target/path/owner/reload。
-- [ ] URL/二维码/日志中没有密码/token。
-- [ ] Gist 接收端默认走直链，不要求 token。
-- [ ] `rkp-mini-sync` 独立构建；`rkp-mini-issuer` 不链接 sync 依赖。
-- [ ] 首次启用风险确认、默认关闭、可禁用。
-- [ ] OMK `retire_stale_keybox_bound_keys` 警告已实现。
-- [ ] TEESim `config.json` keybox 引用检查已实现。
-- [ ] 自动运行使用 `secret-file` 时，权限/缺失/轮换行为已覆盖。
-- [ ] 跨设备风险文案已写入 UI 和 README/AGENTS。
+- [ ] `AGENTS.md` and this document have been read; no server has been reintroduced.
+- [ ] `sync-state` contains no target/path/owner/reload.
+- [ ] No passphrase/token in URLs/QR codes/logs.
+- [ ] The Gist receiver uses the direct link by default and does not require a token.
+- [ ] `rkp-mini-sync` builds independently; `rkp-mini-issuer` does not link sync dependencies.
+- [ ] First enable requires risk acceptance, is disabled by default, and can be disabled.
+- [ ] The OMK `retire_stale_keybox_bound_keys` warning is implemented.
+- [ ] The TEESim `config.json` keybox reference check is implemented.
+- [ ] Permission/missing/rotation behavior is covered when automatic runs use `secret-file`.
+- [ ] The cross-device risk text is written into the UI and README/AGENTS.

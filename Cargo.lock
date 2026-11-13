@@ -1460,7 +1460,7 @@ dependencies = [
 
 [[package]]
 name = "rkp-mini-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1483,7 +1483,7 @@ dependencies = [
 
 [[package]]
 name = "rkp-mini-deployer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1531,7 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "rkp-mini-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -1546,7 +1546,7 @@ dependencies = [
 
 [[package]]
 name = "rkp-mini-sync"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1567,7 +1567,7 @@ dependencies = [
 
 [[package]]
 name = "rkp-mini-sync-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "age",
  "anyhow",

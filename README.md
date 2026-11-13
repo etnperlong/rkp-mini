@@ -45,7 +45,7 @@ Two modules use them: **RKP-Mini Issuer** (`rkp_mini_issuer`, ships issuer + syn
 ./build.sh
 ```
 
-Produces `dist/rkp_mini_issuer-v0.3.0.zip` and `dist/rkp_mini_deployer-v0.2.0.zip`
+Produces `dist/rkp_mini_issuer-v0.3.0.zip` and `dist/rkp_mini_deployer-v0.3.0.zip`
 (binaries, hooks and `webroot/`), both installable from the KernelSU manager. Every
 `rkp-mini-*` dependency of a package is compiled from the same workspace: the two ZIPs ship
 a byte-identical `rkp-mini-sync`.

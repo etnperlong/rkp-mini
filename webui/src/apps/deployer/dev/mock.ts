@@ -1515,9 +1515,9 @@ export async function mockExec(command: string): Promise<ExecResult> {
     return { errno: 0, stdout: `[sync]\nrole = "receiver"\nenabled = true\nprovider = "gist"\nlabel = "phone-a"\n\n[deploy]\nidentity_change_policy = "scheduled"\nrotation_lead_days = 4\nauto_deploy = true\n`, stderr: '' }
   }
   if (command.startsWith('cat ') && command.includes('/module.prop')) {
-    return { errno: 0, stdout: 'id=rkp_mini_deployer\nname=RKP-Mini Deployer\nversion=v0.2.0\nversionCode=2\n', stderr: '' }
+    return { errno: 0, stdout: 'id=rkp_mini_deployer\nname=RKP-Mini Deployer\nversion=v0.3.0\nversionCode=3\n', stderr: '' }
   }
-  if (command.endsWith(' --version')) return { errno: 0, stdout: 'rkp-mini-deployer 0.2.0\n', stderr: '' }
+  if (command.endsWith(' --version')) return { errno: 0, stdout: 'rkp-mini-deployer 0.3.0\n', stderr: '' }
 
   const args = shellArgs(command)
   const jsonAt = args.indexOf('--json')

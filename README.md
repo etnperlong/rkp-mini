@@ -34,6 +34,14 @@ key, requests certificates from the Google RKP service, and writes a TrickyStore
 
 The WebUI speaks 简体中文, 繁體中文, English, 日本語, 한국어, Deutsch, Français and Italiano.
 
+## Screenshots
+
+Local simulation previews, not device-verified.
+
+| Issuer status | Sync sharing | Deployer status | Remote sync |
+|---|---|---|---|
+| <img src="docs/images/screenshots/en/issuer-status.png" width="220" alt="Issuer status"> | <img src="docs/images/screenshots/en/issuer-share.png" width="220" alt="Sync sharing"> | <img src="docs/images/screenshots/en/deployer-status.png" width="220" alt="Deployer status"> | <img src="docs/images/screenshots/en/deployer-sync.png" width="220" alt="Remote sync"> |
+
 ## Requirements
 
 - Rooted arm64 device with KernelSU.

@@ -34,6 +34,14 @@ RKP-Mini 是一对自带 WebUI 的 KernelSU 模块。**签发端（Issuer）** �
 
 WebUI 支持简体中文、繁體中文、English、日本語、한국어、Deutsch、Français 和 Italiano。
 
+## 截图
+
+本地模拟界面预览，非真机验证。
+
+| 签发端 · 状态 | 签发端 · 同步分享 | 部署端 · 状态 | 部署端 · 远程同步 |
+|---|---|---|---|
+| <img src="docs/images/screenshots/zh-CN/issuer-status.png" width="220" alt="签发端状态"> | <img src="docs/images/screenshots/zh-CN/issuer-share.png" width="220" alt="同步分享"> | <img src="docs/images/screenshots/zh-CN/deployer-status.png" width="220" alt="部署端状态"> | <img src="docs/images/screenshots/zh-CN/deployer-sync.png" width="220" alt="远程同步"> |
+
 ## 环境要求
 
 - 已 root 的 arm64 设备，使用 KernelSU。

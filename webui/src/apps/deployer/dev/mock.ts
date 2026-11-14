@@ -427,7 +427,7 @@ function buildRemoteCheck(at: number): RemoteCheck {
     keybox_sha256: deployed?.keybox_sha256 ?? local?.keybox_sha256 ?? null,
     device_id: local?.device_id ?? null,
     issued_at: agoDays(2),
-    keybox_not_after: atDays(deployed?.leaf_not_after_days ?? 118),
+    keybox_not_after: atDays(deployed?.leaf_not_after_days ?? 10.5),
   }
   let error: SyncErrorInfo | null = null
 

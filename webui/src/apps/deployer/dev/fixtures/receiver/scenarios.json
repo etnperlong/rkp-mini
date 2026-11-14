@@ -54,7 +54,7 @@
       "device_id": "rkp-mini-000000007f3a",
       "keybox_sha256": "9f2c4a7d1e8b3c6f0a5d2e7b4c1f8a3d6e9b2c5f8a1d4e7b0c3f6a9d2e5b8c1f",
       "plaintext_sha256": "3d7f1a9c5e2b8d4f6a0c3e7b1d5f9a2c4e8b0d6f3a1c7e5b9d2f4a8c6e0b1d3f",
-      "keybox_not_after_days": 118,
+      "keybox_not_after_days": 10.5,
       "verified_days_ago": 2
     },
     "staged": {
@@ -62,13 +62,13 @@
       "device_id": "rkp-mini-000000007f3a",
       "keybox_sha256": "9f2c4a7d1e8b3c6f0a5d2e7b4c1f8a3d6e9b2c5f8a1d4e7b0c3f6a9d2e5b8c1f",
       "plaintext_sha256": "3d7f1a9c5e2b8d4f6a0c3e7b1d5f9a2c4e8b0d6f3a1c7e5b9d2f4a8c6e0b1d3f",
-      "leaf_not_after_days": 118,
+      "leaf_not_after_days": 10.5,
       "leaf_not_before_days_ago": 2
     },
     "deployed": {
       "seq": 42,
       "keybox_sha256": "9f2c4a7d1e8b3c6f0a5d2e7b4c1f8a3d6e9b2c5f8a1d4e7b0c3f6a9d2e5b8c1f",
-      "leaf_not_after_days": 118,
+      "leaf_not_after_days": 10.5,
       "at_days_ago": 2
     },
     "pending": null,

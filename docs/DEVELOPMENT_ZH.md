@@ -42,7 +42,7 @@ cd webui && bun run dev:issuer                               # 或 dev:deployer�
 
 | 触发条件 | 版本与发布方式 |
 |---|---|
-| 推送到 `main` | `<源码版本>-nightly.<UTC 日期>.<运行序号>.g<短 SHA>`，例如 `0.4.0-nightly.20261113.42.gabcdef0`；每次运行单独发布一个 **Pre-release**，不会标记为 Latest |
+| 推送到 `main` | `<源码版本>-nightly.<UTC 日期>.<运行序号>.g<短 SHA>`，例如 `0.4.0-nightly.20261113.42.gabcdef0`；替换滚动的 **Pre-release** 与固定的 `nightly` 标签，不会标记为 Latest |
 | 推送标签 `vX.Y.Z` | 以标签为版本；正式发布，标记为 **Latest** |
 
 ```sh
@@ -55,7 +55,10 @@ git push origin v0.5.0
   `Cargo.lock` 和两个 `module.prop`，并把 `versionCode` 设为构建时的 Unix 时间戳。这些改动不会
   提交回仓库。nightly 要求仓库中签发端与部署端的版本号一致。
 - 每个 release 包含两个 ZIP 和 `SHA256SUMS`；同样的文件还会作为 Actions artifact 保留 30 天。
-  重新运行不会覆盖已发布的 release。
+  nightly 构建成功后替换上一次 nightly release、附件与标签；正式版不会覆盖。同一 ref 的 workflow
+  串行运行。
+- nightly 替换会先删除旧 release 与标签，再发布新构建，因此下载可能短暂不可用；如果发布失败，
+  nightly 可能缺失，直到下一次成功发布。已有的带版本号 nightly 标签与 release 不会自动删除。
 - 发布说明为中英双语，直接写在 workflow 里。其中链接到 `README.md#install--use`，因此请保留
   该标题。
 

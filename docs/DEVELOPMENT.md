@@ -45,7 +45,7 @@ Host tests do not establish device issuance, installation, SELinux behaviour or 
 
 | Trigger | Version and publication |
 |---|---|
-| Push to `main` | `<source version>-nightly.<UTC date>.<run number>.g<short SHA>`, e.g. `0.4.0-nightly.20261113.42.gabcdef0`; a separate **Pre-release** per run, never Latest |
+| Push to `main` | `<source version>-nightly.<UTC date>.<run number>.g<short SHA>`, e.g. `0.4.0-nightly.20261113.42.gabcdef0`; replaces the rolling **Pre-release** and fixed `nightly` tag, never Latest |
 | Push tag `vX.Y.Z` | The tag version; a normal release marked **Latest** |
 
 ```sh
@@ -60,7 +60,11 @@ git push origin v0.5.0
   Unix timestamp. Nothing is committed back. Nightlies require the checked-in issuer and
   deployer versions to match.
 - Each release carries both ZIPs and `SHA256SUMS`; the same files are kept as an Actions
-  artifact for 30 days. A rerun never replaces a published release.
+  artifact for 30 days. A successful nightly build replaces the previous nightly release,
+  assets and tag; stable releases are never overwritten. Same-ref workflow runs are serialized.
+- Nightly replacement deletes the old release and tag before publishing the new build, so
+  downloads may be briefly unavailable; a publish failure can leave nightly absent until
+  the next successful publish. Existing versioned nightly tags/releases are not removed automatically.
 - Release notes are bilingual and written inline in the workflow. They link to
   `README.md#install--use`, so keep that heading.
 

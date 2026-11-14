@@ -108,7 +108,7 @@ def prepare(
         "version": version,
         "version_code": str(code),
         "prerelease": "true" if ref_type == "branch" else "false",
-        "tag": f"v{version}" if ref_type == "branch" else ref_name,
+        "tag": "nightly" if ref_type == "branch" else ref_name,
     }
 
 

@@ -84,7 +84,7 @@ class PrepareReleaseTest(unittest.TestCase):
 
     def test_nightly_stamps_every_version(self):
         version = f"{self.crate_version('rkp-mini-issuer')}-nightly.20261113.7.g0123456"
-        expected = {"version": version, "version_code": str(EPOCH), "prerelease": "true", "tag": f"v{version}"}
+        expected = {"version": version, "version_code": str(EPOCH), "prerelease": "true", "tag": "nightly"}
         self.assertEqual(self.stamp(), expected)
         self.assert_stamped(version, str(EPOCH))
 

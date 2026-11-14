@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   NDK_VERSION: 30.0.16248370
@@ -161,6 +165,17 @@ jobs:
         run: |
           cd dist
           sha256sum -c SHA256SUMS
+          if [[ "$PRERELEASE" == true ]]; then
+            # 失败的 API 调用必须让作业失败,不能被当成“没有已存在发布”
+            releases=$(gh api "repos/$GH_REPO/releases" --paginate --jq '.[].tag_name')
+            if grep -Fxq -- "$TAG" <<<"$releases"; then
+              gh release delete "$TAG" --yes
+            fi
+            refs=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq '.[].ref')
+            if grep -Fxq -- "refs/tags/$TAG" <<<"$refs"; then
+              gh api "repos/$GH_REPO/git/refs/tags/$TAG" --method DELETE
+            fi
+          fi
           printf '\n### 更新记录 / Changelog\n\n' >> release-notes.md
           gh api "repos/$GH_REPO/releases/generate-notes" \
             --method POST -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
